@@ -330,7 +330,10 @@ let check ?origin ?(on_parsed = ignore) ?(on_resolved = fun _ _ -> ())
             identity = None;
             signatures =
               List.map (fun (name, scheme) -> (name, Check.show_scheme checker scheme)) names;
-            effects = (match row with Some row -> (Types.repr_row row).Types.effects | None -> []);
+            effects =
+              (match row with
+              | Some row -> Types.effect_identities (Types.repr_row row)
+              | None -> []);
             call_abis = [];
             warnings = resolver_warnings @ warnings;
           }

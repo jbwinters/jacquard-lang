@@ -147,15 +147,15 @@ let test_row_cases () =
         (fun () ->
           let tail = new_rvar 0 in
           unify_rows
-            { effects = [ ha ]; payloads = []; tail }
-            { effects = [ ha ]; payloads = []; tail }),
+            { effects = [ ha ]; payloads = []; instances = []; tail }
+            { effects = [ ha ]; payloads = []; instances = []; tail }),
         true );
       ( "same tail different sets occurs",
         (fun () ->
           let tail = new_rvar 0 in
           unify_rows
-            { effects = [ ha ]; payloads = []; tail }
-            { effects = [ hb ]; payloads = []; tail }),
+            { effects = [ ha ]; payloads = []; instances = []; tail }
+            { effects = [ hb ]; payloads = []; instances = []; tail }),
         false );
       ( "spawn-dependent child/caller row cannot hide an extra effect",
         (fun () ->
@@ -173,21 +173,21 @@ let test_row_cases () =
         (fun () ->
           let sk = RSkolem (fresh_id (), "e") in
           unify_rows
-            { effects = [ ha ]; payloads = []; tail = sk }
-            { effects = [ ha ]; payloads = []; tail = sk }),
+            { effects = [ ha ]; payloads = []; instances = []; tail = sk }
+            { effects = [ ha ]; payloads = []; instances = []; tail = sk }),
         true );
       ( "row skolem vs closed",
         (fun () ->
           unify_rows
-            { effects = []; payloads = []; tail = RSkolem (fresh_id (), "e") }
+            { effects = []; payloads = []; instances = []; tail = RSkolem (fresh_id (), "e") }
             (closed_row [])),
         false );
       ( "open var absorbs skolem side",
         (fun () ->
           let sk = RSkolem (fresh_id (), "e") in
           unify_rows
-            { effects = [ ha ]; payloads = []; tail = sk }
-            { effects = []; payloads = []; tail = new_rvar 0 }),
+            { effects = [ ha ]; payloads = []; instances = []; tail = sk }
+            { effects = []; payloads = []; instances = []; tail = new_rvar 0 }),
         true );
     ]
   in
@@ -220,8 +220,8 @@ let assert_constructive_join label wrap unwrap =
   List.iter
     (fun reverse ->
       let tail = new_rvar 1 in
-      let callback_row = { effects = []; payloads = []; tail }
-      and effectful_row = { effects = [ hb ]; payloads = []; tail } in
+      let callback_row = { effects = []; payloads = []; instances = []; tail }
+      and effectful_row = { effects = [ hb ]; payloads = []; instances = []; tail } in
       let callback = TArrow ([], callback_row, t_int)
       and effectful = TArrow ([], effectful_row, t_int) in
       let left, right = if reverse then (effectful, callback) else (callback, effectful) in
@@ -257,8 +257,8 @@ let test_join_constructs_non_aliasing_results () =
       | TCon (head, [ ty ]) when Hash.equal head hc -> ty
       | ty -> Alcotest.failf "expected constructor wrapper, got %s" (show ty));
   let rigid = RSkolem (fresh_id (), "e") in
-  let rigid_left = { effects = [ ha ]; payloads = []; tail = rigid }
-  and rigid_right = { effects = [ hb ]; payloads = []; tail = rigid } in
+  let rigid_left = { effects = [ ha ]; payloads = []; instances = []; tail = rigid }
+  and rigid_right = { effects = [ hb ]; payloads = []; instances = []; tail = rigid } in
   Alcotest.(check bool)
     "rigid annotation rows remain exact" false
     (unifies (fun () ->
@@ -336,7 +336,10 @@ let materialize (t : tpl) =
     | PTuple ts -> TTuple (List.map go ts)
     | PArrow (ps, rvi, la, r) ->
         let tail = match rvi with None -> RClosed | Some i -> rv i in
-        TArrow (List.map go ps, { effects = (if la then [ ha ] else []); payloads = []; tail }, go r)
+        TArrow
+          ( List.map go ps,
+            { effects = (if la then [ ha ] else []); payloads = []; instances = []; tail },
+            go r )
   in
   go t
 
@@ -426,11 +429,249 @@ let test_payload_constraints () =
       unify hidden.ty (TArrow ([], payload_row t_text, TTuple []))
   | _ -> Alcotest.fail "clone changed the scheme count"
 
+(* TS.2 (design §9 A1.1, A1.3, A1.4): instance row entries, label identity, fixpoint
+   normalization, and the fresh-continuation flag. Capabilities are a nominal [cap] here. *)
+let cap = Hash.of_string "capability"
+let capability label payload = TCon (cap, [ label; payload ])
+let entry label payload = { effect_id = ha; label; payload = [ payload ] }
+
+let instance_row ?(tail = RClosed) entries =
+  { effects = []; payloads = []; instances = entries; tail }
+
+let test_instance_entries () =
+  let i = TLabel (fresh_id (), "i") and j = TLabel (fresh_id (), "j") in
+  (* identical entries merge and agree on payloads *)
+  let a = new_tvar 0 in
+  let merged = repr_row (instance_row [ entry i a; entry i t_int ]) in
+  Alcotest.(check int) "identical entries merge" 1 (List.length merged.instances);
+  Alcotest.(check bool) "their payloads unify" true (repr a == t_int);
+  (* distinct labels stay distinct; a label variable is never guessed equal to a label *)
+  let alpha = new_tvar 0 in
+  Alcotest.(check int)
+    "distinct labels stay distinct" 3
+    (List.length
+       (repr_row (instance_row [ entry i t_int; entry j t_text; entry alpha t_int ])).instances);
+  (* a closed row cannot absorb another label's entry; an open row can *)
+  Alcotest.(check bool)
+    "closed rows with different labels differ" false
+    (unifies (fun () ->
+         unify_rows (instance_row [ entry i t_int ]) (instance_row [ entry j t_int ])));
+  Alcotest.(check bool)
+    "an open row absorbs a distinct entry" true
+    (unifies (fun () ->
+         unify_rows (instance_row [ entry i t_int ]) (instance_row ~tail:(new_rvar 0) [])));
+  Alcotest.(check bool)
+    "identical entries across rows must agree on payloads" false
+    (unifies (fun () ->
+         unify_rows (instance_row [ entry i t_int ]) (instance_row [ entry i t_text ])))
+
+let test_instance_fixpoint () =
+  (* merging the last pair identifies alpha and beta, exposing the first pair's conflict; every
+     order of the four entries is refused the same way *)
+  let entries () =
+    let alpha = new_tvar 0 and beta = new_tvar 0 and gamma = new_tvar 0 in
+    [
+      entry alpha t_int;
+      entry beta t_text;
+      entry gamma (capability alpha t_int);
+      entry gamma (capability beta t_int);
+    ]
+  in
+  let rec permutations = function
+    | [] -> [ [] ]
+    | items ->
+        List.concat_map
+          (fun item ->
+            List.map (fun rest -> item :: rest) (permutations (List.filter (( != ) item) items)))
+          items
+  in
+  List.iter
+    (fun order ->
+      Alcotest.(check bool)
+        "a conflict exposed by a merge is an ordinary error" false
+        (unifies (fun () -> ignore (repr_row (instance_row order)))))
+    (permutations [ 0; 1; 2; 3 ]
+    |> List.map (fun order ->
+        let all = entries () in
+        List.map (List.nth all) order));
+  (* duplicates split across a linked tail merge too *)
+  let i = TLabel (fresh_id (), "i") in
+  let tail = new_rvar 0 in
+  let a = new_tvar 0 in
+  (match tail with
+  | RVar cell -> bind_rvar cell (instance_row [ entry i t_int ])
+  | _ -> Alcotest.fail "fresh row variable");
+  let merged = repr_row (instance_row ~tail [ entry i a ]) in
+  Alcotest.(check int) "split duplicates merge" 1 (List.length merged.instances);
+  Alcotest.(check bool) "and agree" true (repr a == t_int)
+
+let test_label_sort () =
+  (* a label variable never becomes a type, in either argument order *)
+  List.iter
+    (fun reverse ->
+      let label = new_label_var 1 in
+      let other = TTuple [] in
+      Alcotest.(check bool)
+        "a label variable refuses a type" false
+        (unifies (fun () -> if reverse then unify other label else unify label other)))
+    [ false; true ];
+  Alcotest.(check bool)
+    "a label variable refuses a skolem" false
+    (unifies (fun () -> unify (new_label_var 1) (TSkolem (fresh_id (), "a"))));
+  (* an ordinary type variable is a type position: it never unifies with a label (A1.1) *)
+  List.iter
+    (fun reverse ->
+      List.iter
+        (fun label ->
+          let plain = new_tvar 1 in
+          Alcotest.(check bool)
+            "an ordinary variable refuses a label" false
+            (unifies (fun () -> if reverse then unify plain label else unify label plain)))
+        [ new_label_var 1; TLabel (fresh_id (), "l") ])
+    [ false; true ];
+  Alcotest.(check bool)
+    "two label variables unify" true
+    (unifies (fun () -> unify (new_label_var 1) (new_label_var 1)));
+  Alcotest.(check bool)
+    "a label variable takes a rigid label" true
+    (unifies (fun () -> unify (new_label_var 1) (TLabel (fresh_id (), "l"))));
+  (* instantiation keeps the sort *)
+  let copy = instantiate ~level:1 { ty = TTuple [ new_label_var 2 ]; gen_level = 1 } in
+  match repr copy with
+  | TTuple [ label ] ->
+      Alcotest.(check bool)
+        "an instantiated label is a label" false
+        (unifies (fun () -> unify label t_int))
+  | _ -> Alcotest.fail "unexpected instantiation"
+
+let test_instance_payload_occurs () =
+  (* binding a row to an entry whose payload mentions that row is an ordinary occurs failure *)
+  let tail = new_rvar 1 in
+  let cyclic =
+    {
+      effects = [];
+      payloads = [];
+      instances =
+        [
+          {
+            effect_id = ha;
+            label = TLabel (fresh_id (), "l");
+            payload = [ TArrow ([], { empty_row with tail }, TTuple []) ];
+          };
+        ];
+      tail = RClosed;
+    }
+  in
+  Alcotest.(check bool)
+    "a row cannot contain itself through an instance payload" false
+    (unifies (fun () -> unify_rows { empty_row with tail } cyclic));
+  (* quantification sees variables reachable only through instance entries *)
+  let label = new_label_var 2 and payload = new_tvar 2 in
+  let scheme =
+    {
+      ty =
+        TArrow
+          ( [],
+            {
+              effects = [];
+              payloads = [];
+              instances = [ { effect_id = ha; label; payload = [ payload ] } ];
+              tail = RClosed;
+            },
+            TTuple [] );
+      gen_level = 1;
+    }
+  in
+  Alcotest.(check int) "both are quantified" 2 (List.length (fst (quantified scheme)))
+
+let test_capability_invariance () =
+  (* a registered capability's arguments are unified, never joined: two capabilities whose payload
+     callbacks differ in their closed rows do not join to a wider payload *)
+  let capability = Hash.of_string "ty-capability" in
+  let make effects =
+    TCon
+      ( capability,
+        [
+          new_label_var 1;
+          TArrow ([], { effects; payloads = []; instances = []; tail = RClosed }, t_int);
+        ] )
+  in
+  Alcotest.(check bool)
+    "an ordinary constructor joins its arguments" true
+    (unifies (fun () -> ignore (join ~level:1 (make [ ha ]) (make [ hb ]))));
+  Alcotest.(check bool)
+    "a capability is invariant" false
+    (unifies (fun () ->
+         ignore (join ~invariant:(Hash.equal capability) ~level:1 (make [ ha ]) (make [ hb ]))))
+
+let test_fresh_continuation_flag () =
+  (* a flagged tail's refusal is structured (E0833), never an ordinary unification failure *)
+  let unifies f =
+    match f () with
+    | () -> true
+    | exception Instance_refusal ("E0833", _) -> false
+    | exception Unify_error detail -> Alcotest.failf "an ordinary unification failure: %s" detail
+  in
+  let i = TLabel (fresh_id (), "i") in
+  let flagged () = new_rvar ~lacks_instances:true 0 in
+  let bind tail row = match tail with RVar cell -> bind_rvar cell row | _ -> assert false in
+  Alcotest.(check bool)
+    "a flagged tail refuses an instance entry" false
+    (unifies (fun () -> bind (flagged ()) (instance_row [ entry i t_int ])));
+  Alcotest.(check bool)
+    "but accepts ambient effects" true
+    (unifies (fun () -> bind (flagged ()) (closed_row [ ha ])));
+  Alcotest.(check bool)
+    "and a closed or rigid tail" true
+    (unifies (fun () -> bind (flagged ()) (instance_row ~tail:(RSkolem (fresh_id (), "e")) [])));
+  (* the flag passes through tail unification and binding *)
+  let left = flagged () and right = new_rvar 0 in
+  unify_rows { empty_row with tail = left } { empty_row with tail = right };
+  Alcotest.(check bool)
+    "unifying with a flagged tail flags the shared tail" false
+    (unifies (fun () -> unify_rows { empty_row with tail = right } (instance_row [ entry i t_int ])));
+  let start = flagged () in
+  let next = new_rvar 0 in
+  bind start (closed_row [ ha ] |> fun row -> { row with tail = next });
+  Alcotest.(check bool)
+    "binding passes the flag to the new tail" false
+    (unifies (fun () -> bind next (instance_row [ entry i t_int ])));
+  (* instantiation and cloning keep it *)
+  let arrow = TArrow ([], { empty_row with tail = new_rvar ~lacks_instances:true 1 }, t_int) in
+  let flagged_tail ty =
+    match repr ty with
+    | TArrow (_, row, _) -> (
+        match (repr_row row).tail with
+        | RVar { contents = RUnbound { lacks_instances; _ } } -> lacks_instances
+        | _ -> false)
+    | _ -> false
+  in
+  Alcotest.(check bool)
+    "instantiation keeps the flag" true
+    (flagged_tail (instantiate ~level:2 { ty = arrow; gen_level = 0 }));
+  Alcotest.(check bool)
+    "cloning keeps the flag" true
+    (match clone_schemes [ mono arrow ] with [ s ] -> flagged_tail s.ty | _ -> false);
+  (* an instance entry displays as its effect, once *)
+  let shown =
+    show
+      ~name_of:(fun _ -> "E")
+      (TArrow ([], instance_row [ entry i t_int; entry (TLabel (fresh_id (), "j")) t_text ], t_int))
+  in
+  Alcotest.(check string) "display" "() ->{E} E" shown
+
 let suite =
   [
     Alcotest.test_case "effect payload constraints survive transport and isolation" `Quick
       test_payload_constraints;
     Alcotest.test_case "type unification cases" `Quick test_type_cases;
+    Alcotest.test_case "instance entries: identity and distinctness" `Quick test_instance_entries;
+    Alcotest.test_case "instance entries: fixpoint normalization" `Quick test_instance_fixpoint;
+    Alcotest.test_case "fresh-continuation flag" `Quick test_fresh_continuation_flag;
+    Alcotest.test_case "labels are their own sort" `Quick test_label_sort;
+    Alcotest.test_case "instance payloads in occurs and quantification" `Quick
+      test_instance_payload_occurs;
+    Alcotest.test_case "capabilities are invariant in join" `Quick test_capability_invariance;
     Alcotest.test_case "row unification cases" `Quick test_row_cases;
     Alcotest.test_case "chained unification" `Quick test_chains;
     Alcotest.test_case "row inclusion is directional" `Quick

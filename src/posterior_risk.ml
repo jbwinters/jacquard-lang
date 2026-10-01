@@ -236,8 +236,7 @@ let check_model_signature store builtin_signatures model_id =
                       if
                         Hash.equal actual_call call_type && Hash.equal actual_risk risk_type
                         && row.Types.tail = Types.RClosed
-                        && List.length row.Types.effects = 1
-                        && Hash.equal (List.hd row.Types.effects) dist_effect
+                        && Types.effect_identities row = [ dist_effect ]
                       then Ok ()
                       else
                         Error

@@ -37,19 +37,44 @@ type ty =
           never appears in source, kernel forms, canonical identity, or runtime values. *)
   | TVar of tvar ref
   | TSkolem of int * string  (** rigid annotation variable; the string is its source name *)
+  | TLabel of int * string
+      (** A rigid instance label (TS.2, design §9 A1.1), minted per checked scoped call. Labels are
+          their own sort: they occur only as a capability's first type argument and as the label of
+          an instance row entry, and unify only with themselves or a label variable. *)
 
 and tvar = Unbound of { id : int; level : level } | Link of ty
 
-and row = { effects : Hash.t list; payloads : (Hash.t * ty list) list; tail : rtail }
+and row = {
+  effects : Hash.t list;
+  payloads : (Hash.t * ty list) list;
+  instances : instance list;
+  tail : rtail;
+}
 (** [effects] is sorted and deduplicated after {!repr_row}. [payloads] carries the invariant
-    arguments for input-bearing parameters of those effects. Rows are immutable; refinement uses
-    shared type variables and private tail links. Normalization can raise [Unify_error] if linked
-    rows impose inconsistent payloads. *)
+    arguments for input-bearing parameters of those effects. [instances] holds scoped instance
+    entries (TS.2): the ambient part is unchanged when it is empty. Rows are immutable; refinement
+    uses shared type variables and private tail links. Normalization can raise [Unify_error] if
+    linked rows impose inconsistent payloads. *)
+
+and instance = { effect_id : Hash.t; label : ty; payload : ty list }
+(** One scoped instance entry: an operation of instance effect [effect] on the capability labelled
+    [label], whose capability payload is [payload]. Entries are the same entry exactly when their
+    effects are equal and their labels are identical after resolution (design §9 A1.1). *)
 
 and rtail = RClosed | RVar of rvar ref | RSkolem of int * string
-and rvar = RUnbound of { id : int; level : level } | RLink of row
+
+and rvar =
+  | RUnbound of { id : int; level : level; lacks_instances : bool }
+      (** [lacks_instances] marks the row of a fresh-continuation callback (design §9 A1.4): it may
+          never be bound to a row with an instance entry, and it passes to the bound row's tail. *)
+  | RLink of row
 
 exception Unify_error of string
+
+exception Instance_refusal of string * string
+(** [Instance_refusal (code, detail)] is a scoped-instance refusal found inside unification (design
+    §9 A1.8). It is not a [Unify_error], so handlers that relabel ordinary unification failures
+    cannot hide it; the checker reports it with its own code. *)
 
 (* ------------------------------------------------------------------ *)
 (* Construction                                                        *)
@@ -58,19 +83,31 @@ exception Unify_error of string
 let counter = Atomic.make 0
 let fresh_id () = Atomic.fetch_and_add counter 1 + 1
 let new_tvar level = TVar (ref (Unbound { id = fresh_id (); level }))
-let new_rvar level : rtail = RVar (ref (RUnbound { id = fresh_id (); level }))
+
+(** [new_label_var level] is an instance label variable. Labels are their own sort (design §9 A1.1):
+    a label variable's id is negative, which keeps the sort without a separate table. It unifies
+    only with rigid labels and label variables, never with a type or an ordinary type variable. *)
+let new_label_var level = TVar (ref (Unbound { id = -fresh_id (); level }))
+
+let is_label_id id = id < 0
+
+(** [copy_var id level] is a fresh variable of the sort of variable [id]. *)
+let copy_var id level = if is_label_id id then new_label_var level else new_tvar level
+
+let new_rvar ?(lacks_instances = false) level : rtail =
+  RVar (ref (RUnbound { id = fresh_id (); level; lacks_instances }))
 
 (** [closed_row ~payloads effects] builds an exact row. Payload keys must name effects in the row;
     duplicate payload constraints are checked when the row is normalized. *)
 let closed_row ?(payloads = []) effects =
-  { effects = List.sort_uniq Hash.compare effects; payloads; tail = RClosed }
+  { effects = List.sort_uniq Hash.compare effects; payloads; instances = []; tail = RClosed }
 
 (** [open_row ~payloads level effects] adds a fresh flexible tail to the given fixed effects and
     payload constraints. Payload keys must name fixed effects, as in {!closed_row}. *)
 let open_row ?(payloads = []) level effects =
-  { effects = List.sort_uniq Hash.compare effects; payloads; tail = new_rvar level }
+  { effects = List.sort_uniq Hash.compare effects; payloads; instances = []; tail = new_rvar level }
 
-let empty_row = { effects = []; payloads = []; tail = RClosed }
+let empty_row = { effects = []; payloads = []; instances = []; tail = RClosed }
 let hash_set_diff a b = List.filter (fun h -> not (List.exists (Hash.equal h) b)) a
 
 (** [payloads_for effects payloads] retains only entries whose label is in [effects], preserving the
@@ -102,6 +139,7 @@ and repr_row (r : row) : row =
       {
         effects = List.sort_uniq Hash.compare (r.effects @ inner.effects);
         payloads = merge_payloads r.payloads inner.payloads;
+        instances = merge_instances (r.instances @ inner.instances);
         tail = inner.tail;
       }
   | _ ->
@@ -109,6 +147,7 @@ and repr_row (r : row) : row =
         r with
         effects = List.sort_uniq Hash.compare r.effects;
         payloads = merge_payloads [] r.payloads;
+        instances = merge_instances r.instances;
       }
 
 (** [merge_payloads left right] retains both constraint maps and unifies arguments for duplicate
@@ -127,6 +166,40 @@ and merge_payloads left right =
     left right
   |> List.sort (fun (left, _) (right, _) -> Hash.compare left right)
 
+(** [same_label left right] holds when two labels are identical after resolution: the same rigid
+    label, label skolem or unbound variable. Distinct variables are never identified here (design §9
+    A1.3). *)
+and same_label left right =
+  match (repr left, repr right) with
+  | TLabel (left, _), TLabel (right, _) -> left = right
+  | TVar left, TVar right -> left == right
+  | _ -> false
+
+and same_instance left right =
+  Hash.equal left.effect_id right.effect_id && same_label left.label right.label
+
+(** [merge_instances entries] merges identical entries, unifying their payloads, until no two
+    entries are identical: a merge can identify labels nested in payloads, which can make other
+    entries identical. A payload conflict raises [Unify_error] (an ordinary type error). *)
+and merge_instances entries =
+  let rec merge_one merged = function
+    | [] -> (List.rev merged, false)
+    | entry :: rest -> (
+        match List.partition (same_instance entry) rest with
+        | [], _ -> merge_one (entry :: merged) rest
+        | duplicates, others ->
+            List.iter
+              (fun duplicate ->
+                if List.length duplicate.payload <> List.length entry.payload then
+                  raise (Unify_error "instance payload arity mismatch");
+                List.iter2 unify entry.payload duplicate.payload)
+              duplicates;
+            (List.rev_append merged (entry :: others), true))
+  in
+  match merge_one [] entries with
+  | entries, true -> merge_instances entries
+  | entries, false -> entries
+
 (* ------------------------------------------------------------------ *)
 (* Occurs check and level adjustment                                   *)
 (* ------------------------------------------------------------------ *)
@@ -140,7 +213,7 @@ and occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
       if id = id' then raise (Unify_error "occurs check: a type would contain itself");
       if l' > lvl then r := Unbound { id = id'; level = lvl }
   | TVar { contents = Link _ } -> assert false
-  | TSkolem _ -> ()
+  | TSkolem _ | TLabel _ -> ()
   | TCon (_, args) -> List.iter (occurs_adjust id lvl) args
   | TTuple items -> List.iter (occurs_adjust id lvl) items
   | TArrow (params, row, result) ->
@@ -158,12 +231,18 @@ and occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
   | TExactThunk inner -> occurs_adjust id lvl inner
 
 and row_occurs_adjust_ty id lvl row =
-  List.iter (fun (_, args) -> List.iter (occurs_adjust id lvl) args) (repr_row row).payloads
+  let row = repr_row row in
+  List.iter (fun (_, args) -> List.iter (occurs_adjust id lvl) args) row.payloads;
+  List.iter
+    (fun entry ->
+      occurs_adjust id lvl entry.label;
+      List.iter (occurs_adjust id lvl) entry.payload)
+    row.instances
 
 and row_occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
   Fuel_meter.tick 1;
   match repr t with
-  | TVar _ | TSkolem _ -> ()
+  | TVar _ | TSkolem _ | TLabel _ -> ()
   | TCon (_, args) -> List.iter (row_occurs_adjust id lvl) args
   | TTuple items -> List.iter (row_occurs_adjust id lvl) items
   | TArrow (params, row, result) ->
@@ -183,10 +262,11 @@ and row_occurs_adjust (id : int) (lvl : level) (t : ty) : unit =
 and row_occurs_in_row id lvl row =
   let row = repr_row row in
   List.iter (fun (_, args) -> List.iter (row_occurs_adjust id lvl) args) row.payloads;
+  List.iter (fun entry -> List.iter (row_occurs_adjust id lvl) entry.payload) row.instances;
   match row.tail with
-  | RVar ({ contents = RUnbound { id = id'; level = l' } } as r) ->
+  | RVar ({ contents = RUnbound { id = id'; level = l'; lacks_instances } } as r) ->
       if id = id' then raise (Unify_error "occurs check: a row would contain itself");
-      if l' > lvl then r := RUnbound { id = id'; level = lvl }
+      if l' > lvl then r := RUnbound { id = id'; level = lvl; lacks_instances }
   | _ -> ()
 
 (* ------------------------------------------------------------------ *)
@@ -203,6 +283,13 @@ and unify (a : ty) (b : ty) : unit =
     | t, TVar ({ contents = Unbound { id; level } } as r) -> (
         match repr t with
         | TVar { contents = Unbound { id = id'; _ } } when id = id' -> ()
+        | TVar { contents = Unbound { id = id'; _ } } when is_label_id id <> is_label_id id' ->
+            raise (Unify_error "an instance label cannot be a type")
+        | TLabel _ when not (is_label_id id) ->
+            raise (Unify_error "an instance label cannot be a type")
+        | (TCon _ | TTuple _ | TArrow _ | TResume _ | TVariadicArrow _ | TExactThunk _ | TSkolem _)
+          when is_label_id id ->
+            raise (Unify_error "an instance label cannot be a type")
         | t ->
             occurs_adjust id level t;
             row_var_levels level t;
@@ -211,6 +298,7 @@ and unify (a : ty) (b : ty) : unit =
     | TExactThunk inner, candidate | candidate, TExactThunk inner ->
         unify_exact_thunk inner candidate
     | TSkolem (i, _), TSkolem (j, _) when i = j -> ()
+    | TLabel (i, _), TLabel (j, _) when i = j -> ()
     | TCon (h1, args1), TCon (h2, args2) when Hash.equal h1 h2 ->
         if List.length args1 <> List.length args2 then
           raise (Unify_error "type constructor arity mismatch");
@@ -249,7 +337,12 @@ and unify_exact_thunk inner candidate =
       let left_row = repr_row left_row and right_row = repr_row right_row in
       if
         List.length left_row.effects <> List.length right_row.effects
-        || not (List.for_all2 Hash.equal left_row.effects right_row.effects)
+        || (not (List.for_all2 Hash.equal left_row.effects right_row.effects))
+        || List.length left_row.instances <> List.length right_row.instances
+        || not
+             (List.for_all
+                (fun entry -> List.exists (same_instance entry) right_row.instances)
+                left_row.instances)
       then raise (Unify_error "relational thunk effect rows have different fixed effects");
       let tails_compatible =
         match (left_row.tail, right_row.tail) with
@@ -275,7 +368,7 @@ and unify_exact_thunks left right =
 and row_var_levels level t =
   Fuel_meter.tick 1;
   match repr t with
-  | TVar _ | TSkolem _ | TCon (_, []) -> ()
+  | TVar _ | TSkolem _ | TLabel _ | TCon (_, []) -> ()
   | TCon (_, args) -> List.iter (row_var_levels level) args
   | TTuple items -> List.iter (row_var_levels level) items
   | TArrow (params, row, result) ->
@@ -283,8 +376,8 @@ and row_var_levels level t =
       row_payload_levels level row;
       (let row = repr_row row in
        match row.tail with
-       | RVar ({ contents = RUnbound { id; level = l' } } as r) when l' > level ->
-           r := RUnbound { id; level }
+       | RVar ({ contents = RUnbound { id; level = l'; lacks_instances } } as r) when l' > level ->
+           r := RUnbound { id; level; lacks_instances }
        | _ -> ());
       row_var_levels level result
   | TResume (input, row, answer) ->
@@ -292,8 +385,8 @@ and row_var_levels level t =
       row_payload_levels level row;
       (let row = repr_row row in
        match row.tail with
-       | RVar ({ contents = RUnbound { id; level = l' } } as r) when l' > level ->
-           r := RUnbound { id; level }
+       | RVar ({ contents = RUnbound { id; level = l'; lacks_instances } } as r) when l' > level ->
+           r := RUnbound { id; level; lacks_instances }
        | _ -> ());
       row_var_levels level answer
   | TVariadicArrow (param, row, result) ->
@@ -301,21 +394,24 @@ and row_var_levels level t =
       row_payload_levels level row;
       (let row = repr_row row in
        match row.tail with
-       | RVar ({ contents = RUnbound { id; level = l' } } as r) when l' > level ->
-           r := RUnbound { id; level }
+       | RVar ({ contents = RUnbound { id; level = l'; lacks_instances } } as r) when l' > level ->
+           r := RUnbound { id; level; lacks_instances }
        | _ -> ());
       row_var_levels level result
   | TExactThunk inner -> row_var_levels level inner
 
 and row_payload_levels level row =
+  let row = repr_row row in
+  let adjust ty =
+    occurs_adjust min_int level ty;
+    row_var_levels level ty
+  in
+  List.iter (fun (_, args) -> List.iter adjust args) row.payloads;
   List.iter
-    (fun (_, args) ->
-      List.iter
-        (fun ty ->
-          occurs_adjust (-1) level ty;
-          row_var_levels level ty)
-        args)
-    (repr_row row).payloads
+    (fun entry ->
+      adjust entry.label;
+      List.iter adjust entry.payload)
+    row.instances
 
 (** Row unification (module doc): cancel the intersection, then case on the tails. *)
 and unify_rows (ra : row) (rb : row) : unit =
@@ -333,41 +429,81 @@ and unify_rows (ra : row) (rb : row) : unit =
   ignore (merge_payloads ra.payloads rb.payloads);
   let only_a = hash_set_diff ra.effects rb.effects in
   let only_b = hash_set_diff rb.effects ra.effects in
+  (* identical instance entries cancel and agree on payloads; others stay distinct (A1.3) *)
+  List.iter
+    (fun entry ->
+      match List.find_opt (same_instance entry) rb.instances with
+      | Some other ->
+          if List.length other.payload <> List.length entry.payload then
+            raise (Unify_error "instance payload arity mismatch");
+          List.iter2 unify entry.payload other.payload
+      | None -> ())
+    ra.instances;
+  let only_ia =
+    List.filter (fun e -> not (List.exists (same_instance e) rb.instances)) ra.instances
+  in
+  let only_ib =
+    List.filter (fun e -> not (List.exists (same_instance e) ra.instances)) rb.instances
+  in
+  let only_a_any = only_a <> [] || only_ia <> [] and only_b_any = only_b <> [] || only_ib <> [] in
   match (ra.tail, rb.tail) with
   | RClosed, RClosed ->
-      if only_a <> [] || only_b <> [] then raise (Unify_error "closed effect rows differ")
+      if only_a_any || only_b_any then raise (Unify_error "closed effect rows differ")
   | RSkolem (i, _), RSkolem (j, _) when i = j ->
-      if only_a <> [] || only_b <> [] then
+      if only_a_any || only_b_any then
         raise (Unify_error "effect rows with the same rigid tail differ")
   | RClosed, RVar rv | RSkolem _, RVar rv ->
       (* the flexible side may not have extra effects the fixed side lacks *)
-      if only_b <> [] then
+      if only_b_any then
         raise
           (Unify_error
              "a closed effect row cannot absorb extra effects; a stored definition passed as a \
               thunk can be eta-expanded at the use site: (lam () (app (var f)))")
       else
         bind_rvar rv
-          { effects = only_a; payloads = payloads_for only_a ra.payloads; tail = ra.tail }
+          {
+            effects = only_a;
+            payloads = payloads_for only_a ra.payloads;
+            instances = only_ia;
+            tail = ra.tail;
+          }
   | RVar rv, RClosed | RVar rv, RSkolem _ ->
-      if only_a <> [] then
+      if only_a_any then
         raise
           (Unify_error
              "a closed effect row cannot absorb extra effects; a stored definition passed as a \
               thunk can be eta-expanded at the use site: (lam () (app (var f)))")
       else
         bind_rvar rv
-          { effects = only_b; payloads = payloads_for only_b rb.payloads; tail = rb.tail }
+          {
+            effects = only_b;
+            payloads = payloads_for only_b rb.payloads;
+            instances = only_ib;
+            tail = rb.tail;
+          }
   | RVar rva, RVar rvb -> (
       match (!rva, !rvb) with
       | RUnbound { id = ia; _ }, RUnbound { id = ib; _ } when ia = ib ->
           (* same tail: exact row equality still requires equal fixed sets *)
-          if only_a <> [] || only_b <> [] then
+          if only_a_any || only_b_any then
             raise (Unify_error "occurs check: effect rows with the same tail differ")
-      | RUnbound { level = la; _ }, RUnbound { level = lb; _ } ->
-          let tail = new_rvar (min la lb) in
-          bind_rvar rva { effects = only_b; payloads = payloads_for only_b rb.payloads; tail };
-          bind_rvar rvb { effects = only_a; payloads = payloads_for only_a ra.payloads; tail }
+      | ( RUnbound { level = la; lacks_instances = lacks_a; _ },
+          RUnbound { level = lb; lacks_instances = lacks_b; _ } ) ->
+          let tail = new_rvar ~lacks_instances:(lacks_a || lacks_b) (min la lb) in
+          bind_rvar rva
+            {
+              effects = only_b;
+              payloads = payloads_for only_b rb.payloads;
+              instances = only_ib;
+              tail;
+            };
+          bind_rvar rvb
+            {
+              effects = only_a;
+              payloads = payloads_for only_a ra.payloads;
+              instances = only_ia;
+              tail;
+            }
       | _ -> assert false (* repr_row eliminated links *))
   | RClosed, RSkolem _ | RSkolem _, RClosed | RSkolem _, RSkolem _ ->
       raise (Unify_error "effect row tails are incompatible")
@@ -375,11 +511,18 @@ and unify_rows (ra : row) (rb : row) : unit =
 and bind_rvar (rv : rvar ref) (r : row) : unit =
   match !rv with
   | RLink _ -> assert false
-  | RUnbound { id; level } -> (
+  | RUnbound { id; level; lacks_instances } -> (
+      (* a fresh-continuation callback's row never gains an instance entry (A1.4) *)
+      if lacks_instances && (repr_row r).instances <> [] then
+        raise
+          (Instance_refusal
+             ( "E0833",
+               "an instance operation cannot run in a callback that runs on a fresh continuation \
+                (async.spawn, async.scope or dist.sample-lw)" ));
       (* occurs: the bound row's tail must not be this very variable *)
       match (repr_row r).tail with
       | RVar { contents = RUnbound { id = id'; _ } } when id = id' ->
-          if r.effects = [] then () (* trivial self-link is a no-op *)
+          if r.effects = [] && r.instances = [] then () (* trivial self-link is a no-op *)
           else raise (Unify_error "occurs check: a row would contain itself")
       | _ ->
           List.iter
@@ -390,11 +533,22 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
                   row_var_levels level ty)
                 args)
             (repr_row r).payloads;
+          List.iter
+            (fun entry ->
+              List.iter
+                (fun ty ->
+                  row_occurs_adjust id level ty;
+                  row_var_levels level ty)
+                entry.payload)
+            (repr_row r).instances;
           row_payload_levels level r;
-          (* propagate level ceiling to the new tail *)
+          (* propagate the level ceiling and the instance exclusion to the new tail *)
           (match (repr_row r).tail with
-          | RVar ({ contents = RUnbound { id = id'; level = l' } } as r') when l' > level ->
-              r' := RUnbound { id = id'; level }
+          | RVar ({ contents = RUnbound { id = id'; level = l'; lacks_instances = lacks' } } as r')
+            ->
+              r' :=
+                RUnbound
+                  { id = id'; level = min l' level; lacks_instances = lacks' || lacks_instances }
           | _ -> ());
           rv := RLink r)
 
@@ -412,6 +566,7 @@ let include_rows ~(sub : row) ~(into : row) : row =
     {
       effects = List.sort_uniq Hash.compare (into.effects @ sub.effects);
       payloads = merge_payloads into.payloads sub.payloads;
+      instances = merge_instances (into.instances @ sub.instances);
       tail = into.tail;
     }
 
@@ -427,7 +582,12 @@ let require_effects ?(payloads = []) ~level effects row : unit =
   | [], _ | _, RClosed -> ()
   | _, RVar rv ->
       bind_rvar rv
-        { effects = missing; payloads = payloads_for missing payloads; tail = new_rvar level }
+        {
+          effects = missing;
+          payloads = payloads_for missing payloads;
+          instances = [];
+          tail = new_rvar level;
+        }
   | _, RSkolem _ ->
       raise
         (Unify_error
@@ -440,7 +600,7 @@ let require_effects ?(payloads = []) ~level effects row : unit =
 let rec copy_join_result ty =
   Fuel_meter.tick 1;
   match repr ty with
-  | (TVar _ | TSkolem _) as ty -> ty
+  | (TVar _ | TSkolem _ | TLabel _) as ty -> ty
   | TCon (head, args) -> TCon (head, List.map copy_join_result args)
   | TTuple items -> TTuple (List.map copy_join_result items)
   | TArrow (params, row, result) ->
@@ -456,44 +616,52 @@ and copy_join_row row =
   {
     row with
     payloads = List.map (fun (hash, args) -> (hash, List.map copy_join_result args)) row.payloads;
+    instances =
+      List.map
+        (fun entry -> { entry with payload = List.map copy_join_result entry.payload })
+        row.instances;
   }
 
 (** [join ~level left right] constructs the least-upper-bound type of two alternative results.
     Flexible rows with a common tail contribute the union of their fixed labels to a fresh result
     row without refining that shared tail. This prevents a branch result from widening callback
     input rows that happen to share it. Ordinary type constraints still use {!unify}; rigid rows
-    remain exact. Failure raises [Unify_error]. *)
-let rec join ~level (left : ty) (right : ty) : ty =
+    remain exact. A type whose head satisfies [invariant] (a registered capability, design §9 A1.1)
+    is unified, never joined, so each instance label keeps one payload. Failure raises
+    [Unify_error]. *)
+let rec join ?(invariant = fun _ -> false) ~level (left : ty) (right : ty) : ty =
   Fuel_meter.tick 1;
   let left = repr left and right = repr right in
   if left == right then copy_join_result left
   else
     match (left, right) with
     | TTuple lefts, TTuple rights when List.length lefts = List.length rights ->
-        TTuple (List.map2 (join ~level) lefts rights)
+        TTuple (List.map2 (join ~invariant ~level) lefts rights)
     | TCon (left_head, left_args), TCon (right_head, right_args)
-      when Hash.equal left_head right_head && List.length left_args = List.length right_args ->
-        TCon (left_head, List.map2 (join ~level) left_args right_args)
+      when Hash.equal left_head right_head
+           && List.length left_args = List.length right_args
+           && not (invariant left_head) ->
+        TCon (left_head, List.map2 (join ~invariant ~level) left_args right_args)
     | TArrow (left_params, left_row, left_result), TArrow (right_params, right_row, right_result)
       when List.length left_params = List.length right_params ->
         List.iter2 unify left_params right_params;
         TArrow
           ( List.map copy_join_result left_params,
             join_rows left_row right_row,
-            join ~level left_result right_result )
+            join ~invariant ~level left_result right_result )
     | TResume (left_input, left_row, left_answer), TResume (right_input, right_row, right_answer) ->
         unify left_input right_input;
         TResume
           ( copy_join_result left_input,
             join_rows left_row right_row,
-            join ~level left_answer right_answer )
+            join ~invariant ~level left_answer right_answer )
     | ( TVariadicArrow (left_param, left_row, left_result),
         TVariadicArrow (right_param, right_row, right_result) ) ->
         unify left_param right_param;
         TVariadicArrow
           ( copy_join_result left_param,
             join_rows left_row right_row,
-            join ~level left_result right_result )
+            join ~invariant ~level left_result right_result )
     | _ ->
         unify left right;
         copy_join_result left
@@ -507,12 +675,14 @@ and join_rows left right =
       {
         effects = List.sort_uniq Hash.compare (left.effects @ right.effects);
         payloads = merge_payloads left.payloads right.payloads;
+        instances = merge_instances (left.instances @ right.instances);
         tail = left.tail;
       }
   | RClosed, RClosed ->
       {
         effects = List.sort_uniq Hash.compare (left.effects @ right.effects);
         payloads = merge_payloads left.payloads right.payloads;
+        instances = merge_instances (left.instances @ right.instances);
         tail = RClosed;
       }
   | _ ->
@@ -522,7 +692,7 @@ and join_rows left right =
 (** [join_into ~level accumulator alternative] updates a dedicated unification-variable accumulator
     to an independent join result. It is used where resumptions need to refer to the eventual
     handler answer type before every alternative has been visited. *)
-let join_into ~level accumulator alternative =
+let join_into ?invariant ~level accumulator alternative =
   match accumulator with
   | TVar cell -> (
       match (!cell, repr alternative) with
@@ -531,7 +701,7 @@ let join_into ~level accumulator alternative =
           occurs_adjust id level alternative;
           row_var_levels level alternative;
           cell := Link (copy_join_result alternative)
-      | Link current, alternative -> cell := Link (join ~level current alternative))
+      | Link current, alternative -> cell := Link (join ?invariant ~level current alternative))
   | _ -> raise (Unify_error "join accumulator is not a dedicated type variable")
 
 (* ------------------------------------------------------------------ *)
@@ -557,10 +727,10 @@ let instantiate ~level (s : scheme) : ty =
         match Hashtbl.find_opt tmap id with
         | Some v -> v
         | None ->
-            let v = new_tvar level in
+            let v = copy_var id level in
             Hashtbl.add tmap id v;
             v)
-    | (TVar _ | TSkolem _) as t -> t
+    | (TVar _ | TSkolem _ | TLabel _) as t -> t
     | TCon (h, args) -> TCon (h, List.map go args)
     | TTuple items -> TTuple (List.map go items)
     | TArrow (params, row, result) -> TArrow (List.map go params, go_row row, go result)
@@ -570,14 +740,22 @@ let instantiate ~level (s : scheme) : ty =
   and go_row r =
     let r = repr_row r in
     let r =
-      { r with payloads = List.map (fun (hash, args) -> (hash, List.map go args)) r.payloads }
+      {
+        r with
+        payloads = List.map (fun (hash, args) -> (hash, List.map go args)) r.payloads;
+        instances =
+          List.map
+            (fun entry ->
+              { entry with label = go entry.label; payload = List.map go entry.payload })
+            r.instances;
+      }
     in
     match r.tail with
-    | RVar { contents = RUnbound { id; level = l } } when l > s.gen_level -> (
+    | RVar { contents = RUnbound { id; level = l; lacks_instances } } when l > s.gen_level -> (
         match Hashtbl.find_opt rmap id with
         | Some tail -> { r with tail }
         | None ->
-            let tail = new_rvar level in
+            let tail = new_rvar ~lacks_instances level in
             Hashtbl.add rmap id tail;
             { r with tail })
     | _ -> r
@@ -600,6 +778,7 @@ let clone_schemes (schemes : scheme list) : scheme list =
     | TVariadicArrow (param, row, result) -> TVariadicArrow (go param, go_row row, go result)
     | TExactThunk inner -> TExactThunk (go inner)
     | TSkolem (id, name) -> TSkolem (id, name)
+    | TLabel (id, name) -> TLabel (id, name)
     | TVar reference -> (
         match !reference with
         | Link target -> go target
@@ -607,36 +786,44 @@ let clone_schemes (schemes : scheme list) : scheme list =
             match Hashtbl.find_opt tmap id with
             | Some copy -> copy
             | None ->
-                let copy = new_tvar level in
+                let copy = copy_var id level in
                 Hashtbl.add tmap id copy;
                 copy))
   and go_row row =
-    let finish effects payloads tail =
+    let finish effects payloads instances tail =
       {
         effects = List.sort_uniq Hash.compare effects;
         payloads =
           merge_payloads [] (List.map (fun (hash, args) -> (hash, List.map go args)) payloads);
+        instances =
+          merge_instances
+            (List.map
+               (fun entry ->
+                 { entry with label = go entry.label; payload = List.map go entry.payload })
+               instances);
         tail;
       }
     in
-    let rec flatten effects payloads = function
-      | RClosed -> finish effects payloads RClosed
-      | RSkolem (id, name) -> finish effects payloads (RSkolem (id, name))
+    let rec flatten effects payloads instances = function
+      | RClosed -> finish effects payloads instances RClosed
+      | RSkolem (id, name) -> finish effects payloads instances (RSkolem (id, name))
       | RVar reference -> (
           match !reference with
-          | RLink inner -> flatten (effects @ inner.effects) (payloads @ inner.payloads) inner.tail
-          | RUnbound { id; level } ->
+          | RLink inner ->
+              flatten (effects @ inner.effects) (payloads @ inner.payloads)
+                (instances @ inner.instances) inner.tail
+          | RUnbound { id; level; lacks_instances } ->
               let tail =
                 match Hashtbl.find_opt rmap id with
                 | Some copy -> copy
                 | None ->
-                    let copy = new_rvar level in
+                    let copy = new_rvar ~lacks_instances level in
                     Hashtbl.add rmap id copy;
                     copy
               in
-              finish effects payloads tail)
+              finish effects payloads instances tail)
     in
-    flatten row.effects row.payloads row.tail
+    flatten row.effects row.payloads row.instances row.tail
   in
   List.map (fun scheme -> { scheme with ty = go scheme.ty }) schemes
 
@@ -647,7 +834,7 @@ let unifiable left right =
       try
         unify left.ty right.ty;
         true
-      with Unify_error _ -> false)
+      with Unify_error _ | Instance_refusal _ -> false)
   | _ -> assert false
 
 (** [skolems ty] returns the rigid type and row variables reachable from [ty], including hidden
@@ -659,7 +846,7 @@ let skolems ty =
     Fuel_meter.tick 1;
     match repr ty with
     | TSkolem (id, _) -> ids := id :: !ids
-    | TVar _ -> ()
+    | TVar _ | TLabel _ -> ()
     | TCon (_, args) | TTuple args -> List.iter walk args
     | TArrow (args, row, result) ->
         List.iter walk args;
@@ -673,13 +860,20 @@ let skolems ty =
   and walk_row row =
     let row = repr_row row in
     List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+    (* a clause skolem stored only in an instance entry's payload is still found (A1.1) *)
+    List.iter (fun entry -> List.iter walk entry.payload) row.instances;
     match row.tail with RSkolem (id, _) -> ids := id :: !ids | _ -> ()
   in
   walk ty;
   List.sort_uniq Int.compare !ids
 
-(** Quantified variable ids of a scheme, for display ([forall a e. ...]). *)
-let quantified (s : scheme) : int list * int list =
+(** Quantified variable ids of a scheme. [`Complete] (the default) reaches every variable
+    [instantiate] freshens, ambient payloads and instance entries included (design §9 A1.1).
+    [`Display] is the walk display uses ([forall a e. ...]): parameters, row tails and results only,
+    since rendered rows show effect names, never payloads or labels. [`Boundary] is [`Display] plus
+    instance entries: the host protocol's monomorphism checks keep their pre-TS.2 answer for every
+    program without a registered instance. *)
+let quantified ?(walk = `Complete) (s : scheme) : int list * int list =
   let tids = ref [] and rids = ref [] in
   let seen_t = Hashtbl.create 8 and seen_r = Hashtbl.create 8 in
   let rec go t =
@@ -690,46 +884,106 @@ let quantified (s : scheme) : int list * int list =
           Hashtbl.add seen_t id ();
           tids := id :: !tids
         end
-    | TVar _ | TSkolem _ -> ()
+    | TVar _ | TSkolem _ | TLabel _ -> ()
     | TCon (_, args) -> List.iter go args
     | TTuple items -> List.iter go items
     | TArrow (params, row, result) ->
         List.iter go params;
-        (let row = repr_row row in
-         match row.tail with
-         | RVar { contents = RUnbound { id; level } } when level > s.gen_level ->
-             if not (Hashtbl.mem seen_r id) then begin
-               Hashtbl.add seen_r id ();
-               rids := id :: !rids
-             end
-         | _ -> ());
+        go_row row;
         go result
-    | TResume (input, row, answer) ->
+    | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
         go input;
-        (let row = repr_row row in
-         match row.tail with
-         | RVar { contents = RUnbound { id; level } } when level > s.gen_level ->
-             if not (Hashtbl.mem seen_r id) then begin
-               Hashtbl.add seen_r id ();
-               rids := id :: !rids
-             end
-         | _ -> ());
+        go_row row;
         go answer
-    | TVariadicArrow (param, row, result) ->
-        go param;
-        (let row = repr_row row in
-         match row.tail with
-         | RVar { contents = RUnbound { id; level } } when level > s.gen_level ->
-             if not (Hashtbl.mem seen_r id) then begin
-               Hashtbl.add seen_r id ();
-               rids := id :: !rids
-             end
-         | _ -> ());
-        go result
     | TExactThunk inner -> go inner
+  and go_row row =
+    let row = repr_row row in
+    if walk = `Complete then List.iter (fun (_, args) -> List.iter go args) row.payloads;
+    if walk <> `Display then
+      List.iter
+        (fun entry ->
+          go entry.label;
+          List.iter go entry.payload)
+        row.instances;
+    match row.tail with
+    | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
+        if not (Hashtbl.mem seen_r id) then begin
+          Hashtbl.add seen_r id ();
+          rids := id :: !rids
+        end
+    | _ -> ()
   in
   go s.ty;
   (List.rev !tids, List.rev !rids)
+
+(** [effect_identities row] is the sorted, deduplicated set of effect identities a normalized row
+    mentions: its ambient effects and the effects of its instance entries. Authority, display and
+    manifest consumers use it (design §9 A1.8). *)
+and effect_identities (row : row) =
+  List.sort_uniq Hash.compare (row.effects @ List.map (fun entry -> entry.effect_id) row.instances)
+
+(** [row_holds_instances row] holds when [row] has an instance entry or a label anywhere, including
+    inside its payloads and the latent rows they contain. A top-level expression's row must not
+    (design §9 A1.6). *)
+let row_holds_instances row =
+  let rec ty_holds t =
+    Fuel_meter.tick 1;
+    match repr t with
+    | TLabel _ -> true
+    | TVar { contents = Unbound { id; _ } } -> is_label_id id
+    | TVar { contents = Link _ } | TSkolem _ -> false
+    | TCon (_, items) | TTuple items -> List.exists ty_holds items
+    | TArrow (params, row, result) ->
+        List.exists ty_holds params || row_holds row || ty_holds result
+    | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+        ty_holds input || row_holds row || ty_holds answer
+    | TExactThunk inner -> ty_holds inner
+  and row_holds row =
+    let row = repr_row row in
+    row.instances <> [] || List.exists (fun (_, args) -> List.exists ty_holds args) row.payloads
+  in
+  row_holds row
+
+(** [same_instance_sets left right] compares two normalized instance-entry sets exactly: the same
+    effects with identical resolved labels, where a label variable equals only itself (A1.8). *)
+let same_instance_sets left right =
+  List.length left = List.length right
+  && List.for_all (fun entry -> List.exists (same_instance entry) right) left
+  && List.for_all (fun entry -> List.exists (same_instance entry) left) right
+
+(** [is_label ty] holds for a rigid label or a label variable. *)
+let is_label ty =
+  match repr ty with
+  | TLabel _ -> true
+  | TVar { contents = Unbound { id; _ } } -> is_label_id id
+  | _ -> false
+
+(** [is_closed_pure row] holds for a normalized closed row with no effect at all, ambient or
+    instance. *)
+let is_closed_pure (row : row) = row.tail = RClosed && row.effects = [] && row.instances = []
+
+(** [mentions_label id ty] holds when the rigid label [id] occurs anywhere in [ty]: in a type
+    argument, a row's payloads, an instance entry's label or payload, or a bound row tail. The
+    scoped form's non-escape check uses it (design §9 A1.7). *)
+let rec mentions_label id ty =
+  Fuel_meter.tick 1;
+  match repr ty with
+  | TLabel (other, _) -> other = id
+  | TVar _ | TSkolem _ -> false
+  | TCon (_, items) | TTuple items -> List.exists (mentions_label id) items
+  | TArrow (params, row, result) ->
+      List.exists (mentions_label id) params
+      || row_mentions_label id row || mentions_label id result
+  | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+      mentions_label id input || row_mentions_label id row || mentions_label id answer
+  | TExactThunk inner -> mentions_label id inner
+
+and row_mentions_label id row =
+  let row = repr_row row in
+  List.exists (fun (_, args) -> List.exists (mentions_label id) args) row.payloads
+  || List.exists
+       (fun entry -> mentions_label id entry.label || List.exists (mentions_label id) entry.payload)
+       row.instances
 
 (* ------------------------------------------------------------------ *)
 (* Display                                                             *)
@@ -767,7 +1021,8 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
   in
   let show_row (r : row) =
     let r = repr_row r in
-    let effs = List.map effect_name_of (List.sort Hash.compare r.effects) in
+    (* an instance entry displays as its effect name (A1.8) *)
+    let effs = List.map effect_name_of (effect_identities r) in
     match r.tail with
     | RClosed -> String.concat ", " effs
     | RVar { contents = RUnbound { id; _ } } ->
@@ -784,11 +1039,14 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
     match repr t with
     | TVar { contents = Unbound { id; _ } } -> tname id
     | TVar { contents = Link _ } -> assert false
-    | TSkolem (_, n) -> n
-    | TCon (h, []) -> name_of h
-    | TCon (h, args) ->
-        let s = name_of h ^ " " ^ String.concat " " (List.map (go ~paren:true) args) in
-        if paren then "(" ^ s ^ ")" else s
+    | TSkolem (_, n) | TLabel (_, n) -> n
+    | TCon (h, args) -> (
+        (* a capability's label is internal and never displayed (design §9 A1.4) *)
+        match List.filter (fun arg -> not (is_label arg)) args with
+        | [] -> name_of h
+        | args ->
+            let s = name_of h ^ " " ^ String.concat " " (List.map (go ~paren:true) args) in
+            if paren then "(" ^ s ^ ")" else s)
     | TTuple [] -> "()"
     | TTuple items -> "(" ^ String.concat ", " (List.map (go ~paren:false) items) ^ ")"
     | TArrow (params, row, result) ->
@@ -815,7 +1073,9 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
     [|] namespace required by surface syntax: [forall a | e. TYPE]. Variable naming is shared with
     the body rendering, so quantifier names line up. *)
 let show_scheme ?name_of ?effect_name_of ?(surface = false) (s : scheme) : string =
-  let tids, rids = quantified s in
+  let tids, rids = quantified ~walk:`Display s in
+  (* labels are never displayed (design §9 A1.4) *)
+  let tids = List.filter (fun id -> not (is_label_id id)) tids in
   let body = show ?name_of ?effect_name_of ~surface s.ty in
   (* naming in [show] assigns letters in first-appearance order, which matches [quantified]'s
      traversal; reconstruct the quantifier prefix from counts *)

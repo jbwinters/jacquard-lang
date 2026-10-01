@@ -42,6 +42,17 @@ open Types
 module SMap = Map.Make (String)
 module SSet = Set.Make (String)
 
+type instance_registration = {
+  scoped : Hash.t;
+  instance_effect : Hash.t;
+  capability : Hash.t;
+  operations : Hash.t list;
+  callback_position : int;
+}
+(** One registered scoped instance effect (TS.2, design §9 A1.0): the scoped combinator term, the
+    instance effect, its one-parameter capability type, its operations, and the position of the
+    scoped callback argument. Production contexts register none. *)
+
 type ctx = {
   store : Store.t;
   mutable trusted_store_refs : bool;
@@ -69,6 +80,8 @@ type ctx = {
           context's whole lifetime, so one ctx measures a whole program. *)
   mutable tier_ops : (Hash.t * Tier.discipline) list;
       (** op hash -> one handler clause's syntactic resume discipline (PF.2 phase 1) *)
+  mutable instances : instance_registration list;
+      (** scoped instance effects the checker enforces (TS.2); empty in production *)
   mutable recovery_decls : (Hash.t * Store.located) list;
       (** editor-recovery overlay: type and effect declarations of the analyzed file that lowered
           cleanly, indexed by every hash they produce, so later islands resolve their constructors
@@ -95,6 +108,53 @@ let primitive_types ctx =
     entries at the same hashes are replaced. *)
 let register_builtin_signatures ctx signatures =
   List.iter (fun (hash, scheme) -> Hashtbl.replace ctx.builtin_sigs hash scheme) signatures
+
+(** [register_instances ctx registrations] enforces scoped instance effects (TS.2) on [ctx]. Each
+    registration is validated against the store: the instance effect is an effect declaration, every
+    operation is one of its operations, the capability type is a one-parameter type declaration, the
+    scoped term is a term, and the callback position is 1 (slice 1 implements the State shape
+    [(init, callback)]). Registration must happen before any affected signature is cached;
+    production contexts never register. It is a test-only API, so misuse raises [Invalid_argument].
+*)
+let register_instances ctx registrations =
+  let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
+  let locate hash = Store.locate_internal ctx.store hash in
+  let check (registration : instance_registration) =
+    (match locate registration.instance_effect with
+    | Ok { decl = { Kernel.it = Kernel.DefEffect _; _ }; role = Store.Whole; _ } -> ()
+    | _ -> refuse "the instance effect is not an effect declaration");
+    if registration.operations = [] then refuse "an instance effect needs operations";
+    List.iter
+      (fun operation ->
+        match locate operation with
+        | Ok { decl_hash; role = Store.Operation _; _ }
+          when Hash.equal decl_hash registration.instance_effect ->
+            ()
+        | _ -> refuse "an operation does not belong to the instance effect")
+      registration.operations;
+    (match locate registration.capability with
+    | Ok { decl = { Kernel.it = Kernel.DefType { tvars = [ _ ]; _ }; _ }; role = Store.Whole; _ } ->
+        ()
+    | _ -> refuse "the capability is not a one-parameter type declaration");
+    (match locate registration.scoped with
+    | Ok { decl = { Kernel.it = Kernel.DefTerm _; _ }; _ } -> ()
+    | _ -> refuse "the scoped combinator is not a term");
+    if registration.callback_position <> 1 then refuse "the callback position is not 1"
+  in
+  List.iter check registrations;
+  ctx.instances <- ctx.instances @ registrations
+
+(** [instance_registrations ctx] lists the scoped instance effects [ctx] enforces. *)
+let instance_registrations ctx = ctx.instances
+
+let registered_capability ctx hash =
+  List.exists (fun (r : instance_registration) -> Hash.equal r.capability hash) ctx.instances
+
+let registered_instance_effect ctx hash =
+  List.exists (fun (r : instance_registration) -> Hash.equal r.instance_effect hash) ctx.instances
+
+let scoped_registration ctx hash =
+  List.find_opt (fun (r : instance_registration) -> Hash.equal r.scoped hash) ctx.instances
 
 (** [tier_applications ctx] returns the application classifications recorded by strict checks. *)
 let tier_applications ctx = ctx.tier_apps
@@ -133,6 +193,13 @@ let diagnostic_summary = function
   | "E0817" -> "A once resumption escapes its handler clause"
   | "E0818" -> "A non-value binding cannot be reused polymorphically"
   | "E0819" -> "An opaque Secret was used by generic inspection"
+  | "E0830" -> "An instance row is undetermined"
+  | "E0831" -> "A scoped instance combinator is used outside its checker form"
+  | "E0832" -> "An instance escapes its scope"
+  | "E0833" -> "An instance operation would run in a fresh-continuation callback"
+  | "E0834" -> "A user handler cannot handle an instance operation"
+  | "E0835" -> "A capability cannot be constructed or taken apart"
+  | "E0836" -> "A capability type cannot be stored in a declaration"
   | "E0907" -> "A scoped task or channel handle is invalid"
   | code -> "Checker rejected the program (" ^ code ^ ")"
 
@@ -154,6 +221,13 @@ let diagnostic_next_step = function
   | "E0817" -> "Consume the once resumption directly inside its handler clause."
   | "E0818" -> "Eta-expand the binding or give each use its own binding."
   | "E0819" -> "Keep the value opaque or expose it explicitly with `secret.expose`."
+  | "E0830" -> "Pass the capability that determines the instance, or leave the row unannotated."
+  | "E0831" -> "Call the scoped combinator directly with a literal one-parameter lambda."
+  | "E0832" -> "Use the capability only inside its scope; return or store values read from it."
+  | "E0833" -> "Read the value inside the scope and pass the value, not the capability's operation."
+  | "E0834" -> "Use the instance's scoped combinator; user handlers handle ambient effects only."
+  | "E0835" -> "Obtain a capability from its scoped combinator."
+  | "E0836" -> "Carry a capability through a type parameter instead of a fixed field type."
   | "E0907" -> "Use the handle only inside the exact async.scope that created it."
   | _ -> "Correct the rejected checker input and try again."
 
@@ -180,6 +254,13 @@ let payload_conflict ?meta detail =
     ~summary:(diagnostic_summary "E0801")
     ~cause:("effect payload mismatch (" ^ detail ^ ")")
     ~next_step:(diagnostic_next_step "E0801") ~contrast:None ()
+
+(** [instance_refusal code detail] reports a structured scoped-instance refusal that reached a
+    top-level boundary outside expression inference. *)
+let instance_refusal ?meta code detail =
+  Diag.error ?span:(Option.bind meta Meta.span) ~domain:Diag.Checker ~code
+    ~summary:(diagnostic_summary code) ~cause:detail ~next_step:(diagnostic_next_step code)
+    ~contrast:None ()
 
 (* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
    bodies may use a hidden prelude capability hash, while source expressions must use public
@@ -255,7 +336,7 @@ let rec same_review_type left right =
   ||
   match (left, right) with
   | TVar left, TVar right -> left == right
-  | TSkolem (left, _), TSkolem (right, _) -> left = right
+  | TSkolem (left, _), TSkolem (right, _) | TLabel (left, _), TLabel (right, _) -> left = right
   | TCon (left_hash, left_args), TCon (right_hash, right_args) ->
       Hash.equal left_hash right_hash
       && List.length left_args = List.length right_args
@@ -283,6 +364,7 @@ and same_review_row left right =
   let left = Types.repr_row left and right = Types.repr_row right in
   List.length left.effects = List.length right.effects
   && List.for_all2 Hash.equal left.effects right.effects
+  && same_instance_sets left.instances right.instances
   &&
   match (left.tail, right.tail) with
   | RClosed, RClosed -> true
@@ -409,7 +491,7 @@ let unify_or ctx ?meta ?next_step ~what expected actual =
       detail
 
 let unify_join_or ctx ?meta ~what expected actual =
-  try Types.join_into ~level:ctx.level expected actual
+  try Types.join_into ~invariant:(registered_capability ctx) ~level:ctx.level expected actual
   with Unify_error detail ->
     err ?meta
       ~next_step:"the expected side comes from the surrounding context; make both sides agree"
@@ -433,7 +515,10 @@ let type_arity ctx ?meta (h : Hash.t) : int =
 (* Annotation conversion                                               *)
 (* ------------------------------------------------------------------ *)
 
-type conv_mode = Rigid | Flexible
+(* [Proof] is [Rigid] with label skolems: a definition's rigid signature proof proves label
+   polymorphism, while an expression annotation's capability labels stay flexible (design §9
+   A1.5). *)
+type conv_mode = Rigid | Proof | Flexible
 
 type conv_env = {
   mode : conv_mode;
@@ -443,14 +528,18 @@ type conv_env = {
 
 let conv_fresh_tv ctx cenv name =
   let v =
-    match cenv.mode with Rigid -> TSkolem (fresh_id (), name) | Flexible -> new_tvar ctx.level
+    match cenv.mode with
+    | Rigid | Proof -> TSkolem (fresh_id (), name)
+    | Flexible -> new_tvar ctx.level
   in
   cenv.tvs <- (name, v) :: cenv.tvs;
   v
 
 let conv_fresh_rv ctx cenv name =
   let v =
-    match cenv.mode with Rigid -> RSkolem (fresh_id (), name) | Flexible -> new_rvar ctx.level
+    match cenv.mode with
+    | Rigid | Proof -> RSkolem (fresh_id (), name)
+    | Flexible -> new_rvar ctx.level
   in
   cenv.rvs <- (name, v) :: cenv.rvs;
   v
@@ -464,6 +553,7 @@ let payload_parameters ctx hash =
   if
     String.equal identity Concurrency_contract.async_effect_hash
     || String.equal identity Channel_contract.channel_effect_hash
+    || registered_instance_effect ctx hash
   then []
   else
     let rec occurs name (ty : Kernel.ty) =
@@ -493,6 +583,143 @@ let fresh_payloads ctx effects =
       | vars -> Some (hash, List.map (fun _ -> new_tvar ctx.level) vars))
     (List.sort_uniq Hash.compare effects)
 
+(** [conv_label ctx cenv] is a converted capability's label: a label skolem in a rigid signature
+    proof, otherwise a label variable. *)
+let conv_label ctx cenv =
+  match cenv.mode with
+  | Proof -> TLabel (fresh_id (), "l")
+  | Rigid | Flexible -> new_label_var ctx.level
+
+(** [elaborate_instance_rows ctx ~meta ?enclosing ty] replaces each registered instance effect named
+    in a row of the converted annotation [ty] with one instance entry per capability of that effect
+    among the parameter types of the annotated arrow and of the arrows enclosing it within [ty]
+    ([enclosing] seeds the outermost), at any depth. A row naming an instance effect with no such
+    capability is refused (E0830), because nothing determines its label (design §9 A1.5). *)
+let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
+  if ctx.instances = [] then ty
+  else
+    let capabilities ty =
+      let found = ref [] in
+      let rec walk ty =
+        match repr ty with
+        | TCon (h, args) -> (
+            List.iter walk args;
+            match
+              ( List.find_opt
+                  (fun (r : instance_registration) -> Hash.equal r.capability h)
+                  ctx.instances,
+                args )
+            with
+            | Some r, label :: payload ->
+                found := { effect_id = r.instance_effect; label; payload } :: !found
+            | _ -> ())
+        | TTuple items -> List.iter walk items
+        | TArrow (params, _, result) ->
+            List.iter walk params;
+            walk result
+        | TResume (input, _, answer) | TVariadicArrow (input, _, answer) ->
+            walk input;
+            walk answer
+        | TExactThunk inner -> walk inner
+        | TVar _ | TSkolem _ | TLabel _ -> ()
+      in
+      walk ty;
+      List.rev !found
+    in
+    let elaborate_row enclosing (row : row) =
+      let named, ambient = List.partition (registered_instance_effect ctx) row.effects in
+      if named = [] then row
+      else
+        let entries =
+          List.concat_map
+            (fun instance_effect ->
+              match
+                List.filter
+                  (fun (entry : instance) -> Hash.equal entry.effect_id instance_effect)
+                  enclosing
+              with
+              | [] ->
+                  err ~meta ~code:"E0830"
+                    "the annotation names instance effect %s but no capability parameter \
+                     determines its instance"
+                    (name_of ctx instance_effect)
+              | entries -> entries)
+            named
+        in
+        {
+          row with
+          effects = ambient;
+          payloads = List.filter (fun (h, _) -> not (List.mem h named)) row.payloads;
+          instances = merge_instances (row.instances @ entries);
+        }
+    in
+    let rec walk enclosing ty =
+      match repr ty with
+      | TArrow (params, row, result) ->
+          let enclosing = enclosing @ List.concat_map capabilities params in
+          TArrow
+            (List.map (walk enclosing) params, elaborate_row enclosing row, walk enclosing result)
+      | TResume (input, row, answer) ->
+          let enclosing = enclosing @ capabilities input in
+          TResume (walk enclosing input, elaborate_row enclosing row, walk enclosing answer)
+      | TVariadicArrow (param, row, result) ->
+          let enclosing = enclosing @ capabilities param in
+          TVariadicArrow (walk enclosing param, elaborate_row enclosing row, walk enclosing result)
+      | TExactThunk inner -> TExactThunk (walk enclosing inner)
+      | TCon (h, args) -> TCon (h, List.map (walk enclosing) args)
+      | TTuple items -> TTuple (List.map (walk enclosing) items)
+      | (TVar _ | TSkolem _ | TLabel _) as other -> other
+    in
+    walk enclosing ty
+
+(** [check_determinacy ctx ~meta scheme] refuses (E0830) a published scheme whose instance entries
+    mention a quantified label variable that occurs in no capability type of the scheme: nothing
+    could ever determine which instance it names (design §9 A1.6). *)
+let check_determinacy ctx ~meta (scheme : scheme) =
+  if ctx.instances <> [] then begin
+    let determined = ref [] and entries = ref [] in
+    let quantified label =
+      match repr label with
+      | TVar { contents = Unbound { id; level } } when is_label_id id && level > scheme.gen_level ->
+          Some id
+      | _ -> None
+    in
+    let rec walk ty =
+      match repr ty with
+      | TCon (h, label :: args) when registered_capability ctx h ->
+          Option.iter (fun id -> determined := id :: !determined) (quantified label);
+          List.iter walk args
+      | TCon (_, items) | TTuple items -> List.iter walk items
+      | TArrow (params, row, result) ->
+          List.iter walk params;
+          walk_row row;
+          walk result
+      | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+          walk input;
+          walk_row row;
+          walk answer
+      | TExactThunk inner -> walk inner
+      | TVar _ | TSkolem _ | TLabel _ -> ()
+    and walk_row row =
+      let row = repr_row row in
+      List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+      List.iter
+        (fun (entry : instance) ->
+          Option.iter
+            (fun id -> entries := (id, entry.effect_id) :: !entries)
+            (quantified entry.label);
+          List.iter walk entry.payload)
+        row.instances
+    in
+    walk scheme.ty;
+    match List.find_opt (fun (id, _) -> not (List.mem id !determined)) !entries with
+    | Some (_, instance_effect) ->
+        err ~meta ~code:"E0830"
+          "this definition performs %s on an instance that none of its capability types determines"
+          (name_of ctx instance_effect)
+    | None -> ()
+  end
+
 (* Convert a resolved surface type (an annotation) to an internal type. Free type/row
    variables are implicitly quantified at the annotation: first use introduces them. *)
 let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
@@ -512,7 +739,9 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
       if arity <> List.length args then
         err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
           (List.length args);
-      TCon (h, List.map (conv_ty ctx cenv) args)
+      let args = List.map (conv_ty ctx cenv) args in
+      (* a capability's first, internal argument is its instance label (design §9 A1.1) *)
+      if registered_capability ctx h then TCon (h, conv_label ctx cenv :: args) else TCon (h, args)
   | Kernel.TApp _ -> err ~meta ~code:"E0810" "only declared types can be applied"
   | Kernel.TArrow (params, row, result) ->
       TArrow
@@ -543,7 +772,12 @@ and conv_row ctx cenv ~effectself (r : Kernel.row) : row =
     | Some v -> (
         match List.assoc_opt v cenv.rvs with Some t -> t | None -> conv_fresh_rv ctx cenv v)
   in
-  { effects = List.sort_uniq Hash.compare effects; payloads = fresh_payloads ctx effects; tail }
+  {
+    effects = List.sort_uniq Hash.compare effects;
+    payloads = fresh_payloads ctx effects;
+    instances = [];
+    tail;
+  }
 
 (* ------------------------------------------------------------------ *)
 (* Declaration schemes: constructors, ops, terms                       *)
@@ -635,7 +869,7 @@ let check_decl_payload_storage ?meta ?(effectself = None) ~parameters ty =
     if List.exists (fun parameter -> parameter == ty) parameters then ()
     else
       match ty with
-      | TVar _ | TSkolem _ -> ()
+      | TVar _ | TSkolem _ | TLabel _ -> ()
       | TCon (_, args) | TTuple args -> List.iter walk args
       | TArrow (params, row, result) ->
           List.iter walk params;
@@ -672,6 +906,8 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
         decl_hash;
         role = Store.Constructor i;
       } ->
+      if registered_capability ctx decl_hash then
+        err ?meta ~code:"E0835" "a capability can only be obtained from its scoped combinator";
       let c = List.nth cons i in
       let inner = ctx.level + 1 in
       let exact_vary_world =
@@ -688,7 +924,8 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
       let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
       (* self-references — (tref tname) stayed Named — become the applied result type *)
       let conv_field (fl : Kernel.field) =
-        conv_decl_ty ctx cenv ~self:(tname, result) fl.Kernel.fty
+        elaborate_instance_rows ctx ~meta:fl.Kernel.fty.Kernel.meta
+          (conv_decl_ty ctx cenv ~self:(tname, result) fl.Kernel.fty)
       in
       let fields = List.map conv_field c.Kernel.fields in
       let ty = match fields with [] -> result | fields -> TArrow (fields, empty_row, result) in
@@ -743,7 +980,8 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
         if arity <> List.length args then
           err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
             (List.length args);
-        TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args)
+        let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
+        if registered_capability ctx h then TCon (h, conv_label ctx cenv :: args) else TCon (h, args)
     | Kernel.TArrow (params, row, result) ->
         let converted_row = conv_row ctx cenv ~effectself row in
         TArrow
@@ -764,7 +1002,34 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
     | _ -> conv_ty ctx cenv t
   in
   check_decl_payload_storage ~meta ~effectself ~parameters:(List.map snd cenv.tvs) converted;
+  check_decl_capability_storage ctx ~meta ~effectself ~parameters:(List.map snd cenv.tvs) converted;
   converted
+
+(** [check_decl_capability_storage] refuses (E0836) a capability type in a nominal field or a user
+    effect operation signature, except in a registered instance effect's own operations: a fixed
+    field would hide the capability's label from non-escape. A capability carried by a declared type
+    parameter keeps its label visible and is allowed. *)
+and check_decl_capability_storage ctx ~meta ~effectself ~parameters ty =
+  let own_operations =
+    match effectself with Some (_, hash) -> registered_instance_effect ctx hash | None -> false
+  in
+  let rec walk ty =
+    if List.exists (fun parameter -> parameter == ty) parameters then ()
+    else
+      match repr ty with
+      | TCon (h, _) when registered_capability ctx h && not own_operations ->
+          err ~meta ~code:"E0836" "a capability type cannot be stored in this declaration"
+      | TVar _ | TSkolem _ | TLabel _ -> ()
+      | TCon (_, args) | TTuple args -> List.iter walk args
+      | TArrow (params, _, result) ->
+          List.iter walk params;
+          walk result
+      | TResume (input, _, answer) | TVariadicArrow (input, _, answer) ->
+          walk input;
+          walk answer
+      | TExactThunk inner -> walk inner
+  in
+  walk ty
 
 (** [is_frozen_async_spawn ctx operation] recognizes only the exact Async declaration that receives
     the identity-guarded SC.4 dependent typing rule. The check is store-shaped rather than
@@ -925,6 +1190,7 @@ let equal_hashes left right =
 let rows_can_be_exactly_equal left right =
   let left = repr_row left and right = repr_row right in
   equal_hashes left.effects right.effects
+  && same_instance_sets left.instances right.instances
   &&
   match (left.tail, right.tail) with
   | RClosed, RClosed -> true
@@ -996,10 +1262,51 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
       let effectself = Some (ename, decl_hash) in
       let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
       let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
+      let params, result =
+        (* the operation is the arrow enclosing its parameter and result types *)
+        match
+          elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result))
+        with
+        | TArrow (params, _, result) -> (params, result)
+        | _ -> (params, result)
+      in
       let operation_row =
-        if is_frozen_async_spawn ctx h then
+        if registered_instance_effect ctx decl_hash then
+          (* each reference gets fresh, generalizable labels; the operation's row is the single
+             instance entry of its capability (design §9 A1.2) *)
+          let capability =
+            List.find_map
+              (fun param ->
+                match repr param with
+                | TCon (cap, label :: payload) when registered_capability ctx cap -> (
+                    (match repr label with
+                    | TVar ({ contents = Unbound _ } as cell) -> cell := Link (new_label_var inner)
+                    | _ -> ());
+                    match payload with [ payload ] -> Some (label, payload) | _ -> None)
+                | _ -> None)
+              params
+          in
+          match capability with
+          | Some (label, payload) ->
+              {
+                effects = [];
+                payloads = [];
+                instances = [ { effect_id = decl_hash; label; payload = [ payload ] } ];
+                tail = RClosed;
+              }
+          | None ->
+              err ?meta ~code:"E0805"
+                "instance operation %s needs a capability parameter with one payload argument"
+                (name_of ctx h)
+        else if is_frozen_async_spawn ctx h then
           match params with
-          | [ TArrow ([], child_row, _) ] -> child_row
+          | [ TArrow ([], child_row, _) ] ->
+              (* the child runs on a fresh continuation: no instance entry may reach it (A1.4) *)
+              (match child_row.tail with
+              | RVar ({ contents = RUnbound { id; level; _ } } as cell) ->
+                  cell := RUnbound { id; level; lacks_instances = true }
+              | _ -> ());
+              child_row
           | _ ->
               err ?meta ~code:"E0805"
                 "frozen async.spawn identity resolved to an invalid converted parameter shape"
@@ -1101,15 +1408,16 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
   let rec walk t =
     Fuel_meter.tick 1;
     match repr t with
-    | TVar _ | TSkolem _ -> ()
+    | TVar _ | TSkolem _ | TLabel _ -> ()
     | TCon (_, args) -> List.iter walk args
     | TTuple items -> List.iter walk items
     | TArrow (params, row, result) ->
         List.iter walk params;
         (let row = repr_row row in
          List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+         walk_instances row;
          match row.tail with
-         | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
+         | RVar ({ contents = RUnbound { id; level; _ } } as r) when level > gen_level ->
              let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
@@ -1118,8 +1426,9 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
         walk input;
         (let row = repr_row row in
          List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+         walk_instances row;
          match row.tail with
-         | RVar ({ contents = RUnbound { id; level } } as rv) when level > gen_level -> (
+         | RVar ({ contents = RUnbound { id; level; _ } } as rv) when level > gen_level -> (
              match Hashtbl.find_opt counts id with
              | None -> Hashtbl.add counts id (1, rv)
              | Some (n, _) -> Hashtbl.replace counts id (n + 1, rv))
@@ -1129,13 +1438,21 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
         walk param;
         (let row = repr_row row in
          List.iter (fun (_, args) -> List.iter walk args) row.payloads;
+         walk_instances row;
          match row.tail with
-         | RVar ({ contents = RUnbound { id; level } } as r) when level > gen_level ->
+         | RVar ({ contents = RUnbound { id; level; _ } } as r) when level > gen_level ->
              let n = match Hashtbl.find_opt counts id with Some (n, _) -> n | None -> 0 in
              Hashtbl.replace counts id (n + 1, r)
          | _ -> ());
         walk result
     | TExactThunk inner -> walk inner
+  (* instance entries' labels and payloads share variables like any other position (A1.1) *)
+  and walk_instances (row : row) =
+    List.iter
+      (fun (entry : instance) ->
+        walk entry.label;
+        List.iter walk entry.payload)
+      row.instances
   in
   walk t;
   Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink empty_row) counts
@@ -1256,7 +1573,15 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
           | Error ds ->
               err ?meta ~code:"E0805" "%s" (String.concat "; " (List.map Diag.to_cause_string ds))))
 
-and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
+(* A structured instance refusal found inside unification is reported at the innermost expression
+   being inferred, with its own code, past every relabeling handler (design §9 A1.8). *)
+and infer ?immediate_transformer ctx env ~ambient ~required (e : Kernel.expr) : ty =
+  if ctx.instances = [] then infer_expr ?immediate_transformer ctx env ~ambient ~required e
+  else
+    try infer_expr ?immediate_transformer ctx env ~ambient ~required e
+    with Types.Instance_refusal (code, detail) -> err ~meta:e.Kernel.meta ~code "%s" detail
+
+and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
   let meta = e.Kernel.meta in
   match e.Kernel.it with
@@ -1274,6 +1599,12 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
         | Some scheme -> instantiate ~level:ctx.level scheme
         | None -> snd env.group.(i)
       else err ~meta ~code:"E0805" "groupref %d outside its group" i
+  | Kernel.Ref (h, Kernel.Term) when Option.is_some (scoped_registration ctx h) ->
+      (* a direct call is the checker form below; any other reference would forward a callback
+         past the scope's non-escape check (design §4) *)
+      err ~meta ~code:"E0831"
+        "%s is a scoped combinator: call it directly with a literal one-parameter lambda"
+        (Option.value ~default:"this reference" (Meta.name meta))
   | Kernel.Ref (h, Kernel.Term) -> instantiate ~level:ctx.level (term_scheme ctx ~meta h)
   | Kernel.Ref (h, Kernel.Con) -> instantiate ~level:ctx.level (con_scheme ctx ~meta h)
   | Kernel.Ref (h, Kernel.Op) -> instantiate ~level:ctx.level (op_scheme ctx ~meta h)
@@ -1284,6 +1615,11 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
       let lam_ambient = ref (open_row ctx.level []) in
       let body_ty = infer ctx env' ~ambient:lam_ambient ~required:empty_row body in
       TArrow (param_tys, !lam_ambient, body_ty)
+  | Kernel.App (({ Kernel.it = Kernel.Ref (h, Kernel.Term); _ } as fn), args)
+    when Option.is_some (scoped_registration ctx h) ->
+      infer_scoped ctx env ~ambient ~required ~meta ~callee:(Meta.name fn.Kernel.meta)
+        (Option.get (scoped_registration ctx h))
+        args
   | Kernel.App (fn, args) -> (
       let fn_ty =
         if
@@ -1458,6 +1794,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           let vty = infer ctx env ~ambient ~required value in
           ctx.level <- ctx.level - 1;
           close_lonely_rows ~gen_level:ctx.level vty;
+          check_determinacy ctx ~meta { ty = vty; gen_level = ctx.level };
           let env' =
             {
               env with
@@ -1492,6 +1829,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           unify_or ctx ~meta ~what:"recursive binding" fty vty;
           ctx.level <- ctx.level - 1;
           close_lonely_rows ~gen_level:ctx.level fty;
+          check_determinacy ctx ~meta { ty = fty; gen_level = ctx.level };
           let env' =
             {
               env with
@@ -1530,6 +1868,10 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
             match oc.Kernel.op with
             | Kernel.Hashed h -> (
                 match locate ctx h with
+                | Ok { Store.decl_hash; role = Store.Operation _; _ }
+                  when registered_instance_effect ctx decl_hash ->
+                    err ~meta:oc.Kernel.ometa ~code:"E0834"
+                      "an instance operation is handled only by its scoped combinator"
                 | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some (decl_hash, h)
                 | _ -> err ~meta:oc.Kernel.ometa ~code:"E0805" "op clause is not an operation")
             | Kernel.Named n -> err ~meta:oc.Kernel.ometa ~code:"E0811" "unresolved op `%s`" n)
@@ -1578,6 +1920,8 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
           effects =
             List.filter (fun eff -> not (List.exists (Hash.equal eff) handled)) solved_body.effects;
           payloads = List.filter (fun (hash, _) -> not (List.mem hash handled)) solved_body.payloads;
+          (* a language handler never handles an instance entry (A1.2): it continues outward *)
+          instances = solved_body.instances;
           tail = solved_body.tail;
         }
       in
@@ -1707,7 +2051,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
   | Kernel.Unquote _ -> err ~meta ~code:"E0805" "unquote outside quote reached the checker"
   | Kernel.Ann (subject, ann) ->
       let cenv = { mode = Rigid; tvs = []; rvs = [] } in
-      let expected = conv_ty ctx cenv ann in
+      let expected = elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann) in
       let actual = infer ~immediate_transformer ctx env ~ambient ~required subject in
       (try Types.unify expected actual
        with Unify_error detail ->
@@ -1719,6 +2063,100 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
            ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)" (show_ty ctx expected)
            (show_ty ctx actual) detail);
       expected
+
+(** [infer_scoped] is the checker form of a scoped instance combinator (design §9 A1.7), for the
+    State shape of slice 1: [(init, fn (c) -> body)]. The initializer is inferred in the caller's
+    ambient; the body is checked as a lambda body with empty handler requirements, its capability
+    carrying a rigid label minted for this call; exactly the entries of that instance are
+    subtracted; the caller's handler requirements apply to the outward row before it is included;
+    and the label must not escape (E0832). *)
+and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instance_registration)
+    args =
+  let refuse fmt = err ~meta ~code:"E0831" fmt in
+  let init, callback =
+    match args with
+    | [ init; callback ] when registration.callback_position = 1 -> (init, callback)
+    | _ -> refuse "a scoped combinator takes an initial value and a literal callback"
+  in
+  let param, body, annotation =
+    match callback.Kernel.it with
+    | Kernel.Lam ([ param ], body) -> (param, body, None)
+    | Kernel.Ann ({ Kernel.it = Kernel.Lam ([ param ], body); _ }, annotation) ->
+        (param, body, Some annotation)
+    | _ -> refuse "the callback of a scoped combinator must be a literal one-parameter lambda"
+  in
+  let init_ty = infer ctx env ~ambient ~required init in
+  let label_id = fresh_id () in
+  let label = TLabel (label_id, "scope") in
+  let capability = TCon (registration.capability, [ label; init_ty ]) in
+  let param_ty, bindings = infer_pat ctx param in
+  unify_or ctx ~meta:callback.Kernel.meta ~what:"scoped callback parameter" param_ty capability;
+  let body_ambient = ref (open_row ctx.level []) in
+  let body_ty = infer ctx (bind_all bindings env) ~ambient:body_ambient ~required:empty_row body in
+  Option.iter
+    (fun annotation ->
+      let cenv = { mode = Rigid; tvs = []; rvs = [] } in
+      let expected =
+        elaborate_instance_rows ctx ~meta:annotation.Kernel.meta (conv_ty ctx cenv annotation)
+      in
+      let actual = TArrow ([ param_ty ], !body_ambient, body_ty) in
+      try Types.unify expected actual
+      with Unify_error detail ->
+        err ~meta:callback.Kernel.meta ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)"
+          (show_ty ctx expected) (show_ty ctx actual) detail)
+    annotation;
+  let solved = repr_row !body_ambient in
+  let own, others =
+    List.partition
+      (fun (entry : instance) ->
+        Hash.equal entry.effect_id registration.instance_effect && same_label entry.label label)
+      solved.instances
+  in
+  List.iter
+    (fun (entry : instance) ->
+      match entry.payload with
+      | [ payload ] -> unify_or ctx ~meta ~what:"instance payload" init_ty payload
+      | _ -> err ~meta ~code:"E0801" "instance payload arity mismatch")
+    own;
+  let outward = { solved with instances = others } in
+  ctx.tier_apps <- (outward, Tier.KFn) :: ctx.tier_apps;
+  Option.iter
+    (fun name ->
+      List.iter
+        (fun h ->
+          if not (List.mem_assoc h ctx.origins) then ctx.origins <- (h, name) :: ctx.origins)
+        outward.effects)
+    callee;
+  (try
+     Types.require_effects ~payloads:required.payloads ~level:ctx.level required.effects outward;
+     ambient := Types.include_rows ~sub:outward ~into:!ambient
+   with Unify_error detail ->
+     err ~meta ~code:"E0801" "effect row mismatch at this scope (%s)" detail);
+  let escape where =
+    err ~meta ~code:"E0832" "the instance opened here escapes its scope through %s" where
+  in
+  if mentions_label label_id body_ty then escape "the scope's result";
+  if row_mentions_label label_id outward then escape "the scope's effects";
+  if row_mentions_label label_id !ambient then escape "the caller's effects";
+  if List.exists (fun (_, args) -> List.exists (mentions_label label_id) args) required.payloads
+  then escape "an enclosing handler's payload";
+  SMap.iter
+    (fun name (scheme : scheme) ->
+      if mentions_label label_id scheme.ty then
+        escape (Printf.sprintf "the enclosing variable `%s`" name))
+    env.vars;
+  Array.iter
+    (fun (name, ty) ->
+      if mentions_label label_id ty then
+        escape (Printf.sprintf "the type of `%s` in its definition group" name))
+    env.group;
+  Array.iter
+    (function
+      | Some (scheme : scheme) when mentions_label label_id scheme.ty ->
+          escape "a definition group's signature"
+      | _ -> ())
+    env.group_schemes;
+  body_ty
 
 (* ------------------------------------------------------------------ *)
 (* Declarations (W3.3)                                                 *)
@@ -1741,7 +2179,10 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       List.iter
         (fun (c : Kernel.conspec) ->
           List.iter
-            (fun (fl : Kernel.field) -> ignore (conv_decl_ty ctx cenv ~self fl.Kernel.fty))
+            (fun (fl : Kernel.field) ->
+              ignore
+                (elaborate_instance_rows ctx ~meta:fl.Kernel.fty.Kernel.meta
+                   (conv_decl_ty ctx cenv ~self fl.Kernel.fty)))
             c.Kernel.fields)
         cons
   | Kernel.DefEffect { ename; evars; ops } ->
@@ -1761,10 +2202,17 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       List.iter
         (fun (o : Kernel.opspec) ->
           let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
-          List.iter
-            (fun p -> ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self p))
-            o.Kernel.op_params;
-          ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result))
+          let params =
+            List.map
+              (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self)
+              o.Kernel.op_params
+          in
+          let result =
+            conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result
+          in
+          (* the operation is the arrow enclosing its parameter and result types (A1.5) *)
+          ignore
+            (elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result))))
         ops
   | Kernel.DefTerm _ -> ()
 
@@ -1798,7 +2246,8 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                 match b.Kernel.annot with
                 | Some ann ->
                     let cenv = { mode = Flexible; tvs = []; rvs = [] } in
-                    (b.Kernel.bname, conv_ty ctx cenv ann)
+                    ( b.Kernel.bname,
+                      elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann) )
                 | None -> (b.Kernel.bname, new_tvar ctx.level))
               bindings
           in
@@ -1816,7 +2265,7 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                   (* the binding BODY itself must be effect-free (its value's effects live on
                  arrows): a non-lambda effectful body would otherwise type as pure and give
                  `check --manifest` a false pass (review finding) *)
-                  (match (repr_row !ambient).effects with
+                  (match effect_identities (repr_row !ambient) with
                   | [] -> ()
                   | h :: _ ->
                       err ~meta:b.Kernel.bmeta ~code:"E0815"
@@ -1828,8 +2277,10 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                       (* Check the declared polymorphism on a fresh instance, then retain the inferred
                      payload relationships in the flexible exported signature. The source row
                      spelling alone cannot express those relationships. *)
-                      let cenv = { mode = Rigid; tvs = []; rvs = [] } in
-                      let rigid = conv_ty ctx cenv ann in
+                      let cenv = { mode = Proof; tvs = []; rvs = [] } in
+                      let rigid =
+                        elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann)
+                      in
                       let proof =
                         instantiate ~level:ctx.level { ty = vty; gen_level = saved_level }
                       in
@@ -1860,6 +2311,8 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                 (fun i ->
                   let ty = snd group.(i) in
                   close_lonely_rows ~gen_level:saved_level ty;
+                  check_determinacy ctx ~meta:binding_array.(i).Kernel.bmeta
+                    { ty; gen_level = saved_level };
                   group_schemes.(i) <- Some { ty; gen_level = saved_level })
                 component)
             (definition_components bindings);
@@ -1918,7 +2371,9 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
                ( Canon.con_hash decl_hash i,
                  c.Kernel.con_name,
                  List.map
-                   (fun (fl : Kernel.field) -> conv_decl_ty ctx cenv ~self fl.Kernel.fty)
+                   (fun (fl : Kernel.field) ->
+                     elaborate_instance_rows ctx ~meta:fl.Kernel.fty.Kernel.meta
+                       (conv_decl_ty ctx cenv ~self fl.Kernel.fty))
                    c.Kernel.fields ))
              cons)
     | _ ->
@@ -2291,6 +2746,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           tier_apps = [];
           tier_ops = [];
           recovery_decls = [];
+          instances = [];
         }
   | Error ds, _, _, _, _, _
   | _, Error ds, _, _, _, _
@@ -2331,6 +2787,11 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
                 infer ctx empty_env ~ambient ~required:empty_row e)
           in
           close_lonely_rows ~gen_level:ctx.level ty;
+          check_determinacy ctx ~meta:e.Kernel.meta { ty; gen_level = ctx.level };
+          (* no instance entry or label may remain in the row, even inside a payload (A1.6) *)
+          if row_holds_instances !ambient then
+            err ~meta:e.Kernel.meta ~code:"E0830"
+              "this top-level expression performs an instance operation that no scope here opens";
           {
             names = [ ("_", { ty; gen_level = ctx.level }) ];
             row = Some (repr_row !ambient);
@@ -2392,6 +2853,13 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
   with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Types.Instance_refusal (code, detail) ->
+      let meta =
+        match top with
+        | Kernel.Expr expression -> expression.meta
+        | Kernel.Decl declaration -> declaration.meta
+      in
+      Error [ instance_refusal ~meta code detail ]
   | exception Unify_error detail ->
       let meta =
         match top with
@@ -2452,6 +2920,8 @@ module Recovery = struct
       tier_apps = [];
       tier_ops = [];
       recovery_decls = [];
+      (* a recovery check enforces the same instance registration as its base *)
+      instances = base.instances;
     }
 
   (** [register_decl ctx decl] adds a cleanly lowered type or effect declaration of the analyzed
@@ -2524,6 +2994,7 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match term_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 (** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
@@ -2531,6 +3002,7 @@ let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match con_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
+  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
@@ -2542,6 +3014,7 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
     match thunk () with
     | value -> Ok value
     | exception Err diagnostic -> Error [ diagnostic ]
+    | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
     | exception Unify_error detail -> Error [ payload_conflict detail ]
   in
   match Store.locate ctx.store h with
@@ -2568,7 +3041,7 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
 let show_row ctx (r : row) : string =
   let r = repr_row r in
   let named =
-    r.effects
+    effect_identities r
     |> List.map (fun identity -> (name_of ctx identity, identity))
     |> List.sort (fun (name_a, hash_a) (name_b, hash_b) ->
         match String.compare name_a name_b with 0 -> Hash.compare hash_a hash_b | order -> order)
@@ -2631,7 +3104,7 @@ let manifest_errors ctx ?(grantable = []) ~(granted : Hash.t list) (row : row) :
              ~cause:
                (Printf.sprintf "This program requires %s, which is not granted%s." requirement via)
              ~next_step:hint ~contrast:None ()))
-    row.effects
+    (effect_identities row)
 
 (** Registry of every diagnostic code the checker can emit (W3.7's coverage check keys on this list;
     codes are never reused or renumbered). *)
@@ -2654,6 +3127,13 @@ let checker_codes : (string * string) list =
     ("E0817", "once resumption escapes its affine handler-clause scope");
     ("E0818", "polymorphic reuse of a non-value local binding (value restriction)");
     ("E0819", "opaque Secret used by generic inspection or serialization");
+    ("E0830", "undetermined instance row: no capability determines an instance's label");
+    ("E0831", "scoped instance combinator outside its checker form");
+    ("E0832", "instance escapes its scope");
+    ("E0833", "instance operation in a fresh-continuation callback");
+    ("E0834", "user handler clause for an instance operation");
+    ("E0835", "capability constructed or taken apart");
+    ("E0836", "capability type stored in a nominal declaration or operation signature");
     ("W0801", "redundant match clause");
     ("W1206", "labeled API called with a positional Bool constructor literal");
     ("W1207", "labeled API called across a definite repeated-type positional parameter run");

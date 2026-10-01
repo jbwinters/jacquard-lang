@@ -1,7 +1,10 @@
 # TS.1 Scoped, Parameterized Effect Instances
 
-- Status: design with an executable model; no language change is made by this
-  document. Implementation is TS.2 (task 211).
+- Status: design with an executable model. Implementation is TS.2 (task 211).
+  Slice 1, the checker (§8, §9 A1.10), is implemented and checked by
+  `test/test_scoped_instances_checker.ml`; it registers the instance
+  declarations on test checker contexts only, so production programs are
+  unchanged. Slices 2 to 4 remain.
 - Date: 2026-09-24
 - Base: `main` after TS.0 (effect-payload containment, PR #112).
 - Model: `test/scoped_instances_model.ml`, checked by
@@ -351,7 +354,8 @@ DECISION.md`); TS.2 uses:
 Slice 1 adds these to `checker_codes`, the checker's summary and next-step
 tables, `docs/errors.md`, and the diagnostic goldens (the CAP.0 reservation of
 E0820/E0821 exists only in its decision document). Refusals that are ordinary
-type mismatches keep the existing codes: E0801 at an application, E0804 at an
+type mismatches keep the existing codes: E0801 at an application or a branch
+join, E0804 at an
 annotation or in a rigid signature proof (the L1 cases, L3's first case, and
 A1.9's choice and rank-1 cases).
 
@@ -443,9 +447,9 @@ language handler frames, so an instance operation performed there would never
 reach its scope's handler. The callback row of each carries a persistent "no
 instance entries" flag on its row variable:
 
-- `async.spawn`'s child (round_robin.ml, the dependent operation scheme);
-- the body of `async.scope` (round_robin.ml; its result row shares the body's
-  tail);
+- `async.spawn`'s child (check.ml, the frozen operation scheme);
+- the body of `async.scope` (prelude.ml, its builtin signature; its result row
+  shares the body's tail);
 - the thunks of `dist.sample-lw` and `dist.sample-lw-weights-v1`
   (prelude.ml, one shared signature).
 
@@ -454,11 +458,12 @@ Audited and needing no flag: every resumption of a captured continuation
 drivers) keeps its frames; top-level entry points (host worker invocations,
 command drivers, Warp discovery, posterior builtins that take a closed model by
 hash) run where no live capability or undetermined label exists (A1.6); Warp's
-case, prop and variation fields have closed rows and its `VaryWorld` subject is
+`wcase`, prop and variation fields have closed rows and its `VaryWorld` subject is
 invoked only under handlers with closed empty rows, so no instance entry can
 reach them; the `eval-code` root handler is unchecked evaluation (A1.2).
-Slice 1 records this audit and rechecks it for any new trusted builtin. Binding a flagged row variable to a row containing an
-instance entry fails with E0833 (binding it to a closed or rigid tail is
+Slice 1 records this audit and rechecks it for any new trusted builtin.
+Binding a flagged row variable to a row containing an instance entry fails
+with E0833 (binding it to a closed or rigid tail is
 allowed, see below); the flag passes to the new tail of any bound
 row and is OR-ed when two row variables are unified; instantiation and cloning
 keep it. A flagged variable may be bound to a rigid tail during a rigid

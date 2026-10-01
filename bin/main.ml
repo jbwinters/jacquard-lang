@@ -346,7 +346,7 @@ let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_
                 (if dry_run then
                    let r = Types.repr_row (Option.value row ~default:Types.empty_row) in
                    match eval_hash with
-                   | Some eh when List.exists (Hash.equal eh) r.Types.effects ->
+                   | Some eh when List.exists (Hash.equal eh) (Types.effect_identities r) ->
                        raise
                          (Invalid_argument
                             "--dry-run cannot sandbox eval: eval'd code runs at root authority and \
@@ -2978,7 +2978,7 @@ let native_build ~store ~prelude ~cache_root ~out tops =
                       Check.manifest_errors cctx2 ~grantable:Prelude.grantable_names ~granted:[] r
                     in
                     let manifest =
-                      List.map2 (fun h d -> (h, Diag.to_string d)) r.Types.effects msgs
+                      List.map2 (fun h d -> (h, Diag.to_string d)) (Types.effect_identities r) msgs
                     in
                     Some ((e, List.map Diag.to_string warnings, manifest) :: acc)))
           (Some []) tops

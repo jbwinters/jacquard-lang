@@ -1512,9 +1512,10 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
     | Ok scope_h, Some async_h, Some task_result_h ->
         let level = 1 in
         let value = Types.new_tvar level in
-        let tail = Types.new_rvar level in
-        let child_row = Types.{ effects = [ async_h ]; payloads = []; tail } in
-        let result_row = Types.{ effects = []; payloads = []; tail } in
+        (* the body runs on a fresh continuation: no instance entry may reach it (A1.4) *)
+        let tail = Types.new_rvar ~lacks_instances:true level in
+        let child_row = Types.{ effects = [ async_h ]; payloads = []; instances = []; tail } in
+        let result_row = Types.{ effects = []; payloads = []; instances = []; tail } in
         let thunk = Types.TArrow ([], child_row, value) in
         let result = Types.TCon (task_result_h, [ value ]) in
         Ok
@@ -1776,18 +1777,26 @@ let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t
         | Error _ -> None
         | Ok dist_eff ->
             let av = a () in
-            let e = Types.new_rvar 1 in
+            (* the thunk runs on a fresh continuation per sample: no instance entry (A1.4) *)
+            let e = Types.new_rvar ~lacks_instances:true 1 in
             Some
               {
                 Types.ty =
                   Types.TArrow
                     ( [
                         Types.TArrow
-                          ([], { Types.effects = [ dist_eff ]; payloads = []; tail = e }, av);
+                          ( [],
+                            {
+                              Types.effects = [ dist_eff ];
+                              payloads = [];
+                              instances = [];
+                              tail = e;
+                            },
+                            av );
                         int_ty;
                         int_ty;
                       ],
-                      { Types.effects = []; payloads = []; tail = e },
+                      { Types.effects = []; payloads = []; instances = []; tail = e },
                       Types.TCon (list_h, [ Types.TCon (pair_h, [ av; real_ty ]) ]) );
                 gen_level = 0;
               }

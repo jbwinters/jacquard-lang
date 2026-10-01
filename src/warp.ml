@@ -293,7 +293,7 @@ let world_required (cctx : Check.ctx) (store : Store.t) : Hash.t list =
               in
               List.filter
                 (fun h -> match check_h with Some c -> not (Hash.equal h c) | None -> true)
-                row.Types.effects
+                (Types.effect_identities row)
           | _ -> [])
       | _ -> [])
 

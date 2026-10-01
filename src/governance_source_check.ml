@@ -477,7 +477,7 @@ let rec has_only_closed_rows ty =
       (Types.repr_row row).Types.tail = Types.RClosed
       && has_only_closed_rows parameter && has_only_closed_rows result
   | Types.TExactThunk inner -> has_only_closed_rows inner
-  | Types.TVar _ | Types.TSkolem _ -> true
+  | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ -> true
 
 let expected_root_effects = function
   | Live_root | Forwarded_live_root _ ->
@@ -497,7 +497,7 @@ let validate_root_shape checker root shape =
   | Ok scheme when has_only_closed_rows scheme.Types.ty -> (
       match Types.repr scheme.Types.ty with
       | Types.TArrow (_, row, _) ->
-          let actual = (Types.repr_row row).Types.effects in
+          let actual = Types.effect_identities (Types.repr_row row) in
           let expected = List.sort_uniq Hash.compare (expected_root_effects shape) in
           if actual = expected then []
           else

@@ -574,7 +574,7 @@ let encode_boundary_type ~budget ty =
         let* items = map_result encode items in
         Ok (`Assoc [ ("items", `List items); ("kind", `String "tuple") ])
     | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
-    | Types.TSkolem _ ->
+    | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1604"
           "The Core type contains an arrow, resumption, exact thunk, or unresolved variable."
   in
@@ -770,7 +770,7 @@ let boundary_type_supported ty =
     | Types.TCon (_, arguments) -> check_all arguments
     | Types.TTuple items -> check_all items
     | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
-    | Types.TSkolem _ ->
+    | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1604"
           "A checked boundary contract contains a nested callable or unresolved type."
   and check_all = function
@@ -809,7 +809,7 @@ let validate_target checker callable =
     map_error ~code:"E1603" "The selected target closure does not pass strict checking."
       (Check.force_term checker callable)
   in
-  let quantified_types, quantified_rows = Types.quantified scheme in
+  let quantified_types, quantified_rows = Types.quantified ~walk:`Boundary scheme in
   if quantified_types <> [] || quantified_rows <> [] then
     error ~code:"E1603" "The selected target is polymorphic rather than one closed invocation."
   else
@@ -824,9 +824,9 @@ let validate_target checker callable =
         in
         let* () = map_result boundary_type_supported parameters |> Result.map (fun _ -> ()) in
         let* () = boundary_type_supported result in
-        Ok (parameters, row.Types.effects, result)
+        Ok (parameters, Types.effect_identities row, result)
     | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _
-    | Types.TVar _ | Types.TSkolem _ ->
+    | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
         error ~code:"E1603" "The selected stored term is not one callable arrow."
 
 let parse_hash_list ~budget ~context ~maximum json =
@@ -908,9 +908,7 @@ let validate_argument_value checker ~expected value =
         let constructor_type = Types.instantiate ~level:0 scheme in
         let fields, result =
           match Types.repr constructor_type with
-          | Types.TArrow (fields, row, result)
-            when (Types.repr_row row).Types.effects = []
-                 && match (Types.repr_row row).Types.tail with Types.RClosed -> true | _ -> false ->
+          | Types.TArrow (fields, row, result) when Types.is_closed_pure (Types.repr_row row) ->
               (fields, result)
           | ty -> ([], ty)
         in
@@ -920,7 +918,7 @@ let validate_argument_value checker ~expected value =
           let* () =
             match Types.unify result expected with
             | () -> Ok ()
-            | exception Types.Unify_error _ ->
+            | exception (Types.Unify_error _ | Types.Instance_refusal _) ->
                 mismatch "A constructor argument disagrees with its nominal parameter type."
           in
           let* () = map_result boundary_type_supported fields |> Result.map (fun _ -> ()) in
@@ -989,7 +987,9 @@ let validate_operation checker ~effects entry =
     else if contract.Check.mode <> Kernel.Once then
       error ~code:"E1605" "An operation registry entry names a non-once operation."
     else
-      let quantified_types, quantified_rows = Types.quantified contract.Check.scheme in
+      let quantified_types, quantified_rows =
+        Types.quantified ~walk:`Boundary contract.Check.scheme
+      in
       if quantified_types <> [] || quantified_rows <> [] then
         error ~code:"E1604" "A configured operation has a polymorphic boundary signature."
       else
@@ -1005,7 +1005,7 @@ let validate_operation checker ~effects entry =
                 result;
               }
         | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _
-        | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ ->
+        | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
             error ~code:"E1604" "A configured operation does not have one first-order arrow."
 
 let parse_capabilities ~budget checker ~interface_effects = function

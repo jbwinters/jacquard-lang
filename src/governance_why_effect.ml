@@ -145,7 +145,7 @@ let rec contains_callable ty =
   | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ -> true
   | Types.TCon (_, arguments) | Types.TTuple arguments -> List.exists contains_callable arguments
   | Types.TExactThunk inner -> contains_callable inner
-  | Types.TVar _ | Types.TSkolem _ -> true
+  | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ -> true
 
 let safe_external_leaf checker ~requested hash =
   match Check.force_term checker hash with
@@ -159,11 +159,11 @@ let safe_external_leaf checker ~requested hash =
                 (List.exists
                    (fun row_effect ->
                      Hash.equal row_effect workspace.hash || Hash.equal row_effect requested.hash)
-                   row.effects))
+                   (Types.effect_identities row)))
           && (not (List.exists contains_callable parameters))
           && not (contains_callable result)
       | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _
-      | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ ->
+      | Types.TExactThunk _ | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
           false)
 
 let chain_key chain =

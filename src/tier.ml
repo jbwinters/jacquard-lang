@@ -44,7 +44,8 @@ type app_kind = KCon | KOp | KFn
 
 let classify_row (r : row) : arrow_tier =
   let r = repr_row r in
-  match (r.effects, r.tail) with
+  (* an instance entry is an effect (design §9 A1.8): a row of entries only is never pure *)
+  match (effect_identities r, r.tail) with
   | [], RClosed -> Pure
   | [], _ -> RowPoly
   | effects, RClosed -> Effectful { effects; opened = false }

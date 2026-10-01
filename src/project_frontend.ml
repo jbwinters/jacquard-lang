@@ -1252,7 +1252,8 @@ let check_entry ?on_lint ?(on_warning = ignore) session (entry : Project_manifes
         let* { Check.row; warnings; _ } = Check.check_top session.checker top in
         List.iter on_warning warnings;
         (match (top, row) with
-        | Kernel.Expr _, Some row -> effects := (Types.repr_row row).Types.effects @ !effects
+        | Kernel.Expr _, Some row ->
+            effects := Types.effect_identities (Types.repr_row row) @ !effects
         | _ -> ());
         Ok ())
       ~on_installed:(fun _ { Canon.decl_hash; named } ->

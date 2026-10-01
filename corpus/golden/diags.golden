@@ -85,6 +85,27 @@ secret-generic-inspection | secret-generic-inspection.jqd:1:1-100: error[E0819]:
 redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: This match clause is redundant
   Cause: Earlier clauses match every value this clause can match.
   Next step: Remove the redundant clause or narrow an earlier pattern.
+instance-undetermined | instance-undetermined.jqd:1:58-108: error[E0830]: An instance row is undetermined
+  Cause: the annotation names instance effect state-instance but no capability parameter determines its instance
+  Next step: Pass the capability that determines the instance, or leave the row unannotated.
+instance-scoped-outside-form | instance-scoped-outside-form.jqd:1:1-33: error[E0831]: A scoped instance combinator is used outside its checker form
+  Cause: a scoped combinator takes an initial value and a literal callback
+  Next step: Call the scoped combinator directly with a literal one-parameter lambda.
+instance-escape | instance-escape.jqd:1:1-58: error[E0832]: An instance escapes its scope
+  Cause: the instance opened here escapes its scope through the scope's result
+  Next step: Use the capability only inside its scope; return or store values read from it.
+instance-fresh-continuation | instance-fresh-continuation.jqd:1:57-116: error[E0833]: An instance operation would run in a fresh-continuation callback
+  Cause: an instance operation cannot run in a callback that runs on a fresh continuation (async.spawn, async.scope or dist.sample-lw)
+  Next step: Read the value inside the scope and pass the value, not the capability's operation.
+instance-user-clause | instance-user-clause.jqd:1:75-127: error[E0834]: A user handler cannot handle an instance operation
+  Cause: an instance operation is handled only by its scoped combinator
+  Next step: Use the instance's scoped combinator; user handlers handle ambient effects only.
+instance-capability-forged | instance-capability-forged.jqd:1:1-23: error[E0835]: A capability cannot be constructed or taken apart
+  Cause: a capability can only be obtained from its scoped combinator
+  Next step: Obtain a capability from its scoped combinator.
+instance-capability-stored | instance-capability-stored.jqd:1:38-72: error[E0836]: A capability type cannot be stored in a declaration
+  Cause: a capability type cannot be stored in this declaration
+  Next step: Carry a capability through a type parameter instead of a fixed field type.
 eta-positive | eta-positive.jac:2:21-30: error[E0807]: A computation was used where a thunk is required
   Cause: this position expects a thunk, but `condition` is a bare reference; wrap it in `fn () -> ...`
   Next step: Wrap the reference in `fn () -> ...` so the computation is delayed.
