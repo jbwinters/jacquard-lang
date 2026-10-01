@@ -433,8 +433,10 @@ let test_payload_constraints () =
    normalization, and the fresh-continuation flag. Capabilities are a nominal [cap] here. *)
 let cap = Hash.of_string "capability"
 let capability label payload = TCon (cap, [ label; payload ])
-let entry label payload = { effect = ha; label; payload = [ payload ] }
-let instance_row ?(tail = RClosed) entries = { effects = []; payloads = []; instances = entries; tail }
+let entry label payload = { effect_id = ha; label; payload = [ payload ] }
+
+let instance_row ?(tail = RClosed) entries =
+  { effects = []; payloads = []; instances = entries; tail }
 
 let test_instance_entries () =
   let i = TLabel (fresh_id (), "i") and j = TLabel (fresh_id (), "j") in
@@ -447,18 +449,21 @@ let test_instance_entries () =
   let alpha = new_tvar 0 in
   Alcotest.(check int)
     "distinct labels stay distinct" 3
-    (List.length (repr_row (instance_row [ entry i t_int; entry j t_text; entry alpha t_int ])).instances);
+    (List.length
+       (repr_row (instance_row [ entry i t_int; entry j t_text; entry alpha t_int ])).instances);
   (* a closed row cannot absorb another label's entry; an open row can *)
   Alcotest.(check bool)
     "closed rows with different labels differ" false
-    (unifies (fun () -> unify_rows (instance_row [ entry i t_int ]) (instance_row [ entry j t_int ])));
+    (unifies (fun () ->
+         unify_rows (instance_row [ entry i t_int ]) (instance_row [ entry j t_int ])));
   Alcotest.(check bool)
     "an open row absorbs a distinct entry" true
     (unifies (fun () ->
          unify_rows (instance_row [ entry i t_int ]) (instance_row ~tail:(new_rvar 0) [])));
   Alcotest.(check bool)
     "identical entries across rows must agree on payloads" false
-    (unifies (fun () -> unify_rows (instance_row [ entry i t_int ]) (instance_row [ entry i t_text ])))
+    (unifies (fun () ->
+         unify_rows (instance_row [ entry i t_int ]) (instance_row [ entry i t_text ])))
 
 let test_instance_fixpoint () =
   (* merging the last pair identifies alpha and beta, exposing the first pair's conflict; every
@@ -487,8 +492,8 @@ let test_instance_fixpoint () =
         (unifies (fun () -> ignore (repr_row (instance_row order)))))
     (permutations [ 0; 1; 2; 3 ]
     |> List.map (fun order ->
-           let all = entries () in
-           List.map (List.nth all) order));
+        let all = entries () in
+        List.map (List.nth all) order));
   (* duplicates split across a linked tail merge too *)
   let i = TLabel (fresh_id (), "i") in
   let tail = new_rvar 0 in
@@ -534,7 +539,9 @@ let test_label_sort () =
   let copy = instantiate ~level:1 { ty = TTuple [ new_label_var 2 ]; gen_level = 1 } in
   match repr copy with
   | TTuple [ label ] ->
-      Alcotest.(check bool) "an instantiated label is a label" false (unifies (fun () -> unify label t_int))
+      Alcotest.(check bool)
+        "an instantiated label is a label" false
+        (unifies (fun () -> unify label t_int))
   | _ -> Alcotest.fail "unexpected instantiation"
 
 let test_instance_payload_occurs () =
@@ -547,7 +554,7 @@ let test_instance_payload_occurs () =
       instances =
         [
           {
-            effect = ha;
+            effect_id = ha;
             label = TLabel (fresh_id (), "l");
             payload = [ TArrow ([], { empty_row with tail }, TTuple []) ];
           };
@@ -568,7 +575,7 @@ let test_instance_payload_occurs () =
             {
               effects = [];
               payloads = [];
-              instances = [ { effect = ha; label; payload = [ payload ] } ];
+              instances = [ { effect_id = ha; label; payload = [ payload ] } ];
               tail = RClosed;
             },
             TTuple [] );
@@ -647,7 +654,8 @@ let test_fresh_continuation_flag () =
     (match clone_schemes [ mono arrow ] with [ s ] -> flagged_tail s.ty | _ -> false);
   (* an instance entry displays as its effect, once *)
   let shown =
-    show ~name_of:(fun _ -> "E")
+    show
+      ~name_of:(fun _ -> "E")
       (TArrow ([], instance_row [ entry i t_int; entry (TLabel (fresh_id (), "j")) t_text ], t_int))
   in
   Alcotest.(check string) "display" "() ->{E} E" shown

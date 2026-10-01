@@ -73,8 +73,10 @@ let test_operation_schemes () =
             (Hash.equal capability registration.capability);
           Alcotest.(check bool)
             "the entry is the instance effect" true
-            (Hash.equal entry.effect registration.instance_effect);
-          Alcotest.(check bool) "with the capability's label" true (Types.same_label label entry.label);
+            (Hash.equal entry.effect_id registration.instance_effect);
+          Alcotest.(check bool)
+            "with the capability's label" true
+            (Types.same_label label entry.label);
           Alcotest.(check bool)
             "and its payload, which is the result" true
             (match entry.payload with
@@ -107,7 +109,9 @@ let test_operation_schemes () =
   in
   match Types.repr (Types.instantiate ~level:1 same) with
   | Types.TArrow (_, row, _) ->
-      Alcotest.(check int) "one capability, one entry" 1 (List.length (Types.repr_row row).instances)
+      Alcotest.(check int)
+        "one capability, one entry" 1
+        (List.length (Types.repr_row row).instances)
   | _ -> Alcotest.fail "unexpected shape"
 
 let test_opacity_storage_and_handlers () =
@@ -126,13 +130,13 @@ let test_opacity_storage_and_handlers () =
     (code_of h "(defeffect leak () (op leak once ((tapp (tref state-ref) (tref int))) (ttuple)))");
   ignore
     (scheme_of h
-       "(defterm ((binding hold () (lam ((pvar c)) (app (var some) (lam () (app (var get-at) \
-        (var c))))))))");
+       "(defterm ((binding hold () (lam ((pvar c)) (app (var some) (lam () (app (var get-at) (var \
+        c))))))))");
   Alcotest.(check string)
     "a user handler clause for an instance operation is refused" "E0834"
     (code_of h
-       "(lam ((pvar c)) (handle (app (var get-at) (var c)) (ret (pvar x) (var x)) (opclause \
-        get-at ((pvar r)) k (app (var k) (lit 1)))))")
+       "(lam ((pvar c)) (handle (app (var get-at) (var c)) (ret (pvar x) (var x)) (opclause get-at \
+        ((pvar r)) k (app (var k) (lit 1)))))")
 
 let cap = "(tapp (tref state-ref) (tref int))"
 
@@ -147,8 +151,8 @@ let test_annotations () =
   let bump =
     scheme_of h
       (Printf.sprintf
-         "(defterm ((binding bump ((tarrow (%s) (row (eref state-instance)) (ttuple))) (lam ((pvar c)) \
-          (app (var put-at) (var c) (app (var get-at) (var c)))))))"
+         "(defterm ((binding bump ((tarrow (%s) (row (eref state-instance)) (ttuple))) (lam ((pvar \
+          c)) (app (var put-at) (var c) (app (var get-at) (var c)))))))"
          cap)
   in
   Alcotest.(check int) "the annotated bump has its capability's entry" 1 (entries_of bump);
@@ -161,14 +165,15 @@ let test_annotations () =
   ignore
     (scheme_of h
        (Printf.sprintf
-          "(defterm ((binding use ((tarrow ((tarrow () (row (eref state-instance)) (ttuple)) %s) (row \
-           (eref state-instance)) (ttuple))) (lam ((pvar k) (pvar c)) (app (var k))))))"
+          "(defterm ((binding use ((tarrow ((tarrow () (row (eref state-instance)) (ttuple)) %s) \
+           (row (eref state-instance)) (ttuple))) (lam ((pvar k) (pvar c)) (app (var k))))))"
           cap));
   ignore
     (scheme_of h
        (Printf.sprintf
-          "(defterm ((binding use-first ((tarrow (%s (tarrow () (row (eref state-instance)) (ttuple))) \
-           (row (eref state-instance)) (ttuple))) (lam ((pvar c) (pvar k)) (app (var k))))))"
+          "(defterm ((binding use-first ((tarrow (%s (tarrow () (row (eref state-instance)) \
+           (ttuple))) (row (eref state-instance)) (ttuple))) (lam ((pvar c) (pvar k)) (app (var \
+           k))))))"
           cap));
   ignore
     (scheme_of h
@@ -194,8 +199,8 @@ let test_annotations () =
   Alcotest.(check string)
     "a thunk-only annotation names no capability" "E0830"
     (code_of h
-       "(lam ((pvar c)) (ann (lam () (app (var get-at) (var c))) (tarrow () (row (eref state-instance)) \
-        (tref int))))");
+       "(lam ((pvar c)) (ann (lam () (app (var get-at) (var c))) (tarrow () (row (eref \
+        state-instance)) (tref int))))");
   Alcotest.(check string)
     "L3: a result-only capability is not among the parameters" "E0830"
     (code_of h
@@ -240,8 +245,8 @@ let test_scoped_form () =
   Alcotest.(check string)
     "a scope returns its body's result" "() ->{} Int"
     (Test_check.sig_of h
-       (defterm "count" (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var get-at) (var c))")))
-    );
+       (defterm "count"
+          (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var get-at) (var c))"))));
   (* the two-store program: each operation reaches its own instance and payload *)
   check_ok "two stores"
     (defterm "two"
@@ -254,7 +259,8 @@ let test_scoped_form () =
     "(defterm ((binding bump () (lam ((pvar c)) (app (var put-at) (var c) (app (var get-at) (var \
      c)))))))";
   check_ok "helper in a scope"
-    (defterm "use-bump" (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var bump) (var c))")));
+    (defterm "use-bump"
+       (Printf.sprintf "(lam () %s)" (scoped "(lit 0)" "(app (var bump) (var c))")));
   (* the initializer's effects charge the caller *)
   (match
      Test_check.check_src h
@@ -266,8 +272,10 @@ let test_scoped_form () =
       match Types.repr (Types.instantiate ~level:1 scheme) with
       | Types.TArrow (_, row, _) ->
           let row = Types.repr_row row in
-          Alcotest.(check int) "the initializer's effect is the caller's" 1 (List.length row.effects);
-          Alcotest.(check int) "and no instance entry leaves the scope" 0 (List.length row.instances)
+          Alcotest.(check int)
+            "the initializer's effect is the caller's" 1 (List.length row.effects);
+          Alcotest.(check int)
+            "and no instance entry leaves the scope" 0 (List.length row.instances)
       | _ -> Alcotest.fail "unexpected shape")
   | _ -> Alcotest.fail "noisy did not check");
   (* the payload is the initializer's type *)
@@ -303,7 +311,8 @@ let test_scoped_form () =
        "(handle %s (ret (pvar x) (var x)) (opclause emit ((pvar v)) k (app (var k) (tuple))))"
        (scoped "(lit 0)" "(app (var emit) (var c))"));
   e0832 "rank-2 callback (A1.9)"
-    (defterm "run" (Printf.sprintf "(lam ((pvar k)) %s)" (scoped "(lit 0)" "(app (var k) (var c))")));
+    (defterm "run"
+       (Printf.sprintf "(lam ((pvar k)) %s)" (scoped "(lit 0)" "(app (var k) (var c))")));
   e0832 "a non-value alias bound outside the scope (A1.9)"
     (defterm "alias"
        (Printf.sprintf
@@ -347,8 +356,8 @@ let test_scoped_form () =
     "choosing between live instances" "E0801"
     (code_of h (nested (Printf.sprintf "(app (var get-at) %s)" (choose "(var a)" "(var b)"))));
   check_ok "pair"
-    "(defterm ((binding pair () (lam ((pvar f) (pvar x) (pvar y)) (let nonrec (pwild) (app (var \
-     f) (var x)) (app (var f) (var y)))))))";
+    "(defterm ((binding pair () (lam ((pvar f) (pvar x) (pvar y)) (let nonrec (pwild) (app (var f) \
+     (var x)) (app (var f) (var y)))))))";
   Alcotest.(check string)
     "a rank-1 callback on two instances" "E0801"
     (code_of h (nested "(app (var pair) (var get-at) (var a) (var b))"));
@@ -419,9 +428,9 @@ let test_fresh_continuations () =
   (* the refusal keeps its own code where an ordinary row mismatch would be relabeled *)
   e0833 "an annotated spawn helper"
     (Printf.sprintf
-       "(defterm ((binding spawn-bump ((tarrow (%s) (row (eref state-instance) (eref async)) (ttuple))) \
-        (lam ((pvar c)) (let nonrec (pwild) (app (var async.spawn) (lam () (app (var put-at) (var \
-        c) (lit 1)))) (tuple))))))"
+       "(defterm ((binding spawn-bump ((tarrow (%s) (row (eref state-instance) (eref async)) \
+        (ttuple))) (lam ((pvar c)) (let nonrec (pwild) (app (var async.spawn) (lam () (app (var \
+        put-at) (var c) (lit 1)))) (tuple))))))"
        cap)
 
 let test_determinacy_and_consumers () =
@@ -495,7 +504,7 @@ let test_determinacy_and_consumers () =
       instances =
         [
           {
-            Types.effect = Instances_fixture.hash store Resolve.KEffect "state-instance";
+            Types.effect_id = Instances_fixture.hash store Resolve.KEffect "state-instance";
             label = Types.TLabel (Types.fresh_id (), "l");
             payload = [];
           };
@@ -503,7 +512,9 @@ let test_determinacy_and_consumers () =
       tail = Types.RClosed;
     }
   in
-  Alcotest.(check bool) "a row of entries only is not pure" false (Types.is_closed_pure instance_only);
+  Alcotest.(check bool)
+    "a row of entries only is not pure" false
+    (Types.is_closed_pure instance_only);
   Alcotest.(check bool)
     "nor in the tier classification" false
     (Tier.classify_row instance_only = Tier.Pure)

@@ -114,8 +114,8 @@ let register_builtin_signatures ctx signatures =
     operation is one of its operations, the capability type is a one-parameter type declaration, the
     scoped term is a term, and the callback position is 1 (slice 1 implements the State shape
     [(init, callback)]). Registration must happen before any affected signature is cached;
-    production contexts never register. It is a test-only API, so misuse raises
-    [Invalid_argument]. *)
+    production contexts never register. It is a test-only API, so misuse raises [Invalid_argument].
+*)
 let register_instances ctx registrations =
   let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
   let locate hash = Store.locate_internal ctx.store hash in
@@ -590,11 +590,11 @@ let conv_label ctx cenv =
   | Proof -> TLabel (fresh_id (), "l")
   | Rigid | Flexible -> new_label_var ctx.level
 
-(** [elaborate_instance_rows ctx ~meta ?enclosing ty] replaces each registered instance effect
-    named in a row of the converted annotation [ty] with one instance entry per capability of that
-    effect among the parameter types of the annotated arrow and of the arrows enclosing it within
-    [ty] ([enclosing] seeds the outermost), at any depth. A row naming an instance effect with no
-    such capability is refused (E0830), because nothing determines its label (design §9 A1.5). *)
+(** [elaborate_instance_rows ctx ~meta ?enclosing ty] replaces each registered instance effect named
+    in a row of the converted annotation [ty] with one instance entry per capability of that effect
+    among the parameter types of the annotated arrow and of the arrows enclosing it within [ty]
+    ([enclosing] seeds the outermost), at any depth. A row naming an instance effect with no such
+    capability is refused (E0830), because nothing determines its label (design §9 A1.5). *)
 let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
   if ctx.instances = [] then ty
   else
@@ -611,7 +611,7 @@ let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
                 args )
             with
             | Some r, label :: payload ->
-                found := { effect = r.instance_effect; label; payload } :: !found
+                found := { effect_id = r.instance_effect; label; payload } :: !found
             | _ -> ())
         | TTuple items -> List.iter walk items
         | TArrow (params, _, result) ->
@@ -632,14 +632,17 @@ let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
       else
         let entries =
           List.concat_map
-            (fun effect ->
+            (fun instance_effect ->
               match
-                List.filter (fun (entry : instance) -> Hash.equal entry.effect effect) enclosing
+                List.filter
+                  (fun (entry : instance) -> Hash.equal entry.effect_id instance_effect)
+                  enclosing
               with
               | [] ->
                   err ~meta ~code:"E0830"
-                    "the annotation names instance effect %s but no capability parameter determines its instance"
-                    (name_of ctx effect)
+                    "the annotation names instance effect %s but no capability parameter \
+                     determines its instance"
+                    (name_of ctx instance_effect)
               | entries -> entries)
             named
         in
@@ -702,16 +705,18 @@ let check_determinacy ctx ~meta (scheme : scheme) =
       List.iter (fun (_, args) -> List.iter walk args) row.payloads;
       List.iter
         (fun (entry : instance) ->
-          Option.iter (fun id -> entries := (id, entry.effect) :: !entries) (quantified entry.label);
+          Option.iter
+            (fun id -> entries := (id, entry.effect_id) :: !entries)
+            (quantified entry.label);
           List.iter walk entry.payload)
         row.instances
     in
     walk scheme.ty;
     match List.find_opt (fun (id, _) -> not (List.mem id !determined)) !entries with
-    | Some (_, effect) ->
+    | Some (_, instance_effect) ->
         err ~meta ~code:"E0830"
           "this definition performs %s on an instance that none of its capability types determines"
-          (name_of ctx effect)
+          (name_of ctx instance_effect)
     | None -> ()
   end
 
@@ -976,8 +981,7 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
           err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
             (List.length args);
         let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
-        if registered_capability ctx h then TCon (h, conv_label ctx cenv :: args)
-        else TCon (h, args)
+        if registered_capability ctx h then TCon (h, conv_label ctx cenv :: args) else TCon (h, args)
     | Kernel.TArrow (params, row, result) ->
         let converted_row = conv_row ctx cenv ~effectself row in
         TArrow
@@ -1003,8 +1007,8 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
 
 (** [check_decl_capability_storage] refuses (E0836) a capability type in a nominal field or a user
     effect operation signature, except in a registered instance effect's own operations: a fixed
-    field would hide the capability's label from non-escape. A capability carried by a declared
-    type parameter keeps its label visible and is allowed. *)
+    field would hide the capability's label from non-escape. A capability carried by a declared type
+    parameter keeps its label visible and is allowed. *)
 and check_decl_capability_storage ctx ~meta ~effectself ~parameters ty =
   let own_operations =
     match effectself with Some (_, hash) -> registered_instance_effect ctx hash | None -> false
@@ -1260,7 +1264,9 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
       let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
       let params, result =
         (* the operation is the arrow enclosing its parameter and result types *)
-        match elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result)) with
+        match
+          elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result))
+        with
         | TArrow (params, _, result) -> (params, result)
         | _ -> (params, result)
       in
@@ -1285,7 +1291,7 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
               {
                 effects = [];
                 payloads = [];
-                instances = [ { effect = decl_hash; label; payload = [ payload ] } ];
+                instances = [ { effect_id = decl_hash; label; payload = [ payload ] } ];
                 tail = RClosed;
               }
           | None ->
@@ -1611,8 +1617,7 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
       TArrow (param_tys, !lam_ambient, body_ty)
   | Kernel.App (({ Kernel.it = Kernel.Ref (h, Kernel.Term); _ } as fn), args)
     when Option.is_some (scoped_registration ctx h) ->
-      infer_scoped ctx env ~ambient ~required ~meta
-        ~callee:(Meta.name fn.Kernel.meta)
+      infer_scoped ctx env ~ambient ~required ~meta ~callee:(Meta.name fn.Kernel.meta)
         (Option.get (scoped_registration ctx h))
         args
   | Kernel.App (fn, args) -> (
@@ -2087,9 +2092,7 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
   let param_ty, bindings = infer_pat ctx param in
   unify_or ctx ~meta:callback.Kernel.meta ~what:"scoped callback parameter" param_ty capability;
   let body_ambient = ref (open_row ctx.level []) in
-  let body_ty =
-    infer ctx (bind_all bindings env) ~ambient:body_ambient ~required:empty_row body
-  in
+  let body_ty = infer ctx (bind_all bindings env) ~ambient:body_ambient ~required:empty_row body in
   Option.iter
     (fun annotation ->
       let cenv = { mode = Rigid; tvs = []; rvs = [] } in
@@ -2099,15 +2102,14 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
       let actual = TArrow ([ param_ty ], !body_ambient, body_ty) in
       try Types.unify expected actual
       with Unify_error detail ->
-        err ~meta:callback.Kernel.meta ~code:"E0804"
-          "annotation mismatch: expected %s, got %s (%s)" (show_ty ctx expected)
-          (show_ty ctx actual) detail)
+        err ~meta:callback.Kernel.meta ~code:"E0804" "annotation mismatch: expected %s, got %s (%s)"
+          (show_ty ctx expected) (show_ty ctx actual) detail)
     annotation;
   let solved = repr_row !body_ambient in
   let own, others =
     List.partition
       (fun (entry : instance) ->
-        Hash.equal entry.effect registration.instance_effect && same_label entry.label label)
+        Hash.equal entry.effect_id registration.instance_effect && same_label entry.label label)
       solved.instances
   in
   List.iter
@@ -2121,7 +2123,8 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
   Option.iter
     (fun name ->
       List.iter
-        (fun h -> if not (List.mem_assoc h ctx.origins) then ctx.origins <- (h, name) :: ctx.origins)
+        (fun h ->
+          if not (List.mem_assoc h ctx.origins) then ctx.origins <- (h, name) :: ctx.origins)
         outward.effects)
     callee;
   (try
@@ -2200,9 +2203,13 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
         (fun (o : Kernel.opspec) ->
           let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
           let params =
-            List.map (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self) o.Kernel.op_params
+            List.map
+              (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self)
+              o.Kernel.op_params
           in
-          let result = conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result in
+          let result =
+            conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result
+          in
           (* the operation is the arrow enclosing its parameter and result types (A1.5) *)
           ignore
             (elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result))))
@@ -2239,7 +2246,8 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                 match b.Kernel.annot with
                 | Some ann ->
                     let cenv = { mode = Flexible; tvs = []; rvs = [] } in
-                    (b.Kernel.bname, elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann))
+                    ( b.Kernel.bname,
+                      elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann) )
                 | None -> (b.Kernel.bname, new_tvar ctx.level))
               bindings
           in
