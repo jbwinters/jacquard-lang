@@ -83,6 +83,10 @@ project shape from file names alone.
 - `observation-boundary.md`: RF.3 typed root observations (operations with
   arguments, trusted output, results), their ownership and lifetime, and the
   trace carriers that stay separate.
+- `observation-policies.md`: OBS.1 versioned observation policies (operations
+  by identity, compared arguments/results/output, exclusion as redaction,
+  limits, interface pins) and policy-bound observation transcripts with
+  equal/divergent/inconclusive comparison.
 - `computation-fuel.md`: RT.1 per-invocation computation budget, the versioned
   fuel-v1 cost model, and E0919 incomplete-run semantics.
 - `errors.md`: diagnostic code catalog.

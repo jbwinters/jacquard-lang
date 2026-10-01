@@ -86,8 +86,9 @@ val with_root_observer :
 val note_root_output : ctx -> operation:Hash.t -> string -> unit
 (** [note_root_output ctx ~operation bytes] attaches bytes accepted by a trusted root adapter to its
     explicit operation identity, if an observer is active. It must not be used by untrusted or
-    language-level handlers. It is a no-op without an observer; an observer callback exception
-    propagates unchanged. *)
+    language-level handlers. Output is attributed to the root call whose handler is running (outside
+    any, it is a call of its own). Nothing is observed without an observer; an observer callback
+    exception propagates unchanged. *)
 
 (** {1 Invocations (RF.2)}
 
@@ -223,9 +224,10 @@ val resume_captured_state : ctx -> captured_kont -> Value.t -> (state, Runtime_e
 
 type once_capture =
   | OCValue of Value.t
-  | OCOp of { op : Hash.t; name : string; args : Value.t list; resume : Value.t }
+  | OCOp of { call : int; op : Hash.t; name : string; args : Value.t list; resume : Value.t }
       (** A terminal value or root operation whose actual continuation is already sealed as one
-          opaque, originating-context-bound once-resumption instance. *)
+          opaque, originating-context-bound once-resumption instance. [call] is the correlation id
+          of the operation's observation event; pass it to {!dispatch_root_operation}. *)
 
 val run_state_capturing_once : ctx -> state -> (once_capture, Runtime_err.t) result
 (** [run_state_capturing_once ctx state] validates and runs [state]. A captured root continuation is
@@ -238,6 +240,7 @@ val run_state_capturing_once_routed : ctx -> state -> (once_capture, Runtime_err
     deterministic scheduler can check cancellation before routing world work. *)
 
 val dispatch_root_operation :
+  call:int ->
   ctx ->
   resume:Value.t ->
   op:Hash.t ->
@@ -248,7 +251,9 @@ val dispatch_root_operation :
 (** [dispatch_root_operation] invokes an installed root handler after the scheduler boundary. The
     suspended affine resume is included in the same mutable-graph snapshot as the operation and
     arguments, so hostile callbacks cannot mutate its continuation graph unnoticed. Missing handlers
-    return [Unhandled], and callback argument/result guards remain active. *)
+    return [Unhandled], and callback argument/result guards remain active. [call] is the captured
+    operation's correlation id ({!once_capture}), so its observed [Result] and output pair with its
+    [Operation]. *)
 
 type validated_state
 (** An unforgeable state accepted by the reusable inference driver and bound to the exact evaluator

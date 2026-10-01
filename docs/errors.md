@@ -205,6 +205,8 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1002 | eval under --dry-run | a program whose row includes `eval` run with `--dry-run` |
 | E1003 | completed relational runs differ under their selected observation projection | schedule variation finds a race, Secret variation finds redacted payload-dependent Console output, or grant variation finds different live/dry result values |
 | E1004 | malformed, unsupported, or noncanonical run-transcript-v1 bytes | a transcript with a noncontiguous observation index or truncated payload |
+| E1005 | an observation policy is malformed, noncanonical, or refused for the observed program | unsorted operations, an operation identity the program does not have, or a pinned interface-v1 identity that differs |
+| E1006 | observation-transcript-v1 bytes are malformed, or were recorded under a different observation policy | decoding a transcript under another policy, or comparing transcripts of two policies |
 
 ## Native compilation (E11xx)
 

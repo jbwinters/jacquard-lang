@@ -907,7 +907,7 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
                       "exhaustive scheduling requires a hermetic program; routed operation %s is \
                        not allowed"
                       name))
-          | Ok (Eval.OCOp { op; name; args; resume }) ->
+          | Ok (Eval.OCOp { call; op; name; args; resume }) ->
               let* () =
                 Schedule_control.observe_operation schedule_control (Schedule_trace.Routed op)
               in
@@ -918,7 +918,7 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
                   Option.value ~default:(runtime_of_diagnostics diagnostics) !routed_error)
                 ~action:(fun () ->
                   match
-                    Eval.dispatch_root_operation ctx ~resume ~op ~name ~effect_:"routed" args
+                    Eval.dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_:"routed" args
                   with
                   | Ok value -> Ok value
                   | Error error ->

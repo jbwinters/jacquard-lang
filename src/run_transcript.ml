@@ -78,7 +78,7 @@ let record_expression recorder ctx run =
       Eval.with_observer ctx
         (function
           | Observation.Operation { operation; _ } -> on_operation recorder operation
-          | Observation.Output { operation; bytes } -> on_output recorder operation bytes
+          | Observation.Output { operation; bytes; _ } -> on_output recorder operation bytes
           | Observation.Result _ -> ())
         (fun () ->
           match run () with

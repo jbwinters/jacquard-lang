@@ -157,8 +157,8 @@ let test_fresh_run_identity_and_routed_resume_guard () =
   | Error error -> Alcotest.failf "capture failed: %s" (Runtime_err.to_string error)
   | Ok (Eval.OCValue value) ->
       Alcotest.failf "routed Console operation unexpectedly returned %s" (Value.show value)
-  | Ok (Eval.OCOp { op; name; args; resume }) -> (
-      match Eval.dispatch_root_operation ctx ~resume ~op ~name ~effect_:"Console" args with
+  | Ok (Eval.OCOp { call; op; name; args; resume }) -> (
+      match Eval.dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_:"Console" args with
       | Error (Runtime_err.Invalid_task_handle _) -> ()
       | Error error ->
           Alcotest.failf "hostile resume mutation returned the wrong error: %s"

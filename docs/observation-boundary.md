@@ -23,11 +23,11 @@ trust domains, and it is not a universal trace format.
 
 `Observation.event` is produced at the evaluator root, in evaluation order:
 
-- `Operation { operation; name; arguments }`: an operation reached the root,
+- `Operation { call; operation; name; arguments }`: an operation reached the root,
   after every language handler declined it and before any root handler runs.
-- `Output { operation; bytes }`: a trusted root adapter accepted bytes for that
+- `Output { call; operation; bytes }`: a trusted root adapter accepted bytes for that
   operation (today only Console print).
-- `Result { operation; result }`: a granted root handler returned (a value or
+- `Result { call; operation; result }`: a granted root handler returned (a value or
   its own runtime failure) and every post-call check passed: the arguments, the
   result's fuel charge, and the result's validation. So `Result` carries exactly
   what the program receives. There is no `Result` for an operation a driver
@@ -36,6 +36,11 @@ trust domains, and it is not a universal trace format.
   follows the event: if the callback itself exhausts the budget (for example by
   forcing a large payload), the invocation ends with E0919 after `Result`, even
   when the callback caught the exception.
+
+`call` is a correlation id, distinct within an evaluator: a call's `Output` and
+`Result` carry its `Operation`'s id, even when calls to one operation nest or a
+captured operation is dispatched later by a driver. It is not stable across
+runs and is not persisted by any projection.
 
 Arguments and results are never live runtime values. They arrive as an
 immutable data projection (`Observation.value`: integers, reals, text, hashes,
@@ -102,8 +107,9 @@ form (its nodes and bytes).
 - `Output` attaches bytes to the pending event of its operation;
 - `Result` is ignored.
 
-Its serialized bytes are unchanged. Richer projections (OBS.1) are new,
-versioned formats layered on the same events.
+Its serialized bytes are unchanged. Richer projections are new, versioned
+formats layered on the same events: `observation-transcript-v1`, recorded under
+an OBS.1 observation policy (`docs/observation-policies.md`).
 
 The older `Eval.with_root_observer` is kept as the same v1 view (operation
 identities and trusted output bytes) over the typed stream.

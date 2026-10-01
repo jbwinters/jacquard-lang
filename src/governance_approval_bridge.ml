@@ -399,7 +399,7 @@ let run ctx ~file ~allowed_approvers initial =
     match Eval.run_state_capturing_once_routed ctx state with
     | Error error -> runtime_error error
     | Ok (Eval.OCValue value) -> Ok (Completed value)
-    | Ok (Eval.OCOp { op; name = _; args; resume }) when Hash.equal op schema.ask -> (
+    | Ok (Eval.OCOp { call = _; op; name = _; args; resume }) when Hash.equal op schema.ask -> (
         if approval_resumed then
           bridge_refusal
             "a second sequential governance-approval.ask reached the single-rendezvous driver"
@@ -427,8 +427,8 @@ let run ctx ~file ~allowed_approvers initial =
               | Governance_approval_queue.Delivered { decision; _ } ->
                   let* decision = decision_value schema decision in
                   drive true (Eval.apply_state ctx resume [ decision ])))
-    | Ok (Eval.OCOp { op; name; args; resume }) -> (
-        match Eval.dispatch_root_operation ctx ~resume ~op ~name ~effect_:"" args with
+    | Ok (Eval.OCOp { call; op; name; args; resume }) -> (
+        match Eval.dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_:"" args with
         | Error error -> runtime_error error
         | Ok value -> drive approval_resumed (Eval.apply_state ctx resume [ value ]))
   in

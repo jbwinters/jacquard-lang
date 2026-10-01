@@ -28,14 +28,18 @@ type value =
       (** a value observation does not expose: ["secret"], ["closure"], ["resumption"], ["builtin"],
           ["operation"], ["constructor"], ["task"] or ["channel"] *)
 
+(** Every event carries [call], a correlation id: the [Output] and [Result] of a root call carry the
+    id of that call's [Operation], so a consumer pairs them exactly even when calls to one operation
+    nest or a call is captured and dispatched later. Ids are distinct within an evaluator; they are
+    not stable across runs and are not meant to be persisted. *)
 type event =
-  | Operation of { operation : Hash.t; name : string; arguments : value list Lazy.t }
+  | Operation of { call : int; operation : Hash.t; name : string; arguments : value list Lazy.t }
       (** An operation crossed every language handler and reached the root, before any root handler
           ran or a driver captured it. [name] is display-only; [operation] is its identity. The
           arguments are projected only if forced; the projection walk draws on computation fuel. *)
-  | Output of { operation : Hash.t; bytes : string }
+  | Output of { call : int; operation : Hash.t; bytes : string }
       (** A trusted root adapter accepted [bytes] for [operation] (today only Console print). *)
-  | Result of { operation : Hash.t; result : (value, Runtime_err.t) result Lazy.t }
+  | Result of { call : int; operation : Hash.t; result : (value, Runtime_err.t) result Lazy.t }
       (** A granted root handler for [operation] returned, and every post-call check passed: its
           arguments, the result's fuel charge and the result's validation. The event carries what
           the program receives (a value or the handler's own failure). There is none for an
@@ -55,3 +59,6 @@ val render : value -> string
 
 val operation : event -> Hash.t
 (** [operation event] is the operation identity every event carries. *)
+
+val call : event -> int
+(** [call event] is the correlation id every event carries. *)
