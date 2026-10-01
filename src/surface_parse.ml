@@ -2005,7 +2005,31 @@ and parse_paren_type state ~allow_newlines:_ opening =
     match (current state).Surface_lex.token with
     | Surface_lex.RParen ->
         let closing = advance state in
-        let ty = { first with Surface_ast.meta = meta_with_span (span_between opening closing) } in
+        (* As for a parenthesized expression ([parse_paren_expr]), the group is a ["paren"]
+           container spanning its delimiters, and a directly nested group chains as its own
+           ["paren"] container. Its ["paren-body"] container spans the type inside, so a comment
+           written after [(] is the body's (printed after [(]) while one written before [(] is the
+           group's (printed before it). *)
+        let inner = Meta.surface_container "paren" first.meta in
+        let group = meta_with_span (span_between opening closing) in
+        (* only the innermost group has a body: a nested group's body would span exactly its
+           inner group, and two owners with one span make comment ownership ambiguous *)
+        let group =
+          match Meta.span first.meta with
+          | Some span when Meta.is_empty inner ->
+              Meta.with_surface_container "paren-body" (Meta.with_span span Meta.empty) group
+          | Some _ | None -> group
+        in
+        let group =
+          if Meta.is_empty inner then group else Meta.with_surface_container "paren" inner group
+        in
+        let meta =
+          List.fold_left
+            (fun meta (key, value) -> Meta.add key value meta)
+            (meta_with_span (span_between opening closing))
+            (Meta.bindings (Meta.surface_containers first.meta))
+        in
+        let ty = { first with Surface_ast.meta = Meta.with_surface_container "paren" group meta } in
         { ty; arrow_params = Some [ first ] }
     | Surface_lex.Comma ->
         ignore (advance state);
@@ -3052,10 +3076,13 @@ module Trivia_ownership = struct
 
   let container kind meta = slot (Container kind) (Meta.surface_container kind meta)
 
-  (* Nested parentheses chain their containers (see [parse_paren_expr]); each level is an owner. *)
+  (* Nested parentheses chain their containers (see [parse_paren_expr]); each level is an owner, and
+     a parenthesized type's level also owns its body ([parse_paren_type]). *)
   let rec paren_containers meta =
     let group = Meta.surface_container "paren" meta in
-    match slot (Container "paren") group with [] -> [] | slots -> slots @ paren_containers group
+    match slot (Container "paren") group with
+    | [] -> []
+    | slots -> slots @ container "paren-body" group @ paren_containers group
 
   let containers kinds meta = List.concat_map (fun kind -> container kind meta) kinds
 
@@ -3157,7 +3184,7 @@ module Trivia_ownership = struct
     in
     container "params" node.meta @ container "forall" node.meta
     @ container "call-parameter" node.meta
-    @ slot Ty node.meta @ children
+    @ paren_containers node.meta @ slot Ty node.meta @ children
 
   let field depth (field : Surface_ast.field) = slot Field field.meta @ ty (depth + 1) field.ty
 
@@ -3444,7 +3471,8 @@ module Trivia_ownership = struct
     if Meta.is_empty group then meta
     else
       Meta.with_surface_container "paren"
-        (apply additions (Container "paren") (apply_paren_containers additions group))
+        (apply additions (Container "paren")
+           (apply_container additions "paren-body" (apply_paren_containers additions group)))
         meta
 
   let apply_containers additions kinds meta =

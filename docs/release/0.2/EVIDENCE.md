@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1137`
+- Alcotest/QCheck cases: `1138`
 - Cram transcript files: `75`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -653,3 +653,14 @@ interface pin) is E1005, a runtime failure is recorded as an observation, and
 the equal verdict names the policy identity. `jacquard relate` without a policy
 is unchanged. The new `test/cli/relate-policy.t` brings the current source
 inventory to `1137 / 75 / 35`.
+
+FMT.3 keeps comments inside parenthesized types: a parenthesized type records
+a `paren` container (and its body) like a parenthesized expression, a group
+that owns comments keeps its parentheses with each comment on its own side of
+`(`, and positional constructor fields stay on one line when a field owns such
+a group. Comment-free types format as before. The formatter's reparse guard
+(E1204) now also refuses output that drops or alters a comment, or that would
+format differently on a second pass, so a remaining printer gap fails loudly
+instead of losing a comment or printing an unstable layout. One
+`test/test_surface_trivia.ml`
+case brings the current source inventory to `1138 / 75 / 35`.

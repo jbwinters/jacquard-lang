@@ -1015,13 +1015,22 @@ let fmt_cmd file write syntax =
     | Auto -> assert false
     | Bootstrap -> Result.map Printer.format_all (Reader.parse_string ~file src)
     | Surface ->
-        let recovered = Surface_parse.recover_string ~file src in
-        Result.bind (Surface_parse.strict_file recovered) (fun parsed ->
-            print_warnings (Surface_check.lint ~names:Resolve.empty_names parsed.tops);
-            Result.bind (Surface_lower.lower_file parsed) (fun lowered ->
-                Result.bind
-                  (Surface_print.print_file_with_trivia ~file_meta:lowered.meta lowered.tops)
-                  (Surface_print.check_reparses ~file)))
+        let format ~lint text =
+          let recovered = Surface_parse.recover_string ~file text in
+          Result.bind (Surface_parse.strict_file recovered) (fun parsed ->
+              if lint then
+                print_warnings (Surface_check.lint ~names:Resolve.empty_names parsed.tops);
+              Result.bind (Surface_lower.lower_file parsed) (fun lowered ->
+                  Result.bind
+                    (Surface_print.print_file_with_trivia ~file_meta:lowered.meta lowered.tops)
+                    (Surface_print.check_reparses ~source:text ~file)))
+        in
+        Result.bind (format ~lint:true src) (fun out ->
+            (* formatting is a fixed point: output that would format differently again is a
+               printer bug, refused rather than printed *)
+            Result.bind (format ~lint:false out) (fun again ->
+                if String.equal out again then Ok out
+                else Error [ Surface_print.unstable_formatting ~file ]))
   in
   match formatted with
   | Error ds -> print_diags ds
