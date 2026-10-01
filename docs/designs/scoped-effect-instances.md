@@ -3,8 +3,9 @@
 - Status: design with an executable model. Implementation is TS.2 (task 211).
   Slice 1, the checker (§8, §9 A1.10), is implemented and checked by
   `test/test_scoped_instances_checker.ml`. Slice 2, the State runtime and
-  production registration (§10 A2), follows. Slice 2b (Throw and Emit), slice
-  3 (native) and slice 4 (docs) remain.
+  production registration (§10 A2), is implemented and checked by
+  `test/test_scoped_instances_runtime.ml`. Slice 2b (Throw and Emit), slice 3
+  (native) and slice 4 (docs) remain.
 - Date: 2026-09-24
 - Base: `main` after TS.0 (effect-payload containment, PR #112).
 - Model: `test/scoped_instances_model.ml`, checked by
