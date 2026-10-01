@@ -453,7 +453,12 @@ let diag_cases : (string * string * string list option) list =
     ( "redundant-clause",
       "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))",
       None );
-    (* TS.2: the test-registered scoped instance fixture ([Instances_fixture]) *)
+  ]
+
+(** TS.2 cases, checked on a separate context that registers [Instances_fixture], so every other
+    case keeps a production-shaped, unregistered context. *)
+let diag_instance_cases : (string * string * string list option) list =
+  [
     ( "instance-undetermined",
       "(lam ((pvar c)) (ann (lam () (app (var get-at) (var c))) (tarrow () (row (eref \
        state-instance)) (tref int))))",
@@ -496,8 +501,13 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
   let* ctx = Check.make_ctx store in
   let* sigs = Prelude.builtin_signatures store in
   Check.register_builtin_signatures ctx sigs;
-  let* () = Instances_fixture.install_and_register store ctx in
-  let run_case (name, src, granted) =
+  let* instance_store = Store.open_store (root ^ "-instances") in
+  let* _ = Prelude.load ~dir:prelude_dir instance_store in
+  let* instance_ctx = Check.make_ctx instance_store in
+  let* instance_sigs = Prelude.builtin_signatures instance_store in
+  Check.register_builtin_signatures instance_ctx instance_sigs;
+  let* () = Instances_fixture.install_and_register instance_store instance_ctx in
+  let run_case (store, ctx) (name, src, granted) =
     let render ds = List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds in
     let* forms = Reader.parse_string ~file:(name ^ ".jqd") src in
     let rec go = function
@@ -568,13 +578,14 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
     | Error ds -> Ok (List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds)
     | Ok _ -> Ok []
   in
-  let rec all acc = function
+  let rec all checker acc = function
     | [] -> Ok (List.concat (List.rev acc))
     | c :: rest ->
-        let* lines = run_case c in
-        all (lines :: acc) rest
+        let* lines = run_case checker c in
+        all checker (lines :: acc) rest
   in
-  let* bootstrap = all [] diag_cases in
+  let* bootstrap = all (store, ctx) [] diag_cases in
+  let* instances = all (instance_store, instance_ctx) [] diag_instance_cases in
   let rec collect run acc = function
     | [] -> Ok (List.concat (List.rev acc))
     | case :: rest ->
@@ -583,7 +594,7 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
   in
   let* surface = collect run_surface_case [] diag_surface_cases in
   let* strict_recovery = collect run_strict_recovery_case [] diag_strict_recovery_cases in
-  Ok (bootstrap @ surface @ strict_recovery)
+  Ok (bootstrap @ instances @ surface @ strict_recovery)
 
 (* --- SL.9: the rings manifest, the layering audit, and the ring-0 freeze --- *)
 

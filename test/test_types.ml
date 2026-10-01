@@ -513,15 +513,20 @@ let test_label_sort () =
   Alcotest.(check bool)
     "a label variable refuses a skolem" false
     (unifies (fun () -> unify (new_label_var 1) (TSkolem (fresh_id (), "a"))));
-  (* an ordinary variable that meets a label joins the label sort *)
+  (* an ordinary type variable is a type position: it never unifies with a label (A1.1) *)
   List.iter
     (fun reverse ->
-      let label = new_label_var 1 and plain = new_tvar 1 in
-      Alcotest.(check bool)
-        "a variable unifies with a label variable" true
-        (unifies (fun () -> if reverse then unify plain label else unify label plain));
-      Alcotest.(check bool) "and is then a label" false (unifies (fun () -> unify plain t_int)))
+      List.iter
+        (fun label ->
+          let plain = new_tvar 1 in
+          Alcotest.(check bool)
+            "an ordinary variable refuses a label" false
+            (unifies (fun () -> if reverse then unify plain label else unify label plain)))
+        [ new_label_var 1; TLabel (fresh_id (), "l") ])
     [ false; true ];
+  Alcotest.(check bool)
+    "two label variables unify" true
+    (unifies (fun () -> unify (new_label_var 1) (new_label_var 1)));
   Alcotest.(check bool)
     "a label variable takes a rigid label" true
     (unifies (fun () -> unify (new_label_var 1) (TLabel (fresh_id (), "l"))));
@@ -531,6 +536,46 @@ let test_label_sort () =
   | TTuple [ label ] ->
       Alcotest.(check bool) "an instantiated label is a label" false (unifies (fun () -> unify label t_int))
   | _ -> Alcotest.fail "unexpected instantiation"
+
+let test_instance_payload_occurs () =
+  (* binding a row to an entry whose payload mentions that row is an ordinary occurs failure *)
+  let tail = new_rvar 1 in
+  let cyclic =
+    {
+      effects = [];
+      payloads = [];
+      instances =
+        [
+          {
+            effect = ha;
+            label = TLabel (fresh_id (), "l");
+            payload = [ TArrow ([], { empty_row with tail }, TTuple []) ];
+          };
+        ];
+      tail = RClosed;
+    }
+  in
+  Alcotest.(check bool)
+    "a row cannot contain itself through an instance payload" false
+    (unifies (fun () -> unify_rows { empty_row with tail } cyclic));
+  (* quantification sees variables reachable only through instance entries *)
+  let label = new_label_var 2 and payload = new_tvar 2 in
+  let scheme =
+    {
+      ty =
+        TArrow
+          ( [],
+            {
+              effects = [];
+              payloads = [];
+              instances = [ { effect = ha; label; payload = [ payload ] } ];
+              tail = RClosed;
+            },
+            TTuple [] );
+      gen_level = 1;
+    }
+  in
+  Alcotest.(check int) "both are quantified" 2 (List.length (fst (quantified scheme)))
 
 let test_capability_invariance () =
   (* a registered capability's arguments are unified, never joined: two capabilities whose payload
@@ -616,6 +661,8 @@ let suite =
     Alcotest.test_case "instance entries: fixpoint normalization" `Quick test_instance_fixpoint;
     Alcotest.test_case "fresh-continuation flag" `Quick test_fresh_continuation_flag;
     Alcotest.test_case "labels are their own sort" `Quick test_label_sort;
+    Alcotest.test_case "instance payloads in occurs and quantification" `Quick
+      test_instance_payload_occurs;
     Alcotest.test_case "capabilities are invariant in join" `Quick test_capability_invariance;
     Alcotest.test_case "row unification cases" `Quick test_row_cases;
     Alcotest.test_case "chained unification" `Quick test_chains;

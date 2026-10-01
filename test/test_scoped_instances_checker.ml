@@ -34,6 +34,7 @@ let test_registration () =
   refused "a capability that is an effect" { valid with capability = valid.instance_effect };
   refused "a scoped combinator that is a type" { valid with scoped = valid.capability };
   refused "a negative callback position" { valid with callback_position = -1 };
+  refused "a callback position other than slice 1's" { valid with callback_position = 0 };
   Alcotest.(check int)
     "refused registrations add nothing" 1
     (List.length (Check.instance_registrations ctx))
@@ -289,6 +290,18 @@ let test_scoped_form () =
   e0832 "returning the capability" (scoped "(lit 0)" "(var c)");
   e0832 "returning a thunk over it" (scoped "(lit 0)" "(lam () (app (var get-at) (var c)))");
   e0832 "in a tuple" (scoped "(lit 0)" "(tuple (var c) (lit 1))");
+  e0832 "in a container" (scoped "(lit 0)" "(app (var some) (var c))");
+  (* through an outward effect payload, the second half of non-escape *)
+  e0832 "an emitted capability"
+    (Printf.sprintf "(app (var emit.collect) (lam () %s))"
+       (scoped "(lit 0)" "(app (var emit) (var c))"));
+  e0832 "a thrown capability"
+    (Printf.sprintf "(app (var throw.to-result) (lam () %s))"
+       (scoped "(lit 0)" "(let nonrec (pwild) (app (var throw) (var c)) (tuple))"));
+  e0832 "an emitted capability under a user handler"
+    (Printf.sprintf
+       "(handle %s (ret (pvar x) (var x)) (opclause emit ((pvar v)) k (app (var k) (tuple))))"
+       (scoped "(lit 0)" "(app (var emit) (var c))"));
   e0832 "rank-2 callback (A1.9)"
     (defterm "run" (Printf.sprintf "(lam ((pvar k)) %s)" (scoped "(lit 0)" "(app (var k) (var c))")));
   e0832 "a non-value alias bound outside the scope (A1.9)"
@@ -349,6 +362,21 @@ let test_scoped_form () =
     "L1: thunk before its capability" "E0801"
     (code_of h
        (scoped "(lit 0)" "(app (var use) (lam () (app (var put-at) (var c) (lit 2))) (var c))"));
+  (* limit L1's third case: a rigid signature proof unifies parameters left to right *)
+  Alcotest.(check string)
+    "L1: the callback before its capability in a signature proof" "E0804"
+    (code_of h
+       (Printf.sprintf
+          "(defterm ((binding run ((tarrow ((tarrow ((tarrow () (row (eref state-instance)) (tref \
+           int))) (row) (tref int)) %s) (row) (tref int))) (lam ((pvar k) (pvar c)) (app (var k) \
+           (lam () (app (var get-at) (var c))))))))"
+          cap));
+  check_ok "L1: capability first in a signature proof"
+    (Printf.sprintf
+       "(defterm ((binding run-first ((tarrow (%s (tarrow ((tarrow () (row (eref state-instance)) \
+        (tref int))) (row) (tref int))) (row) (tref int))) (lam ((pvar c) (pvar k)) (app (var k) \
+        (lam () (app (var get-at) (var c))))))))"
+       cap);
   (* an annotated callback is checked with flexible labels *)
   check_ok "annotated callback"
     (defterm "annotated"
@@ -414,6 +442,16 @@ let test_determinacy_and_consumers () =
     (code_of h
        (defterm "local"
           "(lam () (let nonrec (pvar r) (lam () (app (var get-at) (app (var loop)))) (lit 1)))"));
+  Alcotest.(check string)
+    "at a local let rec" "E0830"
+    (code_of h
+       (defterm "local-rec"
+          "(lam () (let rec (pvar r) (lam () (app (var get-at) (app (var loop)))) (lit 1)))"));
+  Alcotest.(check string)
+    "in an effect declaration's operation" "E0830"
+    (code_of h
+       "(defeffect bad () (op invoke ((tarrow () (row (eref state-instance)) (tref int))) (tref \
+        int)))");
   Alcotest.(check string)
     "a top-level expression holding an instance entry" "E0830"
     (code_of h "(app (var get-at) (app (var loop)))");

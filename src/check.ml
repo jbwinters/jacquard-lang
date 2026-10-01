@@ -112,8 +112,10 @@ let register_builtin_signatures ctx signatures =
 (** [register_instances ctx registrations] enforces scoped instance effects (TS.2) on [ctx]. Each
     registration is validated against the store: the instance effect is an effect declaration, every
     operation is one of its operations, the capability type is a one-parameter type declaration, the
-    scoped term is a term, and the callback position is non-negative. Registration must happen
-    before any affected signature is cached; production contexts never register. *)
+    scoped term is a term, and the callback position is 1 (slice 1 implements the State shape
+    [(init, callback)]). Registration must happen before any affected signature is cached;
+    production contexts never register. It is a test-only API, so misuse raises
+    [Invalid_argument]. *)
 let register_instances ctx registrations =
   let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
   let locate hash = Store.locate_internal ctx.store hash in
@@ -137,7 +139,7 @@ let register_instances ctx registrations =
     (match locate registration.scoped with
     | Ok { decl = { Kernel.it = Kernel.DefTerm _; _ }; _ } -> ()
     | _ -> refuse "the scoped combinator is not a term");
-    if registration.callback_position < 0 then refuse "the callback position is negative"
+    if registration.callback_position <> 1 then refuse "the callback position is not 1"
   in
   List.iter check registrations;
   ctx.instances <- ctx.instances @ registrations
@@ -334,7 +336,7 @@ let rec same_review_type left right =
   ||
   match (left, right) with
   | TVar left, TVar right -> left == right
-  | TSkolem (left, _), TSkolem (right, _) -> left = right
+  | TSkolem (left, _), TSkolem (right, _) | TLabel (left, _), TLabel (right, _) -> left = right
   | TCon (left_hash, left_args), TCon (right_hash, right_args) ->
       Hash.equal left_hash right_hash
       && List.length left_args = List.length right_args
@@ -654,9 +656,16 @@ let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
           let enclosing = enclosing @ List.concat_map capabilities params in
           TArrow
             (List.map (walk enclosing) params, elaborate_row enclosing row, walk enclosing result)
+      | TResume (input, row, answer) ->
+          let enclosing = enclosing @ capabilities input in
+          TResume (walk enclosing input, elaborate_row enclosing row, walk enclosing answer)
+      | TVariadicArrow (param, row, result) ->
+          let enclosing = enclosing @ capabilities param in
+          TVariadicArrow (walk enclosing param, elaborate_row enclosing row, walk enclosing result)
+      | TExactThunk inner -> TExactThunk (walk enclosing inner)
       | TCon (h, args) -> TCon (h, List.map (walk enclosing) args)
       | TTuple items -> TTuple (List.map (walk enclosing) items)
-      | other -> other
+      | (TVar _ | TSkolem _ | TLabel _) as other -> other
     in
     walk enclosing ty
 
@@ -1281,7 +1290,8 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
               }
           | None ->
               err ?meta ~code:"E0805"
-                "instance operation %s has no capability parameter" (Hash.to_hex h)
+                "instance operation %s needs a capability parameter with one payload argument"
+                (name_of ctx h)
         else if is_frozen_async_spawn ctx h then
           match params with
           | [ TArrow ([], child_row, _) ] ->
@@ -1560,8 +1570,10 @@ let rec term_scheme ctx ?meta (h : Hash.t) : scheme =
 (* A structured instance refusal found inside unification is reported at the innermost expression
    being inferred, with its own code, past every relabeling handler (design §9 A1.8). *)
 and infer ?immediate_transformer ctx env ~ambient ~required (e : Kernel.expr) : ty =
-  try infer_expr ?immediate_transformer ctx env ~ambient ~required e
-  with Types.Instance_refusal (code, detail) -> err ~meta:e.Kernel.meta ~code "%s" detail
+  if ctx.instances = [] then infer_expr ?immediate_transformer ctx env ~ambient ~required e
+  else
+    try infer_expr ?immediate_transformer ctx env ~ambient ~required e
+    with Types.Instance_refusal (code, detail) -> err ~meta:e.Kernel.meta ~code "%s" detail
 
 and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
@@ -1597,9 +1609,12 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
       let lam_ambient = ref (open_row ctx.level []) in
       let body_ty = infer ctx env' ~ambient:lam_ambient ~required:empty_row body in
       TArrow (param_tys, !lam_ambient, body_ty)
-  | Kernel.App ({ Kernel.it = Kernel.Ref (h, Kernel.Term); _ }, args)
+  | Kernel.App (({ Kernel.it = Kernel.Ref (h, Kernel.Term); _ } as fn), args)
     when Option.is_some (scoped_registration ctx h) ->
-      infer_scoped ctx env ~ambient ~required ~meta (Option.get (scoped_registration ctx h)) args
+      infer_scoped ctx env ~ambient ~required ~meta
+        ~callee:(Meta.name fn.Kernel.meta)
+        (Option.get (scoped_registration ctx h))
+        args
   | Kernel.App (fn, args) -> (
       let fn_ty =
         if
@@ -2050,11 +2065,9 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
     carrying a rigid label minted for this call; exactly the entries of that instance are
     subtracted; the caller's handler requirements apply to the outward row before it is included;
     and the label must not escape (E0832). *)
-and infer_scoped ctx env ~ambient ~required ~meta (registration : instance_registration) args =
-  let refuse fmt =
-    err ~meta ~code:"E0831"
-      ~next_step:"Call the scoped combinator directly with a literal one-parameter lambda." fmt
-  in
+and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instance_registration)
+    args =
+  let refuse fmt = err ~meta ~code:"E0831" fmt in
   let init, callback =
     match args with
     | [ init; callback ] when registration.callback_position = 1 -> (init, callback)
@@ -2104,15 +2117,20 @@ and infer_scoped ctx env ~ambient ~required ~meta (registration : instance_regis
       | _ -> err ~meta ~code:"E0801" "instance payload arity mismatch")
     own;
   let outward = { solved with instances = others } in
+  ctx.tier_apps <- (outward, Tier.KFn) :: ctx.tier_apps;
+  Option.iter
+    (fun name ->
+      List.iter
+        (fun h -> if not (List.mem_assoc h ctx.origins) then ctx.origins <- (h, name) :: ctx.origins)
+        outward.effects)
+    callee;
   (try
      Types.require_effects ~payloads:required.payloads ~level:ctx.level required.effects outward;
      ambient := Types.include_rows ~sub:outward ~into:!ambient
    with Unify_error detail ->
      err ~meta ~code:"E0801" "effect row mismatch at this scope (%s)" detail);
   let escape where =
-    err ~meta ~code:"E0832"
-      ~next_step:"Use the capability only inside its scope; return or store values read from it."
-      "the instance opened here escapes its scope through %s" where
+    err ~meta ~code:"E0832" "the instance opened here escapes its scope through %s" where
   in
   if mentions_label label_id body_ty then escape "the scope's result";
   if row_mentions_label label_id outward then escape "the scope's effects";
@@ -2181,10 +2199,13 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       List.iter
         (fun (o : Kernel.opspec) ->
           let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
-          List.iter
-            (fun p -> ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self p))
-            o.Kernel.op_params;
-          ignore (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result))
+          let params =
+            List.map (conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self) o.Kernel.op_params
+          in
+          let result = conv_decl_ty ctx cenv ~unbound_code:"E0812" ~effectself ~self o.Kernel.op_result in
+          (* the operation is the arrow enclosing its parameter and result types (A1.5) *)
+          ignore
+            (elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result))))
         ops
   | Kernel.DefTerm _ -> ()
 

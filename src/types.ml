@@ -40,7 +40,7 @@ type ty =
   | TLabel of int * string
       (** A rigid instance label (TS.2, design §9 A1.1), minted per checked scoped call. Labels
           are their own sort: they occur only as a capability's first type argument and as the
-          label of an instance row entry, and unify only with themselves or a variable. *)
+          label of an instance row entry, and unify only with themselves or a label variable. *)
 
 and tvar = Unbound of { id : int; level : level } | Link of ty
 
@@ -85,8 +85,8 @@ let fresh_id () = Atomic.fetch_and_add counter 1 + 1
 let new_tvar level = TVar (ref (Unbound { id = fresh_id (); level }))
 
 (** [new_label_var level] is an instance label variable. Labels are their own sort (design §9 A1.1):
-    a label variable's id is negative, which keeps the sort without a separate table, so it unifies
-    only with labels and label variables, and an ordinary variable that meets it becomes a label. *)
+    a label variable's id is negative, which keeps the sort without a separate table. It unifies
+    only with rigid labels and label variables, never with a type or an ordinary type variable. *)
 let new_label_var level = TVar (ref (Unbound { id = -fresh_id (); level }))
 
 let is_label_id id = id < 0
@@ -171,7 +171,6 @@ and merge_payloads left right =
 and same_label left right =
   match (repr left, repr right) with
   | TLabel (left, _), TLabel (right, _) -> left = right
-  | TSkolem (left, _), TSkolem (right, _) -> left = right
   | TVar left, TVar right -> left == right
   | _ -> false
 
@@ -282,11 +281,10 @@ and unify (a : ty) (b : ty) : unit =
     | t, TVar ({ contents = Unbound { id; level } } as r) -> (
         match repr t with
         | TVar { contents = Unbound { id = id'; _ } } when id = id' -> ()
-        | TVar ({ contents = Unbound { id = id'; level = level' } } as r')
-          when is_label_id id && not (is_label_id id') ->
-            (* the ordinary variable joins the label sort, never the reverse *)
-            occurs_adjust id' level' (TVar r);
-            r' := Link (TVar r)
+        | TVar { contents = Unbound { id = id'; _ } } when is_label_id id <> is_label_id id' ->
+            raise (Unify_error "an instance label cannot be a type")
+        | TLabel _ when not (is_label_id id) ->
+            raise (Unify_error "an instance label cannot be a type")
         | (TCon _ | TTuple _ | TArrow _ | TResume _ | TVariadicArrow _ | TExactThunk _ | TSkolem _)
           when is_label_id id ->
             raise (Unify_error "an instance label cannot be a type")
@@ -403,7 +401,7 @@ and row_var_levels level t =
 and row_payload_levels level row =
   let row = repr_row row in
   let adjust ty =
-    occurs_adjust (-1) level ty;
+    occurs_adjust min_int level ty;
     row_var_levels level ty
   in
   List.iter (fun (_, args) -> List.iter adjust args) row.payloads;
@@ -529,6 +527,14 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
                   row_var_levels level ty)
                 args)
             (repr_row r).payloads;
+          List.iter
+            (fun entry ->
+              List.iter
+                (fun ty ->
+                  row_occurs_adjust id level ty;
+                  row_var_levels level ty)
+                entry.payload)
+            (repr_row r).instances;
           row_payload_levels level r;
           (* propagate the level ceiling and the instance exclusion to the new tail *)
           (match (repr_row r).tail with
@@ -877,6 +883,11 @@ let quantified (s : scheme) : int list * int list =
     | TArrow (params, row, result) ->
         List.iter go params;
         (let row = repr_row row in
+         List.iter
+           (fun entry ->
+             go entry.label;
+             List.iter go entry.payload)
+           row.instances;
          match row.tail with
          | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
              if not (Hashtbl.mem seen_r id) then begin
@@ -888,6 +899,11 @@ let quantified (s : scheme) : int list * int list =
     | TResume (input, row, answer) ->
         go input;
         (let row = repr_row row in
+         List.iter
+           (fun entry ->
+             go entry.label;
+             List.iter go entry.payload)
+           row.instances;
          match row.tail with
          | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
              if not (Hashtbl.mem seen_r id) then begin
@@ -899,6 +915,11 @@ let quantified (s : scheme) : int list * int list =
     | TVariadicArrow (param, row, result) ->
         go param;
         (let row = repr_row row in
+         List.iter
+           (fun entry ->
+             go entry.label;
+             List.iter go entry.payload)
+           row.instances;
          match row.tail with
          | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
              if not (Hashtbl.mem seen_r id) then begin
