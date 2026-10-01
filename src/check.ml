@@ -145,6 +145,12 @@ let register_instances ctx registrations =
 (** [instance_registrations ctx] lists the scoped instance effects [ctx] enforces. *)
 let instance_registrations ctx = ctx.instances
 
+let registered_capability ctx hash =
+  List.exists (fun (r : instance_registration) -> Hash.equal r.capability hash) ctx.instances
+
+let registered_instance_effect ctx hash =
+  List.exists (fun (r : instance_registration) -> Hash.equal r.instance_effect hash) ctx.instances
+
 (** [tier_applications ctx] returns the application classifications recorded by strict checks. *)
 let tier_applications ctx = ctx.tier_apps
 
@@ -182,6 +188,13 @@ let diagnostic_summary = function
   | "E0817" -> "A once resumption escapes its handler clause"
   | "E0818" -> "A non-value binding cannot be reused polymorphically"
   | "E0819" -> "An opaque Secret was used by generic inspection"
+  | "E0830" -> "An instance row is undetermined"
+  | "E0831" -> "A scoped instance combinator is used outside its checker form"
+  | "E0832" -> "An instance escapes its scope"
+  | "E0833" -> "An instance operation would run in a fresh-continuation callback"
+  | "E0834" -> "A user handler cannot handle an instance operation"
+  | "E0835" -> "A capability cannot be constructed or taken apart"
+  | "E0836" -> "A capability type cannot be stored in a declaration"
   | "E0907" -> "A scoped task or channel handle is invalid"
   | code -> "Checker rejected the program (" ^ code ^ ")"
 
@@ -203,6 +216,13 @@ let diagnostic_next_step = function
   | "E0817" -> "Consume the once resumption directly inside its handler clause."
   | "E0818" -> "Eta-expand the binding or give each use its own binding."
   | "E0819" -> "Keep the value opaque or expose it explicitly with `secret.expose`."
+  | "E0830" -> "Pass the capability that determines the instance, or leave the row unannotated."
+  | "E0831" -> "Call the scoped combinator directly with a literal one-parameter lambda."
+  | "E0832" -> "Use the capability only inside its scope; return or store values read from it."
+  | "E0833" -> "Read the value inside the scope and pass the value, not the capability's operation."
+  | "E0834" -> "Use the instance's scoped combinator; user handlers handle ambient effects only."
+  | "E0835" -> "Obtain a capability from its scoped combinator."
+  | "E0836" -> "Carry a capability through a type parameter instead of a fixed field type."
   | "E0907" -> "Use the handle only inside the exact async.scope that created it."
   | _ -> "Correct the rejected checker input and try again."
 
@@ -513,6 +533,7 @@ let payload_parameters ctx hash =
   if
     String.equal identity Concurrency_contract.async_effect_hash
     || String.equal identity Channel_contract.channel_effect_hash
+    || registered_instance_effect ctx hash
   then []
   else
     let rec occurs name (ty : Kernel.ty) =
@@ -561,7 +582,9 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
       if arity <> List.length args then
         err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
           (List.length args);
-      TCon (h, List.map (conv_ty ctx cenv) args)
+      let args = List.map (conv_ty ctx cenv) args in
+      (* a capability's first, internal argument is its instance label (design §9 A1.1) *)
+      if registered_capability ctx h then TCon (h, new_tvar ctx.level :: args) else TCon (h, args)
   | Kernel.TApp _ -> err ~meta ~code:"E0810" "only declared types can be applied"
   | Kernel.TArrow (params, row, result) ->
       TArrow
@@ -726,6 +749,8 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
         decl_hash;
         role = Store.Constructor i;
       } ->
+      if registered_capability ctx decl_hash then
+        err ?meta ~code:"E0835" "a capability can only be obtained from its scoped combinator";
       let c = List.nth cons i in
       let inner = ctx.level + 1 in
       let exact_vary_world =
@@ -797,7 +822,9 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
         if arity <> List.length args then
           err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
             (List.length args);
-        TCon (h, List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args)
+        let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
+        if registered_capability ctx h then TCon (h, new_tvar ctx.level :: args)
+        else TCon (h, args)
     | Kernel.TArrow (params, row, result) ->
         let converted_row = conv_row ctx cenv ~effectself row in
         TArrow
@@ -818,7 +845,34 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
     | _ -> conv_ty ctx cenv t
   in
   check_decl_payload_storage ~meta ~effectself ~parameters:(List.map snd cenv.tvs) converted;
+  check_decl_capability_storage ctx ~meta ~effectself ~parameters:(List.map snd cenv.tvs) converted;
   converted
+
+(** [check_decl_capability_storage] refuses (E0836) a capability type in a nominal field or a user
+    effect operation signature, except in a registered instance effect's own operations: a fixed
+    field would hide the capability's label from non-escape. A capability carried by a declared
+    type parameter keeps its label visible and is allowed. *)
+and check_decl_capability_storage ctx ~meta ~effectself ~parameters ty =
+  let own_operations =
+    match effectself with Some (_, hash) -> registered_instance_effect ctx hash | None -> false
+  in
+  let rec walk ty =
+    if List.exists (fun parameter -> parameter == ty) parameters then ()
+    else
+      match repr ty with
+      | TCon (h, _) when registered_capability ctx h && not own_operations ->
+          err ~meta ~code:"E0836" "a capability type cannot be stored in this declaration"
+      | TVar _ | TSkolem _ | TLabel _ -> ()
+      | TCon (_, args) | TTuple args -> List.iter walk args
+      | TArrow (params, _, result) ->
+          List.iter walk params;
+          walk result
+      | TResume (input, _, answer) | TVariadicArrow (input, _, answer) ->
+          walk input;
+          walk answer
+      | TExactThunk inner -> walk inner
+  in
+  walk ty
 
 (** [is_frozen_async_spawn ctx operation] recognizes only the exact Async declaration that receives
     the identity-guarded SC.4 dependent typing rule. The check is store-shaped rather than
@@ -1051,7 +1105,33 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
       let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
       let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
       let operation_row =
-        if is_frozen_async_spawn ctx h then
+        if registered_instance_effect ctx decl_hash then
+          (* each reference gets fresh, generalizable labels; the operation's row is the single
+             instance entry of its capability (design §9 A1.2) *)
+          let capability =
+            List.find_map
+              (fun param ->
+                match repr param with
+                | TCon (cap, label :: payload) when registered_capability ctx cap -> (
+                    (match repr label with
+                    | TVar ({ contents = Unbound _ } as cell) -> cell := Link (new_tvar inner)
+                    | _ -> ());
+                    match payload with [ payload ] -> Some (label, payload) | _ -> None)
+                | _ -> None)
+              params
+          in
+          match capability with
+          | Some (label, payload) ->
+              {
+                effects = [];
+                payloads = [];
+                instances = [ { effect = decl_hash; label; payload = [ payload ] } ];
+                tail = RClosed;
+              }
+          | None ->
+              err ?meta ~code:"E0805"
+                "instance operation %s has no capability parameter" (Hash.to_hex h)
+        else if is_frozen_async_spawn ctx h then
           match params with
           | [ TArrow ([], child_row, _) ] -> child_row
           | _ ->
@@ -1594,6 +1674,10 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
             match oc.Kernel.op with
             | Kernel.Hashed h -> (
                 match locate ctx h with
+                | Ok { Store.decl_hash; role = Store.Operation _; _ }
+                  when registered_instance_effect ctx decl_hash ->
+                    err ~meta:oc.Kernel.ometa ~code:"E0834"
+                      "an instance operation is handled only by its scoped combinator"
                 | Ok { Store.decl_hash; role = Store.Operation _; _ } -> Some (decl_hash, h)
                 | _ -> err ~meta:oc.Kernel.ometa ~code:"E0805" "op clause is not an operation")
             | Kernel.Named n -> err ~meta:oc.Kernel.ometa ~code:"E0811" "unresolved op `%s`" n)
