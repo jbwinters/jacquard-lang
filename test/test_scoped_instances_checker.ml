@@ -133,6 +133,91 @@ let test_opacity_storage_and_handlers () =
        "(lam ((pvar c)) (handle (app (var get-at) (var c)) (ret (pvar x) (var x)) (opclause \
         get-at ((pvar r)) k (app (var k) (lit 1)))))")
 
+let cap = "(tapp (tref state-ref) (tref int))"
+
+let entries_of scheme =
+  match Types.repr (Types.instantiate ~level:1 scheme) with
+  | Types.TArrow (_, row, _) -> List.length (Types.repr_row row).instances
+  | _ -> Alcotest.fail "expected a function"
+
+let test_annotations () =
+  let h = fixture () in
+  (* a row annotation's instance effect elaborates to its capability parameter's entry *)
+  let bump =
+    scheme_of h
+      (Printf.sprintf
+         "(defterm ((binding bump ((tarrow (%s) (row (eref state-instance)) (ttuple))) (lam ((pvar c)) \
+          (app (var put-at) (var c) (app (var get-at) (var c)))))))"
+         cap)
+  in
+  Alcotest.(check int) "the annotated bump has its capability's entry" 1 (entries_of bump);
+  (* annotating an existing capability gets a flexible label *)
+  ignore
+    (scheme_of h
+       (Printf.sprintf
+          "(defterm ((binding peek () (lam ((pvar c)) (app (var get-at) (ann (var c) %s))))))" cap));
+  (* a thunk whose row names the instance effect sees the enclosing arrow's capability *)
+  ignore
+    (scheme_of h
+       (Printf.sprintf
+          "(defterm ((binding use ((tarrow ((tarrow () (row (eref state-instance)) (ttuple)) %s) (row \
+           (eref state-instance)) (ttuple))) (lam ((pvar k) (pvar c)) (app (var k))))))"
+          cap));
+  ignore
+    (scheme_of h
+       (Printf.sprintf
+          "(defterm ((binding use-first ((tarrow (%s (tarrow () (row (eref state-instance)) (ttuple))) \
+           (row (eref state-instance)) (ttuple))) (lam ((pvar c) (pvar k)) (app (var k))))))"
+          cap));
+  ignore
+    (scheme_of h
+       "(defterm ((binding first ((tarrow ((tarrow () (row) (ttuple))) (row) (ttuple))) (lam \
+        ((pvar k)) (app (var k))))))");
+  (* capability first is accepted (limit L1) *)
+  ignore
+    (scheme_of h
+       "(defterm ((binding ok () (lam ((pvar c)) (app (var use-first) (var c) (lam () (app (var \
+        put-at) (var c) (lit 1))))))))");
+  (* limit L1: the thunk's row meets the closed parameter row before the capability *)
+  Alcotest.(check string)
+    "L1: thunk before its capability is refused" "E0801"
+    (code_of h
+       "(defterm ((binding late () (lam ((pvar c)) (app (var use) (lam () (app (var put-at) (var \
+        c) (lit 2))) (var c))))))");
+  Alcotest.(check string)
+    "L1: no capability unification relates c and d" "E0801"
+    (code_of h
+       "(defterm ((binding crossed () (lam ((pvar c) (pvar d)) (app (var use-first) (var c) (lam \
+        () (app (var put-at) (var d) (lit 1))))))))");
+  (* E0830: nothing determines the instance *)
+  Alcotest.(check string)
+    "a thunk-only annotation names no capability" "E0830"
+    (code_of h
+       "(lam ((pvar c)) (ann (lam () (app (var get-at) (var c))) (tarrow () (row (eref state-instance)) \
+        (tref int))))");
+  Alcotest.(check string)
+    "L3: a result-only capability is not among the parameters" "E0830"
+    (code_of h
+       (Printf.sprintf
+          "(defterm ((binding mint ((tarrow () (row (eref state-instance)) %s)) (lam () (app (var \
+           mint))))))"
+          cap));
+  (* limit L3: each capability annotation gets its own label *)
+  Alcotest.(check string)
+    "L3: an annotation cannot share a label between positions" "E0804"
+    (code_of h
+       (Printf.sprintf
+          "(defterm ((binding keep ((tarrow (%s) (row) %s)) (lam ((pvar c)) (var c)))))" cap cap));
+  (* one entry per capability parameter: two capabilities give two entries *)
+  Alcotest.(check int)
+    "two capability parameters give two entries" 2
+    (entries_of
+       (scheme_of h
+          (Printf.sprintf
+             "(defterm ((binding both ((tarrow (%s %s) (row (eref state-instance)) (ttuple))) (lam \
+              ((pvar c) (pvar d)) (app (var put-at) (var d) (app (var get-at) (var c)))))))"
+             cap cap)))
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let store, ctx = fresh () in
@@ -157,6 +242,8 @@ let suite =
       test_operation_schemes;
     Alcotest.test_case "capabilities are opaque, unstorable, and not user-handled" `Quick
       test_opacity_storage_and_handlers;
+    Alcotest.test_case "annotations elaborate instance rows from capability parameters" `Quick
+      test_annotations;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]

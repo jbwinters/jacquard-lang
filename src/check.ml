@@ -502,7 +502,10 @@ let type_arity ctx ?meta (h : Hash.t) : int =
 (* Annotation conversion                                               *)
 (* ------------------------------------------------------------------ *)
 
-type conv_mode = Rigid | Flexible
+(* [Proof] is [Rigid] with label skolems: a definition's rigid signature proof proves label
+   polymorphism, while an expression annotation's capability labels stay flexible (design §9
+   A1.5). *)
+type conv_mode = Rigid | Proof | Flexible
 
 type conv_env = {
   mode : conv_mode;
@@ -512,14 +515,18 @@ type conv_env = {
 
 let conv_fresh_tv ctx cenv name =
   let v =
-    match cenv.mode with Rigid -> TSkolem (fresh_id (), name) | Flexible -> new_tvar ctx.level
+    match cenv.mode with
+    | Rigid | Proof -> TSkolem (fresh_id (), name)
+    | Flexible -> new_tvar ctx.level
   in
   cenv.tvs <- (name, v) :: cenv.tvs;
   v
 
 let conv_fresh_rv ctx cenv name =
   let v =
-    match cenv.mode with Rigid -> RSkolem (fresh_id (), name) | Flexible -> new_rvar ctx.level
+    match cenv.mode with
+    | Rigid | Proof -> RSkolem (fresh_id (), name)
+    | Flexible -> new_rvar ctx.level
   in
   cenv.rvs <- (name, v) :: cenv.rvs;
   v
@@ -563,6 +570,83 @@ let fresh_payloads ctx effects =
       | vars -> Some (hash, List.map (fun _ -> new_tvar ctx.level) vars))
     (List.sort_uniq Hash.compare effects)
 
+(** [conv_label ctx cenv] is a converted capability's label: a label skolem in a rigid signature
+    proof, otherwise a label variable. *)
+let conv_label ctx cenv =
+  match cenv.mode with Proof -> TLabel (fresh_id (), "l") | Rigid | Flexible -> new_tvar ctx.level
+
+(** [elaborate_instance_rows ctx ~meta ?enclosing ty] replaces each registered instance effect
+    named in a row of the converted annotation [ty] with one instance entry per capability of that
+    effect among the parameter types of the annotated arrow and of the arrows enclosing it within
+    [ty] ([enclosing] seeds the outermost), at any depth. A row naming an instance effect with no
+    such capability is refused (E0830), because nothing determines its label (design §9 A1.5). *)
+let elaborate_instance_rows ctx ~meta ?(enclosing = []) ty =
+  if ctx.instances = [] then ty
+  else
+    let capabilities ty =
+      let found = ref [] in
+      let rec walk ty =
+        match repr ty with
+        | TCon (h, args) -> (
+            List.iter walk args;
+            match
+              ( List.find_opt
+                  (fun (r : instance_registration) -> Hash.equal r.capability h)
+                  ctx.instances,
+                args )
+            with
+            | Some r, label :: payload ->
+                found := { effect = r.instance_effect; label; payload } :: !found
+            | _ -> ())
+        | TTuple items -> List.iter walk items
+        | TArrow (params, _, result) ->
+            List.iter walk params;
+            walk result
+        | TResume (input, _, answer) | TVariadicArrow (input, _, answer) ->
+            walk input;
+            walk answer
+        | TExactThunk inner -> walk inner
+        | TVar _ | TSkolem _ | TLabel _ -> ()
+      in
+      walk ty;
+      List.rev !found
+    in
+    let elaborate_row enclosing (row : row) =
+      let named, ambient = List.partition (registered_instance_effect ctx) row.effects in
+      if named = [] then row
+      else
+        let entries =
+          List.concat_map
+            (fun effect ->
+              match
+                List.filter (fun (entry : instance) -> Hash.equal entry.effect effect) enclosing
+              with
+              | [] ->
+                  err ~meta ~code:"E0830"
+                    "the annotation names instance effect %s but no capability parameter                      determines its instance"
+                    (name_of ctx effect)
+              | entries -> entries)
+            named
+        in
+        {
+          row with
+          effects = ambient;
+          payloads = List.filter (fun (h, _) -> not (List.mem h named)) row.payloads;
+          instances = merge_instances (row.instances @ entries);
+        }
+    in
+    let rec walk enclosing ty =
+      match repr ty with
+      | TArrow (params, row, result) ->
+          let enclosing = enclosing @ List.concat_map capabilities params in
+          TArrow
+            (List.map (walk enclosing) params, elaborate_row enclosing row, walk enclosing result)
+      | TCon (h, args) -> TCon (h, List.map (walk enclosing) args)
+      | TTuple items -> TTuple (List.map (walk enclosing) items)
+      | other -> other
+    in
+    walk enclosing ty
+
 (* Convert a resolved surface type (an annotation) to an internal type. Free type/row
    variables are implicitly quantified at the annotation: first use introduces them. *)
 let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
@@ -584,7 +668,7 @@ let rec conv_ty ctx cenv (t : Kernel.ty) : ty =
           (List.length args);
       let args = List.map (conv_ty ctx cenv) args in
       (* a capability's first, internal argument is its instance label (design §9 A1.1) *)
-      if registered_capability ctx h then TCon (h, new_tvar ctx.level :: args) else TCon (h, args)
+      if registered_capability ctx h then TCon (h, conv_label ctx cenv :: args) else TCon (h, args)
   | Kernel.TApp _ -> err ~meta ~code:"E0810" "only declared types can be applied"
   | Kernel.TArrow (params, row, result) ->
       TArrow
@@ -767,7 +851,8 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
       let cenv = { mode = Flexible; tvs = vars; rvs = [] } in
       (* self-references — (tref tname) stayed Named — become the applied result type *)
       let conv_field (fl : Kernel.field) =
-        conv_decl_ty ctx cenv ~self:(tname, result) fl.Kernel.fty
+        elaborate_instance_rows ctx ~meta:fl.Kernel.fty.Kernel.meta
+          (conv_decl_ty ctx cenv ~self:(tname, result) fl.Kernel.fty)
       in
       let fields = List.map conv_field c.Kernel.fields in
       let ty = match fields with [] -> result | fields -> TArrow (fields, empty_row, result) in
@@ -823,7 +908,7 @@ and conv_decl_ty ctx cenv ?(unbound_code = "E0811") ?(effectself = None) ~self (
           err ~meta ~code:"E0810" "type %s expects %d argument(s), got %d" (name_of ctx h) arity
             (List.length args);
         let args = List.map (conv_decl_ty ctx cenv ~unbound_code ~effectself ~self) args in
-        if registered_capability ctx h then TCon (h, new_tvar ctx.level :: args)
+        if registered_capability ctx h then TCon (h, conv_label ctx cenv :: args)
         else TCon (h, args)
     | Kernel.TArrow (params, row, result) ->
         let converted_row = conv_row ctx cenv ~effectself row in
@@ -1104,6 +1189,12 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
       let effectself = Some (ename, decl_hash) in
       let params = List.map (conv_decl_ty ctx cenv ~effectself ~self) o.Kernel.op_params in
       let result = conv_decl_ty ctx cenv ~effectself ~self o.Kernel.op_result in
+      let params, result =
+        (* the operation is the arrow enclosing its parameter and result types *)
+        match elaborate_instance_rows ctx ~meta:o.Kernel.smeta (TArrow (params, empty_row, result)) with
+        | TArrow (params, _, result) -> (params, result)
+        | _ -> (params, result)
+      in
       let operation_row =
         if registered_instance_effect ctx decl_hash then
           (* each reference gets fresh, generalizable labels; the operation's row is the single
@@ -1857,7 +1948,7 @@ and infer ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(requir
   | Kernel.Unquote _ -> err ~meta ~code:"E0805" "unquote outside quote reached the checker"
   | Kernel.Ann (subject, ann) ->
       let cenv = { mode = Rigid; tvs = []; rvs = [] } in
-      let expected = conv_ty ctx cenv ann in
+      let expected = elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann) in
       let actual = infer ~immediate_transformer ctx env ~ambient ~required subject in
       (try Types.unify expected actual
        with Unify_error detail ->
@@ -1891,7 +1982,10 @@ and check_type_decl ctx (d : Kernel.decl) : unit =
       List.iter
         (fun (c : Kernel.conspec) ->
           List.iter
-            (fun (fl : Kernel.field) -> ignore (conv_decl_ty ctx cenv ~self fl.Kernel.fty))
+            (fun (fl : Kernel.field) ->
+              ignore
+                (elaborate_instance_rows ctx ~meta:fl.Kernel.fty.Kernel.meta
+                   (conv_decl_ty ctx cenv ~self fl.Kernel.fty)))
             c.Kernel.fields)
         cons
   | Kernel.DefEffect { ename; evars; ops } ->
@@ -1948,7 +2042,7 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                 match b.Kernel.annot with
                 | Some ann ->
                     let cenv = { mode = Flexible; tvs = []; rvs = [] } in
-                    (b.Kernel.bname, conv_ty ctx cenv ann)
+                    (b.Kernel.bname, elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann))
                 | None -> (b.Kernel.bname, new_tvar ctx.level))
               bindings
           in
@@ -1978,8 +2072,10 @@ and check_group ?recovery_group ctx (decl : Kernel.decl) : unit =
                       (* Check the declared polymorphism on a fresh instance, then retain the inferred
                      payload relationships in the flexible exported signature. The source row
                      spelling alone cannot express those relationships. *)
-                      let cenv = { mode = Rigid; tvs = []; rvs = [] } in
-                      let rigid = conv_ty ctx cenv ann in
+                      let cenv = { mode = Proof; tvs = []; rvs = [] } in
+                      let rigid =
+                        elaborate_instance_rows ctx ~meta:ann.Kernel.meta (conv_ty ctx cenv ann)
+                      in
                       let proof =
                         instantiate ~level:ctx.level { ty = vty; gen_level = saved_level }
                       in
@@ -2068,7 +2164,9 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
                ( Canon.con_hash decl_hash i,
                  c.Kernel.con_name,
                  List.map
-                   (fun (fl : Kernel.field) -> conv_decl_ty ctx cenv ~self fl.Kernel.fty)
+                   (fun (fl : Kernel.field) ->
+                     elaborate_instance_rows ctx ~meta:fl.Kernel.fty.Kernel.meta
+                       (conv_decl_ty ctx cenv ~self fl.Kernel.fty))
                    c.Kernel.fields ))
              cons)
     | _ ->
