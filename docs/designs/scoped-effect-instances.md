@@ -305,36 +305,40 @@ combinators (they do not exist yet) and change nothing else.
 
 ## 9. Amendment A1 (TS.2 implementation findings)
 
-- Status: amendment to the approved design, from two review rounds of the
-  slice-1 checker plan against the shipped checker. It refines how §4 is
-  implemented and records two limits; it does not change the API, the dispatch
-  rule, or the compatibility freeze.
+- Status: amendment to the approved design, from review rounds of the slice-1
+  checker plan and of this amendment against the shipped checker. It fixes how
+  §4 is implemented and records the limits that follow; it does not change the
+  API, the dispatch rule (§4), or the compatibility freeze (§6).
 - Date: 2026-10-01.
 
-§4 assumed that every instance label in a row is fixed by unifying a
-capability before the row is compared ("row unification never has to choose").
-The shipped checker is Hindley-Milner with level-based generalization and
-unifies in a fixed order, so that assumption does not hold by itself. The
-amendment states what the implementation guarantees instead.
+§4's "Row determinacy" paragraph assumed every instance label in a row is fixed
+by unifying a capability before the row is compared ("row unification never has
+to choose"). The shipped checker is Hindley-Milner with level-based
+generalization and a fixed unification order, so that does not hold by itself.
+A1.3 and A1.6 supersede that paragraph.
 
 ### A1.1 Representation
 
 - A row keeps its ambient part exactly as today and gains instance entries
   `(instance effect, label, payload)`. A label is a rigid label minted per
-  checked `*.scoped` call, a label variable (generalizable like a type
-  variable), or a label skolem in a rigid annotation proof. Label positions
-  (a capability's first type argument and an entry's label) only ever hold
-  labels: binding one to a constructor, tuple or arrow is a type error.
+  checked `*.scoped` call, a label variable (generalized like a type
+  variable), or a label skolem in a rigid signature proof. Label positions (a
+  capability's first type argument, an entry's label) only ever hold labels:
+  binding one to a constructor, tuple or arrow is a type error.
 - Two entries are the same entry when their effects are equal and their labels
   are identical after resolution. Normalization merges identical entries and
-  unifies their payloads, repeating until no two entries are identical
-  (merging can make labels nested in payloads identical). A payload conflict
-  found there is an ordinary type error, never an internal one: unification is
-  not transactional, so an earlier failed unification can leave such a state,
-  and diagnostic rendering must survive it.
-- Each label determines one payload because a label enters a row only through
-  a capability (the operation schemes below), capability types are invariant
-  (never joined, only unified), and capabilities are opaque.
+  unifies their payloads, repeating until no two entries are identical (a merge
+  can make labels nested in payloads identical). A payload conflict found there
+  is an ordinary type error, never an internal one: unification is not
+  transactional, so a failed unification can leave such a state, and diagnostic
+  rendering must survive it.
+- Every walker covers instance labels and payloads: occurrence and level
+  adjustment, instantiation, cloning, quantification, lonely-tail closing,
+  `skolems` (so a clause skolem stored only in an entry's payload is still seen
+  by the handler escape check), display, and the new label walker.
+- Each label determines one payload because a label enters a row only through a
+  capability (A1.2), capability types are invariant (unified, never joined; the
+  join consults the checker's registration), and capabilities are opaque.
 
 ### A1.2 Instance operations and capabilities
 
@@ -347,38 +351,54 @@ amendment states what the implementation guarantees instead.
   operation signature, except in the instance effect's own operations. A
   generic container instantiated with a capability (`Box a` with
   `a := StateRef<i> s`) keeps the label visible and stays under non-escape.
+- `eval` of quoted code has an unchecked result and could be instantiated at a
+  capability type; only a stale capability can result, which the runtime trap
+  (§4 "Dispatch rule") covers.
 
-### A1.3 Deferred instance-row constraints
+### A1.3 No inferred instance identification
 
-When two rows are compared and an entry carries a label variable that is not
-yet identical to an entry of the same effect on the other side, the comparison
-of those rows is deferred: it is queued and retried at the next drain point
-(the end of an application's argument checking, the end of a binding's
-inference, before a scoped subtraction and its escape check, and before
-generalization). A queued comparison whose labels are still undetermined at a
-drain point is solved with the entries kept distinct. Programs with no
-instance entries are unaffected: nothing is ever queued for them.
+Unification never decides that two distinct label variables, or a label variable
+and a different label, name the same instance merely because two rows are
+compared. After identical entries cancel, remaining instance entries are kept
+distinct: an open row absorbs them, and a closed, rigid or same-tail row that
+lacks a matching entry is a type error, exactly as for any other effect. Labels
+are identified only by unifying capability types. There is no deferral or
+constraint queue: every row comparison is solved where it happens, so every row
+consumer (handler subtraction and skolem check, scoped subtraction and escape
+check, exactness, purity, publication) sees a settled row.
 
-**Limit L1 (pinned by a test).** A capability whose label is determined only
-after the drain point of the row that needs it, for example a lambda-bound
-capability passed through a higher-order function before the thunk using it is
-compared against a closed annotated row, is refused although the program is
-safe. Supplying the capability first, or leaving the row unannotated, is
-accepted.
+**Limit L1 (pinned by tests).** Where a closed or rigid row would require two
+labels to be identified before the capability types that relate them are
+unified, the program is refused although it is safe. For example, with an
+annotated `use : (() ->{state-instance} (), StateRef Int) ->{state-instance} ()`,
+`state.scoped(0, fn (c) -> use(fn () -> state.put-at(c, 2), c))` is refused,
+because the thunk's row meets `use`'s closed parameter row before `c` meets the
+capability parameter. Likewise `g(c, d) = use(fn () -> state.get-at(d), c)` is
+refused although plain HM would identify `c` and `d`. Workarounds: give the
+capability parameter before the thunk, or leave the callback row unannotated
+(an open row absorbs the entry).
 
 ### A1.4 Spawn
 
-The thunk row of `async.spawn` carries a persistent "no instance entries"
-constraint on its row variable. It survives generalization, aliases, wrappers
-and returned spawners, and any binding that would add an instance entry to
-that row is refused (E0823).
+The thunk row of `async.spawn` carries a persistent "no instance entries" flag
+on its row variable. Binding a flagged row variable to a row containing an
+instance entry fails with E0823; the flag passes to the new tail of any bound
+row and is OR-ed when two row variables are unified; instantiation and cloning
+keep it. A flagged variable may be bound to a rigid tail during a rigid
+signature proof; the flag survives in the published signature through the
+flexible unification of the inferred type. The flag is not shown in displayed
+or interface-v1 signatures, so an API diff cannot see it. With an empty
+registration no instance entry exists and the flag never fires.
 
 **Limit L2 (pinned by tests).** Under SC.4 the spawn operation's row is the
-child's row, and a spawning body's ambient row shares that tail. Therefore a
-callback invoked synchronously in a body that also spawns (`par(k1, k2) = {
-let t = async.spawn(k1); k2(); async.await(t) }`) cannot use an instance
-either, although it runs in the parent. Splitting the child's exclusion from
-the parent's inclusion needs a directional row constraint and is future work.
+child's row, and the spawning body's ambient row shares that tail. Therefore a
+callback invoked by a body that spawns, directly or through any callee whose
+row shares the spawned child's tail (row-polymorphic helpers such as
+`bg(k) = async.spawn(k)`, `state.scoped` or `async.scope` bodies that spawn),
+cannot use an instance, although it runs in the parent; for example
+`par(k1, k2) = { let t = async.spawn(k1); k2(); async.await(t) }` refuses a
+`k2` that uses one. Separating the child's exclusion from the parent's
+inclusion needs a directional row constraint and is future work.
 
 ### A1.5 Annotations
 
@@ -387,30 +407,64 @@ the parent's inclusion needs a directional row constraint and is future work.
   works. Label skolems are used only in a definition's rigid signature proof,
   which proves label polymorphism; the published signature is the flexible one.
 - An instance effect named in a row annotation stands for one entry per
-  capability label of that effect among the parameters of the annotated arrow
-  and of enclosing arrows, allocated before the rows are converted. If there is
-  none, the annotation is refused (E0820).
+  capability of that effect among the parameter types of the annotated arrow and
+  of arrows enclosing it *within the same annotation* (not lexically enclosing
+  lambdas), counting capabilities nested in tuples, constructors and callback
+  parameters. Each entry's label is that capability's label and its payload is
+  the capability's payload. If there is no such capability, the annotation is
+  refused (E0820).
 - An annotation around the `*.scoped` head is refused; an annotated callback is
   checked against its annotation with flexible labels.
 
+**Limit L3.** A capability annotation gets an independent label per
+occurrence, so an annotation cannot state that two capability positions share
+an instance: `keep : (StateRef Int) ->{} StateRef Int` with `keep(c) = c` is
+refused by its rigid proof. Inference, or a generic signature (`a -> a`),
+keeps the relationship.
+
 ### A1.6 Determinacy
 
-A published scheme whose instance entries mention a quantified label variable
-that occurs in no capability type of the scheme is refused (E0820). This is
-reachable from ordinary inference (`read-unknown() = state.get-at(loop())`),
-so it is a normal refusal, not an assertion. Ordinary row polymorphism is
-unaffected: `apply(k) = k()` mentions no instance label when published and
-remains usable with a scoped thunk while its scope is live.
+At every scheme publication (local `let`, local `let rec`, SCC publication, top
+level), a scheme whose instance entries mention a quantified label variable that
+occurs in no capability type of the scheme is refused (E0820). This is
+reachable from ordinary inference (`read-unknown() = state.get-at(loop())`), so
+it is a normal refusal. Ordinary row polymorphism is unaffected: `apply(k) =
+k()` mentions no instance label when published and remains usable with a scoped
+thunk while its scope is live. A top-level expression whose row still holds an
+instance entry or an unbound label is refused.
 
-### A1.7 Row consumers
+### A1.7 Scoped rule obligations
+
+The `*.scoped` checker form infers the initializer in the caller's ambient (its
+effects charge the caller), checks the body as a lambda body, subtracts exactly
+the entries `(instance effect, fresh label)`, applies the caller's handler
+requirements to the outward row (as an application's callee inclusion does)
+before including it, and then refuses (E0822) if the fresh label occurs in the
+result type, the outward row (labels, payloads, tails), the caller's ambient
+after inclusion, the handler requirements' payloads, or the types of the
+enclosing environment's variables, group members and group schemes.
+
+### A1.8 Row consumers
 
 Authority display, manifests, purity checks (including governance, host
-protocol and tier classification), and the exact-row predicate used by Warp's
-`VaryWorld` treat instance entries explicitly: display and authority use the
-deduplicated effect identities; exactness and purity compare instance entries
-too, so a row of instance entries only is never pure.
+protocol and tier classification), the review-diff row comparison and the
+exact-row predicate used by Warp's `VaryWorld` treat instance entries
+explicitly. Display and authority use the deduplicated effect identities.
+Exactness compares `(effect, resolved label)` multisets in which a label
+variable equals only itself, never effect identities, and never defers; purity
+counts instance entries, so a row of instance entries only is never pure.
+Errors raised inside unification for E0820, E0822 and E0823 carry a structured
+reason, so existing handlers that relabel unification failures as E0801 do not
+hide them.
 
-### A1.8 Slice-1 evidence
+### A1.9 Other refused programs
+
+Capabilities are invariant, so choosing between two live instances
+(`if b then c1 else c2`, `[c1, c2]`) is refused, and a lambda-bound operation or
+callback is monomorphic, so `both(f, c1, c2) = { f(c1); f(c2) }` is refused
+(rank-1). Both follow from A1.1 and are pinned by tests.
+
+### A1.10 Slice-1 evidence
 
 Slice 1 registers the instance declarations only on test checker contexts;
 production contexts have an empty registration, which a test asserts. Slice 1
