@@ -873,6 +873,9 @@ let paren_type_comment_sources =
     ("before two closing parens", "type T = | Case Text ((Int\n-- c23\n)\n-- c24\n) Text\n");
     ("three closing comments", "type T = | Case Text (((Int\n-- c25\n)\n-- c26\n)\n-- c27\n) Text\n");
     ("an application in a signature", "xs : (List ( -- c28\nInt))\nxs = [1]\n");
+    ("a wrapped tuple's closing comments", "type T = | Case Text ((Int, Text\n-- c29\n) -- c30\n)\n");
+    ("a commented application head", "xs : (List -- c31\nInt)\nxs = [1]\n");
+    ("a comment after a group", "f : ((Int) -- c32\n, Int) ->{} Int\nf = fn (a, b) -> a\n");
   ]
 
 let test_paren_type_comments () =

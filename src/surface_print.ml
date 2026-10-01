@@ -512,38 +512,56 @@ and pp_row context lookup fmt (row : Kernel.row) =
    comment-free groups are dropped as before. *)
 and pp_ty context lookup fmt (ty : Kernel.ty) =
   let paren_meta = Meta.surface_container "paren" ty.meta in
-  if context.trivia && type_group_has_comments paren_meta then
-    pp_grouped_ty context lookup paren_meta fmt ty
+  (* a source group keeps its parentheses whenever a comment lies anywhere in or around it: the
+     comment's line break is then inside the delimiters, where it is legal *)
+  if
+    context.trivia
+    && (not (Meta.is_empty paren_meta))
+    && (type_group_has_comments paren_meta
+       || type_owns_comments
+            { ty with Kernel.meta = Meta.without_surface_container "paren" ty.meta })
+  then pp_grouped_ty context lookup paren_meta fmt ty
   else pp_plain_ty context lookup fmt ty
 
 and pp_grouped_ty context lookup paren_meta fmt ty =
+  (* the node's own comments were written outside the outermost parenthesis *)
+  pp_leading context ty.meta fmt;
   pp_leading context paren_meta fmt;
   let inner = Meta.surface_container "paren" paren_meta in
-  let ty =
+  let body_meta = Meta.surface_container "paren-body" paren_meta in
+  (* a body that is a tuple keeps the comments before its own [)] inside its delimiters *)
+  let body_inner = Meta.trivia Meta.key_trivia_inner body_meta in
+  let tuple = match ty.Kernel.it with Kernel.TTuple _ -> true | _ -> false in
+  let own =
+    ty.meta |> Meta.remove Meta.key_trivia
+    |> Meta.remove Meta.key_trivia_trailing
+    |> Meta.remove Meta.key_trivia_inner |> Meta.remove Meta.key_doc
+  in
+  let own = if tuple then Meta.with_trivia Meta.key_trivia_inner body_inner own else own in
+  let body =
     {
       ty with
       Kernel.meta =
-        (if type_group_has_comments inner then Meta.with_surface_container "paren" inner ty.meta
-         else Meta.without_surface_container "paren" ty.meta);
+        (if type_group_has_comments inner then Meta.with_surface_container "paren" inner own
+         else Meta.without_surface_container "paren" own);
     }
   in
   Format.fprintf fmt "(@[<hov>";
-  (* comments written around the type inside [(] and [)] belong to the body and stay there *)
-  let body_meta = Meta.surface_container "paren-body" paren_meta in
   pp_leading context body_meta fmt;
-  pp_ty context lookup fmt ty;
+  pp_ty context lookup fmt body;
   pp_trailing context body_meta fmt;
   if has_line_trailing context body_meta then Format.pp_force_newline fmt ();
   (* comments before [)] may belong to the body or the group: one list, one layout *)
   pp_inner context
     (Meta.with_trivia Meta.key_trivia_inner
-       (Meta.trivia Meta.key_trivia_inner body_meta @ Meta.trivia Meta.key_trivia_inner paren_meta)
+       ((if tuple then [] else body_inner) @ Meta.trivia Meta.key_trivia_inner paren_meta)
        Meta.empty)
     fmt;
-  if ends_in_last_line_comment context (pp_ty context lookup) paren_meta [ ty ] then
+  if ends_in_last_line_comment context (pp_ty context lookup) paren_meta [ body ] then
     Format.pp_force_newline fmt ();
   Format.fprintf fmt "@])";
-  pp_trailing context paren_meta fmt
+  pp_trailing context paren_meta fmt;
+  pp_trailing context ty.meta fmt
 
 and pp_plain_ty context lookup fmt (ty : Kernel.ty) =
   pp_leading context ty.meta fmt;
