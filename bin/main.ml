@@ -589,6 +589,10 @@ let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_se
                                         (run_scheduled expression)
                                 with
                                 | Ok _ -> Ok ()
+                                (* under a policy a runtime failure is an observation: the failed
+                                   run is recorded and the next expression is still checked and
+                                   run, so every expression meets this constituent's authority *)
+                                | Error _ when Option.is_some observed -> Ok ()
                                 | Error error ->
                                     runtime_failure := Some error;
                                     Error []))
@@ -599,31 +603,13 @@ let relate_constituent ~file ~source ~authority ~prelude ~root_seed ~schedule_se
                             Policy_transcript (Observation_transcript.transcript observed)
                         | None -> V1_transcript (Run_transcript.transcript recorder)
                       in
-                      (* a policy names its operations by identity: one this program does not have
-                         would silently observe nothing *)
-                      match
-                        match policy with
-                        | Some policy ->
-                            Observation_policy.validate_operations policy
-                              ~is_operation:(is_operation store)
-                        | None -> Ok ()
-                      with
-                      | Error diagnostics -> Error (Relate_diagnostics diagnostics)
-                      | Ok () -> (
-                          match
-                            process_forms ~emit_warnings ~syntax store ~file source ~on_expr
-                          with
-                          | Ok () -> Ok (finished ())
-                          (* under a policy a runtime failure is an observation: the failed run is
-                         recorded and later expressions do not run *)
-                          | Error _ when Option.is_some !runtime_failure && Option.is_some observed
-                            ->
-                              Ok (finished ())
-                          | Error _ when Option.is_some !runtime_failure ->
-                              Error (Relate_runtime (Option.get !runtime_failure))
-                          | Error _ when Option.is_some !refused ->
-                              Error (Relate_refused (Option.get !refused))
-                          | Error diagnostics -> Error (Relate_diagnostics diagnostics))))))
+                      match process_forms ~emit_warnings ~syntax store ~file source ~on_expr with
+                      | Ok () -> Ok (finished ())
+                      | Error _ when Option.is_some !runtime_failure ->
+                          Error (Relate_runtime (Option.get !runtime_failure))
+                      | Error _ when Option.is_some !refused ->
+                          Error (Relate_refused (Option.get !refused))
+                      | Error diagnostics -> Error (Relate_diagnostics diagnostics)))))
 
 let print_relate_failure = function
   | Relate_diagnostics diagnostics -> print_diags diagnostics
@@ -635,19 +621,37 @@ let print_relate_failure = function
       match error with Runtime_err.Unhandled _ -> exit_unhandled | _ -> exit_runtime)
 
 (* a policy pinned to an interface-v1 identity applies only to a program with that interface *)
+(* Before anything runs, the program is checked into a private scratch store: the policy's
+   operations must be operations of that prepared program (prelude and the file's own
+   declarations), and a pinned interface must be its interface-v1 identity. *)
 let relate_policy_check ~prelude ~syntax ~file ~source policy =
-  match Observation_policy.interface policy with
-  | None -> Ok ()
-  | Some _ -> (
-      match
-        Frontend.check ~prelude_dir:(prelude_dir_of prelude) ~root:(fresh_check_root ()) ~syntax
-          ~file source
-      with
+  let store_error action error =
+    Error
+      [
+        cli_diagnostic ~code:"E0611"
+          (Printf.sprintf "relate could not %s its policy check store: %s" action
+             (Printexc.to_string error));
+      ]
+  in
+  match fresh_check_root () with
+  | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "create" error
+  | root -> (
+      match Frontend.check ~prelude_dir:(prelude_dir_of prelude) ~root ~syntax ~file source with
+      | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "prepare" error
       | Error diagnostics -> Error diagnostics
       | Ok (Frontend.Recovered { diagnostics; _ }) -> Error diagnostics
-      | Ok (Frontend.Checked artifact) ->
-          Observation_policy.check_interface policy
-            ~identity:(Interface.identity (Frontend.Checked.interface artifact)))
+      | Ok (Frontend.Checked artifact) -> (
+          match Store.open_store root with
+          | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "read" error
+          | Error diagnostics -> Error diagnostics
+          | Ok store -> (
+              match
+                Observation_policy.validate_operations policy ~is_operation:(is_operation store)
+              with
+              | Error diagnostics -> Error diagnostics
+              | Ok () ->
+                  Observation_policy.check_interface policy
+                    ~identity:(Interface.identity (Frontend.Checked.interface artifact)))))
 
 let read_relate_policy = function
   | None -> Ok None
@@ -730,7 +734,9 @@ and relate_with_policy file variation seed allows prelude syntax policy =
                       (Printf.sprintf
                          "Runs 1 and %d cannot be called equal under observation policy %s:\n%s"
                          index policy_name
-                         (Relate.redact ~secrets (Observation_transcript.render difference)));
+                         (Observation_transcript.render_redacted
+                            ~redact:(Relate.redact_fragments ~secrets)
+                            difference));
                   ]
             | Some _, None ->
                 (* the comparison names the policy it was made under *)
@@ -782,8 +788,9 @@ and relate_with_policy file variation seed allows prelude syntax policy =
                                   (Printf.sprintf
                                      "Runs 1 and %d diverged under observation policy %s:\n%s"
                                      run_index policy_name
-                                     (Relate.redact ~secrets
-                                        (Observation_transcript.render difference)));
+                                     (Observation_transcript.render_redacted
+                                        ~redact:(Relate.redact_fragments ~secrets)
+                                        difference));
                               ]
                         | Ok (Observation_transcript.Inconclusive difference) ->
                             if Option.is_none !inconclusive then

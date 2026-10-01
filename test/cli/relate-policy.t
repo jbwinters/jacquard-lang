@@ -96,12 +96,14 @@ operation the program does not have, and one pinned to another interface.
     Next step: Write the policy in canonical observation-policy-v1 form and name only operations and an interface identity of the observed program.
   exit 1
 
-Under a policy a runtime failure is an observation, not an abort: both runs
-are recorded as failed and compared. A failure without a diagnostic code
+Under a policy a runtime failure is an observation, not an abort: the failed
+expression is recorded and the next one still runs (and still meets the
+constituent's authority checks). A failure without a diagnostic code
 cannot be told apart from another, so the runs are not called equal.
 
   $ cat > failing.jac <<'EOF'
   > div(1, 0)
+  > add(1, 2)
   > EOF
   $ jacquard relate failing.jac --vary schedule=2 --seed 4 --policy default.policy; echo "exit $?"
   error[E1007]: Relational runs cannot be called equal
@@ -111,3 +113,58 @@ cannot be told apart from another, so the runs are not called equal.
                + failed uncoded
     Next step: Raise the policy's field limit, compare coded failures, or compare runs that complete; an inconclusive field agrees only on a prefix, an opaque kind, or an unfinished projection.
   exit 1
+
+A policy may name an operation the program itself declares: it is validated
+against the prepared program, not only the prelude.
+
+  $ cat > declares.jac <<'EOF'
+  > once effect Probe where { probe.send : (Int) -> Int }
+  > 
+  > add(1, 2)
+  > EOF
+  $ send=$(jacquard hash declares.jac | awk '$1 == "0:probe.send" { print $2 }')
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=4096 interface=none\nunlisted=ignore\noperations=1\noperation=%s arguments=all result=compare output=ignore\n' "$send" > declares.policy
+  $ jacquard relate declares.jac --vary schedule=2 --seed 4 --policy declares.policy | sed 's/policy=[0-9a-f]*/policy=<identity>/'; echo "exit $?"
+  relate runs=2 seed=4 verdict=equal policy=<identity>
+  exit 0
+
+Secret variation redacts payloads from diagnostics even when the policy's
+field limit truncates them: no fragment of either payload survives.
+
+  $ payload_a="rw-secret-v0-a-$(printf bdd732262feb6e95)"
+  $ payload_b="rw-secret-v0-b-$(printf 28efe333b266f103)"
+  $ cat > console-leak.jac <<'EOF'
+  > leak() = {
+  >   let token = secret.read(secret-ref("fixture", None))
+  >   `op:print`(secret.expose(token))
+  > }
+  > leak()
+  > EOF
+  $ cat > truncating.policy <<'EOF'
+  > jacquard-observation-policy format=1
+  > result=compare field-bytes=30 interface=none
+  > unlisted=record arguments=none result=ignore output=compare
+  > operations=0
+  > EOF
+  $ jacquard relate console-leak.jac --vary secret=fixture --seed 42 --allow secret --allow console --policy truncating.policy > truncated.all 2>&1; echo "exit $?"
+  exit 1
+  $ cat truncated.all
+  error[E1003]: Relational runs diverged
+    Cause: Runs 1 and 2 diverged under observation policy 6f159581d046c190d07d5c8062c44c9e6d2c8d4bd1026995918cc27dfb5443f5:
+             at run[0].event[2].output:
+               - "<secret redacted>" (truncated from 31 bytes)
+               + "<secret redacted>" (truncated from 31 bytes)
+    Next step: Review the first divergence and make the result and routed effects invariant.
+  $ for fragment in "$payload_a" "$payload_b" "${payload_a%?}" "${payload_b%?}" "${payload_a%????}"; do grep -F -c "$fragment" truncated.all || true; done
+  0
+  0
+  0
+  0
+  0
+  $ jacquard relate console-leak.jac --vary secret=fixture --seed 42 --allow secret --allow console --policy truncating.policy --diagnostic-format=json-v1 > truncated-json.all 2>&1; echo "exit $?"
+  exit 1
+  $ for fragment in "$payload_a" "$payload_b" "${payload_a%?}" "${payload_b%?}"; do grep -F -c "$fragment" truncated-json.all || true; done
+  0
+  0
+  0
+  0

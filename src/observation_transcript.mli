@@ -113,6 +113,11 @@ val compare : transcript -> transcript -> (verdict, Diag.t list) result
 (** [compare left right] compares in run, status, value, event order; within an event: operation,
     arguments, result, output. Transcripts recorded under different policies are refused (E1006). *)
 
+val render_redacted : redact:(string -> string) -> difference -> string
+(** [render_redacted ~redact difference] is {!render} with [redact] applied to the raw bytes of data
+    fields and truncated prefixes before they are escaped; paths, kinds, codes, lengths and hashes
+    are not rewritten. [redact] must not raise. *)
+
 val position_path : position -> string
 
 val render : difference -> string

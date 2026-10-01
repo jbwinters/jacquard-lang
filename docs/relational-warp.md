@@ -192,7 +192,8 @@ is made under an observation policy instead of the frozen projection: a
 divergence is still `E1003` (naming the policy identity and the
 observation-transcript path), a comparison that cannot be called equal is
 `E1007`, a refused policy is `E1005`, a runtime failure is recorded as an
-observation rather than reported as a failed constituent, and equality prints
+observation (the next expression still runs) rather than reported as a failed
+constituent, and equality prints
 `relate runs=N seed=S verdict=equal policy=<identity>`.
 
 ### RW.3 shipped schedule command

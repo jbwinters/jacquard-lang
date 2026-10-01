@@ -176,18 +176,22 @@ path and both sides; only recorded fields can appear in it.
 `jacquard relate FILE --vary KIND --seed S --policy POLICY` reads a canonical
 policy file and compares every run with run 1 under it:
 
-- Before running, the policy is refused (E1005) if it is malformed, lists an
-  operation identity the program does not have, or is pinned to an interface
-  other than the program's interface-v1 identity.
-- Each run is recorded as an observation transcript. A runtime failure is an
-  observation (the failed run is recorded and the remaining expressions do not
-  run), not a failed constituent.
+- Before anything runs, the program is checked into a private scratch store,
+  and the policy is refused (E1005) if it is malformed, lists an identity that
+  is not an operation of that prepared program (its prelude or its own
+  declarations), or is pinned to an interface other than the program's
+  interface-v1 identity.
+- Each top-level expression is recorded as a run of an observation transcript.
+  A runtime failure is an observation, not a failed constituent: the failed
+  run is recorded and the next expression is still checked against the
+  constituent's authority and run.
 - A certain difference is `E1003`, naming the policy identity and the
   observation path. If no run certainly differs but some pair cannot be called
   equal, the first such pair is `E1007`. Otherwise the verdict line names the
   policy: `relate runs=N seed=S verdict=equal policy=<identity>`.
-- Diagnostics pass through the same Secret-variation redaction as without a
-  policy, and only recorded fields can appear in them.
+- Diagnostics pass through the Secret-variation redaction applied to raw field
+  bytes, which also removes a trailing fragment of a payload left by
+  truncation; only recorded fields can appear in them.
 
 The policy identity is the comparison's name: two comparisons are the same
 comparison exactly when their policy identities are equal. Warp relational
