@@ -112,10 +112,11 @@ let register_builtin_signatures ctx signatures =
 (** [register_instances ctx registrations] enforces scoped instance effects (TS.2) on [ctx]. Each
     registration is validated against the store: the instance effect is an effect declaration, every
     operation is one of its operations, the capability type is a one-parameter type declaration, the
-    scoped term is a term, and the callback position is 1 (slice 1 implements the State shape
-    [(init, callback)]). Registration must happen before any affected signature is cached;
-    production contexts never register. It is a test-only API, so misuse raises [Invalid_argument].
-*)
+    scoped term is a term, the callback position is 1 (the State shape [(init, callback)]), and no
+    registration repeats an effect, capability or scoped term already registered. Registration
+    seeds the scoped term's trusted scheme (design §10 A2.3), so its body is never checked under
+    registration. Register before any affected signature is cached. Production contexts register
+    State through [make_ctx]; misuse raises [Invalid_argument]. *)
 let register_instances ctx registrations =
   let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
   let locate hash = Store.locate_internal ctx.store hash in
@@ -139,10 +140,45 @@ let register_instances ctx registrations =
     (match locate registration.scoped with
     | Ok { decl = { Kernel.it = Kernel.DefTerm _; _ }; _ } -> ()
     | _ -> refuse "the scoped combinator is not a term");
-    if registration.callback_position <> 1 then refuse "the callback position is not 1"
+    if registration.callback_position <> 1 then refuse "the callback position is not 1";
+    if
+      List.exists
+        (fun (registered : instance_registration) ->
+          Hash.equal registered.instance_effect registration.instance_effect
+          || Hash.equal registered.capability registration.capability
+          || Hash.equal registered.scoped registration.scoped)
+        ctx.instances
+    then refuse "an effect, capability or scoped term is already registered"
   in
-  List.iter check registrations;
-  ctx.instances <- ctx.instances @ registrations
+  (* the trusted scheme of a State-shaped scope (A2.3):
+     forall a s | e. (s, (StateRef s) ->{state-instance | e} a) ->{ | e} a, whose capability carries
+     a label variable bound by the callback's parameter *)
+  let seed (registration : instance_registration) =
+    let payload = new_tvar 1 and result = new_tvar 1 and label = new_label_var 1 in
+    let tail = new_rvar 1 in
+    let capability = TCon (registration.capability, [ label; payload ]) in
+    let callback_row =
+      {
+        effects = [];
+        payloads = [];
+        instances = [ { effect_id = registration.instance_effect; label; payload = [ payload ] } ];
+        tail;
+      }
+    in
+    let ty =
+      TArrow
+        ( [ payload; TArrow ([ capability ], callback_row, result) ],
+          { empty_row with tail },
+          result )
+    in
+    Hashtbl.replace ctx.term_sigs registration.scoped { ty; gen_level = 0 }
+  in
+  List.iter
+    (fun registration ->
+      check registration;
+      ctx.instances <- ctx.instances @ [ registration ];
+      seed registration)
+    registrations
 
 (** [instance_registrations ctx] lists the scoped instance effects [ctx] enforces. *)
 let instance_registrations ctx = ctx.instances
@@ -2710,8 +2746,40 @@ and useful_row ctx (tys : ty list) (matrix : Kernel.pat list list) (q : Kernel.p
 (* Public API                                                          *)
 (* ------------------------------------------------------------------ *)
 
+(** [production_registrations store] is the State registration when [store] holds every frozen
+    instance identity (design §10 A2.5), none when it holds none (a reduced prelude), and an error
+    when it holds only some. *)
+let production_registrations store =
+  let identities =
+    Instance_contract.
+      [ state_ref_type; state_ref_opaque_constructor; state_instance_effect; state_scoped ]
+    @ Instance_contract.instance_operations
+  in
+  let present hash = Result.is_ok (Store.locate_internal store hash) in
+  match List.partition present identities with
+  | _, [] ->
+      Ok
+        [
+          {
+            scoped = Instance_contract.state_scoped;
+            instance_effect = Instance_contract.state_instance_effect;
+            capability = Instance_contract.state_ref_type;
+            operations = Instance_contract.instance_operations;
+            callback_position = 1;
+          };
+        ]
+  | [], _ -> Ok []
+  | _ ->
+      Error
+        [
+          Diag.error ~domain:Checker ~code:"E0805"
+            ~summary:"The scoped instance declarations are incomplete"
+            ~cause:"The store holds some, but not all, of the State instance declarations."
+            ~next_step:"Load the complete, version-matched prelude and try again." ~contrast:None ();
+        ]
+
 (** Build a checker context over a prelude-loaded store; resolves the primitive type hashes. *)
-let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
+let make_ctx ?(instances = true) (store : Store.t) : (ctx, Diag.t list) result =
   let lookup name =
     match Store.lookup_kind store name Resolve.KType with
     | Some { Resolve.hash; _ } -> Ok hash
@@ -2729,7 +2797,7 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
     (lookup "int", lookup "real", lookup "text", lookup "code", lookup "hash", lookup "secret")
   with
   | Ok p_int, Ok p_real, Ok p_text, Ok p_code, Ok p_hash, Ok p_secret ->
-      Ok
+      let ctx =
         {
           store;
           trusted_store_refs = false;
@@ -2751,6 +2819,16 @@ let make_ctx (store : Store.t) : (ctx, Diag.t list) result =
           recovery_decls = [];
           instances = [];
         }
+      in
+      (* State is registered from its frozen identities (design §10 A2.5); [~instances:false]
+         builds the unregistered context tests use as a control *)
+      if not instances then Ok ctx
+      else
+        Result.map
+          (fun registrations ->
+            register_instances ctx registrations;
+            ctx)
+          (production_registrations store)
   | Error ds, _, _, _, _, _
   | _, Error ds, _, _, _, _
   | _, _, Error ds, _, _, _

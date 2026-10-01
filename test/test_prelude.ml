@@ -125,7 +125,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 38 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 40 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
@@ -138,6 +138,17 @@ let test_reviewed_operation_modes store =
         Kernel.{ it = App ({ it = Ref (op, Op); meta }, List.init arity (fun _ -> arg)); meta }
       in
       let expression = Kernel.{ it = Tuple [ perform; { it = Lit (LInt 7); meta } ]; meta } in
+      (* a scoped instance operation reaching the root is a stale capability: it is trapped before
+         capture, so no driver ever receives it (TS.2, design §10 A2.4) *)
+      if Instance_contract.is_instance_operation op then (
+        match Eval.run_state_capturing ctx (Eval.expr_state expression) with
+        | Error (Runtime_err.Stale_capability _) -> ()
+        | Ok _ ->
+            Alcotest.failf "%s.%s reached the root unrefused" reviewed.effect_name reviewed.op_name
+        | Error error ->
+            Alcotest.failf "%s.%s wrong root refusal: %s" reviewed.effect_name reviewed.op_name
+              (Runtime_err.to_string error))
+      else
       let captured =
         match Eval.run_state_capturing ctx (Eval.expr_state expression) with
         | Ok (Eval.COp { kont; _ }) -> kont

@@ -7,9 +7,12 @@ exception Err of Diag.t
 (** Internal checker short-circuit raised by scheme lookup helpers when their documented lookup or
     checking contract fails. Top-level checking APIs return diagnostics instead. *)
 
-val make_ctx : Store.t -> (ctx, Diag.t list) result
+val make_ctx : ?instances:bool -> Store.t -> (ctx, Diag.t list) result
 (** [make_ctx store] resolves required primitive types and creates an empty checker cache. Missing
-    or malformed primitive declarations are returned as diagnostics. *)
+    or malformed primitive declarations are returned as diagnostics. When the store holds the
+    State instance declarations, the context registers them (TS.2, design §10 A2.5); a store
+    holding only some of them is refused. [~instances:false] builds an unregistered context, for
+    tests only. *)
 
 val store : ctx -> Store.t
 (** [store ctx] returns the backing declaration store. *)
@@ -39,7 +42,8 @@ type instance_registration = {
 val register_instances : ctx -> instance_registration list -> unit
 (** [register_instances ctx registrations] enforces scoped instance effects on [ctx] after
     validating each registration against the store (effect, its operations, a one-parameter
-    capability type, a term, callback position 1 for slice 1). An invalid registration is API
+    capability type, a term, callback position 1, no repeated effect, capability or scoped term) and
+    seeds each scoped term's trusted scheme. An invalid registration is API
     misuse: [Invalid_argument], and nothing is registered. Register before any affected signature is
     cached. Production contexts never register. *)
 
