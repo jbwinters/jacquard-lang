@@ -869,6 +869,10 @@ let paren_type_comment_sources =
     ("before a closing paren", "type T = | Case Text (Int\n-- c19\n)\n");
     ("an expression annotation", "x = (1 : (( -- c20\nInt)))\n");
     ("an arrow parameter", "f : (( -- c21\nInt)) ->{} Int\nf = fn (a) -> a\n");
+    ("before three closing parens", "type T = | Case Text (((Int\n-- c22\n)))\n");
+    ("before two closing parens", "type T = | Case Text ((Int\n-- c23\n)\n-- c24\n) Text\n");
+    ("three closing comments", "type T = | Case Text (((Int\n-- c25\n)\n-- c26\n)\n-- c27\n) Text\n");
+    ("an application in a signature", "xs : (List ( -- c28\nInt))\nxs = [1]\n");
   ]
 
 let test_paren_type_comments () =

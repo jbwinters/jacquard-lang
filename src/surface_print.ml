@@ -141,6 +141,22 @@ let pp_spaced context pp fmt items =
          Some item)
        None items)
 
+(* Like [pp_spaced], but the space never breaks: used where a line break would end the enclosing
+   construct (positional fields, type arguments). A line comment still ends its line; it can only
+   occur where the source broke the line, inside delimiters. *)
+let pp_joined context pp fmt items =
+  ignore
+    (List.fold_left
+       (fun previous item ->
+         (match previous with
+         | None -> ()
+         | Some previous ->
+             if ends_in_line_comment context pp previous then Format.pp_force_newline fmt ()
+             else Format.pp_print_char fmt ' ');
+         pp fmt item;
+         Some item)
+       None items)
+
 (* Closes a [@[<v 2>...] brace group. The comment-free spelling keeps the enclosing box's break
    before [}], so only a final line comment forces the brace onto its own line. *)
 let pp_close_brace fmt commented =
@@ -518,9 +534,12 @@ and pp_grouped_ty context lookup paren_meta fmt ty =
   pp_ty context lookup fmt ty;
   pp_trailing context body_meta fmt;
   if has_line_trailing context body_meta then Format.pp_force_newline fmt ();
-  (* a comment before a nested group's [)] can belong to the enclosing body *)
-  pp_inner context body_meta fmt;
-  pp_inner context paren_meta fmt;
+  (* comments before [)] may belong to the body or the group: one list, one layout *)
+  pp_inner context
+    (Meta.with_trivia Meta.key_trivia_inner
+       (Meta.trivia Meta.key_trivia_inner body_meta @ Meta.trivia Meta.key_trivia_inner paren_meta)
+       Meta.empty)
+    fmt;
   if ends_in_last_line_comment context (pp_ty context lookup) paren_meta [ ty ] then
     Format.pp_force_newline fmt ();
   Format.fprintf fmt "@])";
@@ -531,6 +550,9 @@ and pp_plain_ty context lookup fmt (ty : Kernel.ty) =
   (match ty.it with
   | Kernel.TRef ref -> pp_gref lookup Surface_name.Type ty.meta fmt ref
   | Kernel.TVar name -> pp_named Surface_name.Tvar fmt name
+  | Kernel.TApp (head, args) when context.trivia && List.exists type_owns_comments args ->
+      (* a line break between a type and its arguments ends a signature or field: join them *)
+      Format.fprintf fmt "@[<hov>%a@]" (pp_joined context (pp_ty_atom context lookup)) (head :: args)
   | Kernel.TApp (head, args) ->
       Format.fprintf fmt "@[<hov>%a@]" (pp_spaced context (pp_ty_atom context lookup)) (head :: args)
   | Kernel.TArrow (params, row, result) ->
@@ -1497,12 +1519,10 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
       (* a line break between positional fields would end the field list, so a field whose
          parenthesized type owns comments (which break lines inside its parentheses) is joined
          with plain spaces *)
-      if context.trivia && List.exists type_owns_comments types then
-        List.iter
-          (fun ty ->
-            Format.pp_print_char fmt ' ';
-            pp_ty_atom context lookup fmt ty)
-          types
+      if context.trivia && List.exists type_owns_comments types then begin
+        Format.pp_print_char fmt ' ';
+        pp_joined context (pp_ty_atom context lookup) fmt types
+      end
       else begin
         Format.pp_print_space fmt ();
         pp_spaced context (pp_ty_atom context lookup) fmt types

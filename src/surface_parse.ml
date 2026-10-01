@@ -2010,14 +2010,16 @@ and parse_paren_type state ~allow_newlines:_ opening =
            ["paren"] container. Its ["paren-body"] container spans the type inside, so a comment
            written after [(] is the body's (printed after [(]) while one written before [(] is the
            group's (printed before it). *)
+        let inner = Meta.surface_container "paren" first.meta in
         let group = meta_with_span (span_between opening closing) in
+        (* only the innermost group has a body: a nested group's body would span exactly its
+           inner group, and two owners with one span make comment ownership ambiguous *)
         let group =
           match Meta.span first.meta with
-          | Some span ->
+          | Some span when Meta.is_empty inner ->
               Meta.with_surface_container "paren-body" (Meta.with_span span Meta.empty) group
-          | None -> group
+          | Some _ | None -> group
         in
-        let inner = Meta.surface_container "paren" first.meta in
         let group =
           if Meta.is_empty inner then group else Meta.with_surface_container "paren" inner group
         in
