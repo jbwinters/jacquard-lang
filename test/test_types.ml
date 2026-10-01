@@ -500,6 +500,58 @@ let test_instance_fixpoint () =
   Alcotest.(check int) "split duplicates merge" 1 (List.length merged.instances);
   Alcotest.(check bool) "and agree" true (repr a == t_int)
 
+let test_label_sort () =
+  (* a label variable never becomes a type, in either argument order *)
+  List.iter
+    (fun reverse ->
+      let label = new_label_var 1 in
+      let other = TTuple [] in
+      Alcotest.(check bool)
+        "a label variable refuses a type" false
+        (unifies (fun () -> if reverse then unify other label else unify label other)))
+    [ false; true ];
+  Alcotest.(check bool)
+    "a label variable refuses a skolem" false
+    (unifies (fun () -> unify (new_label_var 1) (TSkolem (fresh_id (), "a"))));
+  (* an ordinary variable that meets a label joins the label sort *)
+  List.iter
+    (fun reverse ->
+      let label = new_label_var 1 and plain = new_tvar 1 in
+      Alcotest.(check bool)
+        "a variable unifies with a label variable" true
+        (unifies (fun () -> if reverse then unify plain label else unify label plain));
+      Alcotest.(check bool) "and is then a label" false (unifies (fun () -> unify plain t_int)))
+    [ false; true ];
+  Alcotest.(check bool)
+    "a label variable takes a rigid label" true
+    (unifies (fun () -> unify (new_label_var 1) (TLabel (fresh_id (), "l"))));
+  (* instantiation keeps the sort *)
+  let copy = instantiate ~level:1 { ty = TTuple [ new_label_var 2 ]; gen_level = 1 } in
+  match repr copy with
+  | TTuple [ label ] ->
+      Alcotest.(check bool) "an instantiated label is a label" false (unifies (fun () -> unify label t_int))
+  | _ -> Alcotest.fail "unexpected instantiation"
+
+let test_capability_invariance () =
+  (* a registered capability's arguments are unified, never joined: two capabilities whose payload
+     callbacks differ in their closed rows do not join to a wider payload *)
+  let capability = Hash.of_string "ty-capability" in
+  let make effects =
+    TCon
+      ( capability,
+        [
+          new_label_var 1;
+          TArrow ([], { effects; payloads = []; instances = []; tail = RClosed }, t_int);
+        ] )
+  in
+  Alcotest.(check bool)
+    "an ordinary constructor joins its arguments" true
+    (unifies (fun () -> ignore (join ~level:1 (make [ ha ]) (make [ hb ]))));
+  Alcotest.(check bool)
+    "a capability is invariant" false
+    (unifies (fun () ->
+         ignore (join ~invariant:(Hash.equal capability) ~level:1 (make [ ha ]) (make [ hb ]))))
+
 let test_fresh_continuation_flag () =
   let i = TLabel (fresh_id (), "i") in
   let flagged () = new_rvar ~lacks_instances:true 0 in
@@ -556,6 +608,8 @@ let suite =
     Alcotest.test_case "instance entries: identity and distinctness" `Quick test_instance_entries;
     Alcotest.test_case "instance entries: fixpoint normalization" `Quick test_instance_fixpoint;
     Alcotest.test_case "fresh-continuation flag" `Quick test_fresh_continuation_flag;
+    Alcotest.test_case "labels are their own sort" `Quick test_label_sort;
+    Alcotest.test_case "capabilities are invariant in join" `Quick test_capability_invariance;
     Alcotest.test_case "row unification cases" `Quick test_row_cases;
     Alcotest.test_case "chained unification" `Quick test_chains;
     Alcotest.test_case "row inclusion is directional" `Quick

@@ -478,7 +478,7 @@ let unify_or ctx ?meta ?next_step ~what expected actual =
       detail
 
 let unify_join_or ctx ?meta ~what expected actual =
-  try Types.join_into ~level:ctx.level expected actual
+  try Types.join_into ~invariant:(registered_capability ctx) ~level:ctx.level expected actual
   with Unify_error detail ->
     err ?meta
       ~next_step:"the expected side comes from the surrounding context; make both sides agree"
@@ -573,7 +573,9 @@ let fresh_payloads ctx effects =
 (** [conv_label ctx cenv] is a converted capability's label: a label skolem in a rigid signature
     proof, otherwise a label variable. *)
 let conv_label ctx cenv =
-  match cenv.mode with Proof -> TLabel (fresh_id (), "l") | Rigid | Flexible -> new_tvar ctx.level
+  match cenv.mode with
+  | Proof -> TLabel (fresh_id (), "l")
+  | Rigid | Flexible -> new_label_var ctx.level
 
 (** [elaborate_instance_rows ctx ~meta ?enclosing ty] replaces each registered instance effect
     named in a row of the converted annotation [ty] with one instance entry per capability of that
@@ -1205,7 +1207,7 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
                 match repr param with
                 | TCon (cap, label :: payload) when registered_capability ctx cap -> (
                     (match repr label with
-                    | TVar ({ contents = Unbound _ } as cell) -> cell := Link (new_tvar inner)
+                    | TVar ({ contents = Unbound _ } as cell) -> cell := Link (new_label_var inner)
                     | _ -> ());
                     match payload with [ payload ] -> Some (label, payload) | _ -> None)
                 | _ -> None)

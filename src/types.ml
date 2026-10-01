@@ -78,6 +78,16 @@ exception Unify_error of string
 let counter = Atomic.make 0
 let fresh_id () = Atomic.fetch_and_add counter 1 + 1
 let new_tvar level = TVar (ref (Unbound { id = fresh_id (); level }))
+
+(** [new_label_var level] is an instance label variable. Labels are their own sort (design §9 A1.1):
+    a label variable's id is negative, which keeps the sort without a separate table, so it unifies
+    only with labels and label variables, and an ordinary variable that meets it becomes a label. *)
+let new_label_var level = TVar (ref (Unbound { id = -fresh_id (); level }))
+
+let is_label_id id = id < 0
+
+(** [copy_var id level] is a fresh variable of the sort of variable [id]. *)
+let copy_var id level = if is_label_id id then new_label_var level else new_tvar level
 let new_rvar ?(lacks_instances = false) level : rtail =
   RVar (ref (RUnbound { id = fresh_id (); level; lacks_instances }))
 
@@ -267,6 +277,14 @@ and unify (a : ty) (b : ty) : unit =
     | t, TVar ({ contents = Unbound { id; level } } as r) -> (
         match repr t with
         | TVar { contents = Unbound { id = id'; _ } } when id = id' -> ()
+        | TVar ({ contents = Unbound { id = id'; level = level' } } as r')
+          when is_label_id id && not (is_label_id id') ->
+            (* the ordinary variable joins the label sort, never the reverse *)
+            occurs_adjust id' level' (TVar r);
+            r' := Link (TVar r)
+        | (TCon _ | TTuple _ | TArrow _ | TResume _ | TVariadicArrow _ | TExactThunk _ | TSkolem _)
+          when is_label_id id ->
+            raise (Unify_error "an instance label cannot be a type")
         | t ->
             occurs_adjust id level t;
             row_var_levels level t;
@@ -591,38 +609,42 @@ and copy_join_row row =
     Flexible rows with a common tail contribute the union of their fixed labels to a fresh result
     row without refining that shared tail. This prevents a branch result from widening callback
     input rows that happen to share it. Ordinary type constraints still use {!unify}; rigid rows
-    remain exact. Failure raises [Unify_error]. *)
-let rec join ~level (left : ty) (right : ty) : ty =
+    remain exact. A type whose head satisfies [invariant] (a registered capability, design §9
+    A1.1) is unified, never joined, so each instance label keeps one payload. Failure raises
+    [Unify_error]. *)
+let rec join ?(invariant = fun _ -> false) ~level (left : ty) (right : ty) : ty =
   Fuel_meter.tick 1;
   let left = repr left and right = repr right in
   if left == right then copy_join_result left
   else
     match (left, right) with
     | TTuple lefts, TTuple rights when List.length lefts = List.length rights ->
-        TTuple (List.map2 (join ~level) lefts rights)
+        TTuple (List.map2 (join ~invariant ~level) lefts rights)
     | TCon (left_head, left_args), TCon (right_head, right_args)
-      when Hash.equal left_head right_head && List.length left_args = List.length right_args ->
-        TCon (left_head, List.map2 (join ~level) left_args right_args)
+      when Hash.equal left_head right_head
+           && List.length left_args = List.length right_args
+           && not (invariant left_head) ->
+        TCon (left_head, List.map2 (join ~invariant ~level) left_args right_args)
     | TArrow (left_params, left_row, left_result), TArrow (right_params, right_row, right_result)
       when List.length left_params = List.length right_params ->
         List.iter2 unify left_params right_params;
         TArrow
           ( List.map copy_join_result left_params,
             join_rows left_row right_row,
-            join ~level left_result right_result )
+            join ~invariant ~level left_result right_result )
     | TResume (left_input, left_row, left_answer), TResume (right_input, right_row, right_answer) ->
         unify left_input right_input;
         TResume
           ( copy_join_result left_input,
             join_rows left_row right_row,
-            join ~level left_answer right_answer )
+            join ~invariant ~level left_answer right_answer )
     | ( TVariadicArrow (left_param, left_row, left_result),
         TVariadicArrow (right_param, right_row, right_result) ) ->
         unify left_param right_param;
         TVariadicArrow
           ( copy_join_result left_param,
             join_rows left_row right_row,
-            join ~level left_result right_result )
+            join ~invariant ~level left_result right_result )
     | _ ->
         unify left right;
         copy_join_result left
@@ -653,7 +675,7 @@ and join_rows left right =
 (** [join_into ~level accumulator alternative] updates a dedicated unification-variable accumulator
     to an independent join result. It is used where resumptions need to refer to the eventual
     handler answer type before every alternative has been visited. *)
-let join_into ~level accumulator alternative =
+let join_into ?invariant ~level accumulator alternative =
   match accumulator with
   | TVar cell -> (
       match (!cell, repr alternative) with
@@ -662,7 +684,7 @@ let join_into ~level accumulator alternative =
           occurs_adjust id level alternative;
           row_var_levels level alternative;
           cell := Link (copy_join_result alternative)
-      | Link current, alternative -> cell := Link (join ~level current alternative))
+      | Link current, alternative -> cell := Link (join ?invariant ~level current alternative))
   | _ -> raise (Unify_error "join accumulator is not a dedicated type variable")
 
 (* ------------------------------------------------------------------ *)
@@ -688,7 +710,7 @@ let instantiate ~level (s : scheme) : ty =
         match Hashtbl.find_opt tmap id with
         | Some v -> v
         | None ->
-            let v = new_tvar level in
+            let v = copy_var id level in
             Hashtbl.add tmap id v;
             v)
     | (TVar _ | TSkolem _ | TLabel _) as t -> t
@@ -747,7 +769,7 @@ let clone_schemes (schemes : scheme list) : scheme list =
             match Hashtbl.find_opt tmap id with
             | Some copy -> copy
             | None ->
-                let copy = new_tvar level in
+                let copy = copy_var id level in
                 Hashtbl.add tmap id copy;
                 copy))
   and go_row row =
