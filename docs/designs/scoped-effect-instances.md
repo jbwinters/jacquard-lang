@@ -85,6 +85,9 @@ instance effect as `State<i>` for readability; it is the separate
 
 ### Typing rules (the model's `Instances` mode)
 
+(These rules, and the guarantees stated for them, cover the statically typed
+fragment: programs that do not use the result of unchecked `eval`; see A1.2.)
+
 - `state.scoped(init, fn (c) -> body)`: with `init : s`, check `body` with
   `c : StateRef<i> s` for a fresh rigid label `i`. The body's row may contain
   `State<i>`; the result row removes it. **Non-escape:** neither the result
@@ -353,14 +356,15 @@ A1.3 and A1.6 supersede that paragraph.
   generic container instantiated with a capability (`Box a` with
   `a := StateRef<i> s`) keeps the label visible and stays under non-escape.
 - **Unchecked evaluation is outside the static guarantee.** `eval` of quoted
-  code is checked independently and its result type is not related to its
-  input, so an evaluated identity function can disguise one live capability as
-  another (`eval-code(quote { fn (x) -> x })(count)` typed as `log`'s
-  capability), and the operation is then served by the wrong instance's handler
-  with a payload of the wrong type. The non-escape and payload-agreement
-  guarantees of §4 and this amendment hold for programs whose capabilities do
-  not flow through unchecked `eval`; the stale-capability trap still catches a
-  capability whose handler has returned.
+  code is checked independently, and its result type is unconstrained and
+  unrelated to its input. A program can therefore disguise one live capability
+  as another (`eval-code(quote { fn (x) -> x })(count)` typed as `log`'s
+  capability), or store an ill-typed payload in an instance
+  (`state.put-at(c, eval-code(quote { "wrong" }))` in an `Int` store). The
+  non-escape and payload-agreement guarantees of §4 and this amendment hold
+  only for the statically typed fragment: programs that do not use the result
+  of unchecked `eval`. The stale-capability trap still catches a capability
+  whose handler has returned.
 
 ### A1.3 No inferred instance identification
 
