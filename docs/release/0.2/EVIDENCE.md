@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1138`
+- Alcotest/QCheck cases: `1152`
 - Cram transcript files: `75`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -664,3 +664,9 @@ format differently on a second pass, so a remaining printer gap fails loudly
 instead of losing a comment or printing an unstable layout. One
 `test/test_surface_trivia.ml`
 case brings the current source inventory to `1138 / 75 / 35`.
+
+The scoped effect instance checker (slice 1 of
+`docs/designs/scoped-effect-instances.md`) adds 14 cases: the new
+`test/test_scoped_instances_checker.ml` suite and instance-entry, label-sort and
+occurs cases in `test/test_types.ml`. Instance declarations are registered on
+test checker contexts only. The source inventory is now `1152 / 75 / 35`.

@@ -163,13 +163,13 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0817 | a once resumption escapes its handler clause | returning, storing, capturing, or passing `resume` to a non-`Resume` parameter |
 | E0818 | polymorphic reuse of a non-value local binding (value restriction) | bind an application result, then call it at two unrelated types |
 | E0819 | opaque Secret used by generic inspection or serialization | passing a `Secret` to `debug.inspect` or a Text encoder instead of explicitly calling `secret.expose` |
-| E0830 | an annotation or published scheme names an instance effect whose label no capability determines, or a top-level expression leaves an instance entry | a thunk-only function over an instance (TS.2) |
-| E0831 | a scoped instance combinator outside its checker form | a wrapper, alias, non-literal callback, wrong arity or annotated head (TS.2) |
-| E0832 | an instance escapes its scope | returning, storing or sending a capability or a thunk over it (TS.2) |
-| E0833 | an instance entry reaches the row of a fresh-continuation callback | spawning a thunk that uses a capability (TS.2) |
-| E0834 | a user handler clause for an instance operation | `handle ... with get-at(...)` (TS.2) |
-| E0835 | constructing, destructuring or pattern-matching a capability | forging a capability value (TS.2) |
-| E0836 | a capability type in a nominal declaration or user operation signature | `type Box = Box(StateRef Int)` (TS.2) |
+| E0830 | an annotation or published scheme names an instance effect whose label no capability determines, or a top-level expression leaves an instance entry | a thunk-only function over an instance |
+| E0831 | a scoped instance combinator outside its checker form | a wrapper, alias, non-literal callback, wrong arity or annotated head |
+| E0832 | an instance escapes its scope | returning, storing or sending a capability or a thunk over it |
+| E0833 | an instance entry reaches the row of a fresh-continuation callback | spawning a thunk that uses a capability |
+| E0834 | a user handler clause for an instance operation | `handle ... with get-at(...)` |
+| E0835 | constructing, destructuring or pattern-matching a capability | forging a capability value |
+| E0836 | a capability type in a nominal declaration or user operation signature | `type Box = Box(StateRef Int)` |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
 E0817 has one bounded transformer exception: a direct clause lambda may capture
