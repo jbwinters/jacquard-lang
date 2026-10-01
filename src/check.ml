@@ -2780,12 +2780,10 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
           in
           close_lonely_rows ~gen_level:ctx.level ty;
           check_determinacy ctx ~meta:e.Kernel.meta { ty; gen_level = ctx.level };
-          (match (repr_row !ambient).instances with
-          | [] -> ()
-          | entry :: _ ->
-              err ~meta:e.Kernel.meta ~code:"E0830"
-                "this top-level expression performs %s on an instance that no scope here opens"
-                (name_of ctx entry.effect));
+          (* no instance entry or label may remain in the row, even inside a payload (A1.6) *)
+          if row_holds_instances !ambient then
+            err ~meta:e.Kernel.meta ~code:"E0830"
+              "this top-level expression performs an instance operation that no scope here opens";
           {
             names = [ ("_", { ty; gen_level = ctx.level }) ];
             row = Some (repr_row !ambient);

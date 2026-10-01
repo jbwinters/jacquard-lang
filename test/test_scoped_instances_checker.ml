@@ -455,6 +455,19 @@ let test_determinacy_and_consumers () =
   Alcotest.(check string)
     "a top-level expression holding an instance entry" "E0830"
     (code_of h "(app (var get-at) (app (var loop)))");
+  Alcotest.(check string)
+    "a top-level expression hiding an instance in an effect payload" "E0830"
+    (code_of h "(app (var emit) (lam () (app (var get-at) (app (var loop)))))");
+  (* quantification reaches labels inside ambient payloads; display does not show them *)
+  (match Test_check.check_src h (defterm "send" "(lam () (app (var emit) (var get-at)))") with
+  | Ok { Check.names = [ (_, scheme) ]; _ } ->
+      Alcotest.(check bool)
+        "a label inside a payload is quantified" true
+        (List.exists (fun id -> id < 0) (fst (Types.quantified scheme)));
+      Alcotest.(check bool)
+        "but not displayed" false
+        (List.exists (fun id -> id < 0) (fst (Types.quantified ~display:true scheme)))
+  | _ -> Alcotest.fail "send did not check");
   (* a capability in the result determines the label (limit L3's inferred case) *)
   check_ok "result-only capability"
     (defterm "mint"

@@ -865,8 +865,11 @@ let skolems ty =
   walk ty;
   List.sort_uniq Int.compare !ids
 
-(** Quantified variable ids of a scheme, for display ([forall a e. ...]). *)
-let quantified (s : scheme) : int list * int list =
+(** Quantified variable ids of a scheme. The default walk reaches every variable [instantiate]
+    freshens: ambient payloads and instance entries included (design §9 A1.1). [~display:true]
+    keeps the walk display uses ([forall a e. ...]): parameters, row tails and results only, since
+    rendered rows show effect names, never payloads or labels. *)
+let quantified ?(display = false) (s : scheme) : int list * int list =
   let tids = ref [] and rids = ref [] in
   let seen_t = Hashtbl.create 8 and seen_r = Hashtbl.create 8 in
   let rec go t =
@@ -882,53 +885,30 @@ let quantified (s : scheme) : int list * int list =
     | TTuple items -> List.iter go items
     | TArrow (params, row, result) ->
         List.iter go params;
-        (let row = repr_row row in
-         List.iter
-           (fun entry ->
-             go entry.label;
-             List.iter go entry.payload)
-           row.instances;
-         match row.tail with
-         | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
-             if not (Hashtbl.mem seen_r id) then begin
-               Hashtbl.add seen_r id ();
-               rids := id :: !rids
-             end
-         | _ -> ());
+        go_row row;
         go result
-    | TResume (input, row, answer) ->
+    | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
         go input;
-        (let row = repr_row row in
-         List.iter
-           (fun entry ->
-             go entry.label;
-             List.iter go entry.payload)
-           row.instances;
-         match row.tail with
-         | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
-             if not (Hashtbl.mem seen_r id) then begin
-               Hashtbl.add seen_r id ();
-               rids := id :: !rids
-             end
-         | _ -> ());
+        go_row row;
         go answer
-    | TVariadicArrow (param, row, result) ->
-        go param;
-        (let row = repr_row row in
-         List.iter
-           (fun entry ->
-             go entry.label;
-             List.iter go entry.payload)
-           row.instances;
-         match row.tail with
-         | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
-             if not (Hashtbl.mem seen_r id) then begin
-               Hashtbl.add seen_r id ();
-               rids := id :: !rids
-             end
-         | _ -> ());
-        go result
     | TExactThunk inner -> go inner
+  and go_row row =
+    let row = repr_row row in
+    if not display then begin
+      List.iter (fun (_, args) -> List.iter go args) row.payloads;
+      List.iter
+        (fun entry ->
+          go entry.label;
+          List.iter go entry.payload)
+        row.instances
+    end;
+    match row.tail with
+    | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
+        if not (Hashtbl.mem seen_r id) then begin
+          Hashtbl.add seen_r id ();
+          rids := id :: !rids
+        end
+    | _ -> ()
   in
   go s.ty;
   (List.rev !tids, List.rev !rids)
@@ -938,6 +918,28 @@ let quantified (s : scheme) : int list * int list =
     manifest consumers use it (design §9 A1.8). *)
 and effect_identities (row : row) =
   List.sort_uniq Hash.compare (row.effects @ List.map (fun entry -> entry.effect) row.instances)
+
+(** [row_holds_instances row] holds when [row] has an instance entry or a label anywhere, including
+    inside its payloads and the latent rows they contain. A top-level expression's row must not
+    (design §9 A1.6). *)
+let row_holds_instances row =
+  let rec ty_holds t =
+    Fuel_meter.tick 1;
+    match repr t with
+    | TLabel _ -> true
+    | TVar { contents = Unbound { id; _ } } -> is_label_id id
+    | TVar { contents = Link _ } | TSkolem _ -> false
+    | TCon (_, items) | TTuple items -> List.exists ty_holds items
+    | TArrow (params, row, result) ->
+        List.exists ty_holds params || row_holds row || ty_holds result
+    | TResume (input, row, answer) | TVariadicArrow (input, row, answer) ->
+        ty_holds input || row_holds row || ty_holds answer
+    | TExactThunk inner -> ty_holds inner
+  and row_holds row =
+    let row = repr_row row in
+    row.instances <> [] || List.exists (fun (_, args) -> List.exists ty_holds args) row.payloads
+  in
+  row_holds row
 
 (** [same_instance_sets left right] compares two normalized instance-entry sets exactly: the same
     effects with identical resolved labels, where a label variable equals only itself (A1.8). *)
@@ -1068,7 +1070,7 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
     [|] namespace required by surface syntax: [forall a | e. TYPE]. Variable naming is shared with
     the body rendering, so quantifier names line up. *)
 let show_scheme ?name_of ?effect_name_of ?(surface = false) (s : scheme) : string =
-  let tids, rids = quantified s in
+  let tids, rids = quantified ~display:true s in
   (* labels are never displayed (design §9 A1.4) *)
   let tids = List.filter (fun id -> not (is_label_id id)) tids in
   let body = show ?name_of ?effect_name_of ~surface s.ty in
