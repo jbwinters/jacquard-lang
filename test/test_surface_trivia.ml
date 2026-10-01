@@ -859,6 +859,16 @@ let paren_type_comment_sources =
     ("inside a type application", "type T = | Case Text (List -- c8\n(( -- c9\nInt)))\n");
     ("an applied group", "type T = | Case Text (List (( -- c10\nInt)))\n");
     ("a labeled field", "type T = | Case(a: (( -- c11\nInt)), b: Text)\n");
+    ("an application group", "type T = | Case Text ( -- c12\nList Int)\n");
+    ("a doubled application group", "type T = | Case Text (( -- c13\nList Int))\n");
+    ("an arrow group", "type T = | Case Text ( -- c14\n(Int) ->{} Int)\n");
+    ("an application argument group", "type T = | Case Text (List ( -- c15\nList Int))\n");
+    ("a tuple field", "type T = | Case Text ( -- c16\nInt, Text)\n");
+    ("a doubled tuple field", "type T = | Case Text (( -- c17\nInt, Text))\n");
+    ("before a nested closing paren", "type T = | Case Text ((Int\n-- c18\n))\n");
+    ("before a closing paren", "type T = | Case Text (Int\n-- c19\n)\n");
+    ("an expression annotation", "x = (1 : (( -- c20\nInt)))\n");
+    ("an arrow parameter", "f : (( -- c21\nInt)) ->{} Int\nf = fn (a) -> a\n");
   ]
 
 let test_paren_type_comments () =

@@ -50,16 +50,24 @@ let rec type_group_has_comments meta =
      || meta_has_comments (Meta.surface_container "paren-body" meta)
      || type_group_has_comments (Meta.surface_container "paren" meta))
 
-(* Some parenthesized type anywhere inside [ty] owns comments. *)
-let rec type_owns_group_comments (ty : Kernel.ty) =
-  type_group_has_comments (Meta.surface_container "paren" ty.meta)
+(* [meta] or any delimiter container recorded in it owns comments. *)
+let rec meta_tree_has_comments meta =
+  meta_has_comments meta
+  || List.exists
+       (fun (_, value) -> meta_tree_has_comments (Meta.meta_of_value value))
+       (Meta.bindings (Meta.surface_containers meta))
+
+(* Some node or delimiter anywhere inside [ty] owns comments: printing them breaks lines. *)
+let rec type_owns_comments (ty : Kernel.ty) =
+  meta_tree_has_comments ty.meta
   ||
   match ty.it with
   | Kernel.TRef _ | Kernel.TVar _ -> false
-  | Kernel.TApp (head, args) -> List.exists type_owns_group_comments (head :: args)
-  | Kernel.TArrow (params, _, result) -> List.exists type_owns_group_comments (result :: params)
-  | Kernel.TTuple items -> List.exists type_owns_group_comments items
-  | Kernel.TForall (_, _, body) -> type_owns_group_comments body
+  | Kernel.TApp (head, args) -> List.exists type_owns_comments (head :: args)
+  | Kernel.TArrow (params, row, result) ->
+      meta_tree_has_comments row.wmeta || List.exists type_owns_comments (result :: params)
+  | Kernel.TTuple items -> List.exists type_owns_comments items
+  | Kernel.TForall (_, _, body) -> type_owns_comments body
 
 let pp_comments fmt comments =
   List.iter
@@ -510,6 +518,8 @@ and pp_grouped_ty context lookup paren_meta fmt ty =
   pp_ty context lookup fmt ty;
   pp_trailing context body_meta fmt;
   if has_line_trailing context body_meta then Format.pp_force_newline fmt ();
+  (* a comment before a nested group's [)] can belong to the enclosing body *)
+  pp_inner context body_meta fmt;
   pp_inner context paren_meta fmt;
   if ends_in_last_line_comment context (pp_ty context lookup) paren_meta [ ty ] then
     Format.pp_force_newline fmt ();
@@ -595,6 +605,10 @@ and pp_plain_ty context lookup fmt (ty : Kernel.ty) =
 
 and pp_ty_atom context lookup fmt ty =
   match ty.Kernel.it with
+  (* a group that owns comments already prints its own parentheses *)
+  | (Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _)
+    when context.trivia && type_group_has_comments (Meta.surface_container "paren" ty.meta) ->
+      pp_ty context lookup fmt ty
   | Kernel.TApp _ | Kernel.TArrow _ | Kernel.TForall _ ->
       Format.fprintf fmt "(%a" (pp_ty context lookup) ty;
       pp_closing fmt (ends_in_line_comment context (pp_ty context lookup) ty) ")"
@@ -1483,7 +1497,7 @@ let pp_constructor ?(leading = true) context lookup fmt (constructor : Kernel.co
       (* a line break between positional fields would end the field list, so a field whose
          parenthesized type owns comments (which break lines inside its parentheses) is joined
          with plain spaces *)
-      if context.trivia && List.exists type_owns_group_comments types then
+      if context.trivia && List.exists type_owns_comments types then
         List.iter
           (fun ty ->
             Format.pp_print_char fmt ' ';
