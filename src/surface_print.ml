@@ -1972,20 +1972,41 @@ let print_file_with_trivia ?(file_meta = Meta.empty) ?(lookup : lookup option)
   in
   render_file ()
 
-(* The comment texts of [text], in order. *)
+(* Bootstrap [;] comments inside a raw [jqd { ... }] escape, skipping string literals. *)
+let raw_comments source =
+  let length = String.length source in
+  let rec scan index in_string acc =
+    if index >= length then List.rev acc
+    else
+      match source.[index] with
+      | '\\' when in_string -> scan (index + 2) true acc
+      | '"' -> scan (index + 1) (not in_string) acc
+      | ';' when not in_string ->
+          let stop = Option.value ~default:length (String.index_from_opt source index '\n') in
+          scan stop false (("raw", String.trim (String.sub source index (stop - index))) :: acc)
+      | _ -> scan (index + 1) in_string acc
+  in
+  scan 0 false []
+
+(* The comments of [text] as a sorted multiset of (kind, trimmed text). Order is not compared:
+   lowering legitimately moves declarations (dependency order) together with their comments. *)
 let comment_texts ~file text =
-  List.filter_map
+  List.concat_map
     (fun (located : Surface_lex.located) ->
       match located.token with
-      | Surface_lex.Comment comment | Surface_lex.DocComment comment -> Some (String.trim comment)
-      | _ -> None)
+      | Surface_lex.Comment comment -> [ ("line", String.trim comment) ]
+      | Surface_lex.DocComment comment -> [ ("doc", String.trim comment) ]
+      | Surface_lex.RawCandidate { source; _ } -> raw_comments source
+      | _ -> [])
     (Surface_lex.lex_recover ~file text).tokens
+  |> List.sort compare
 
 (** [check_reparses ?source ~file text] returns [Ok text] when [text] is a strict surface file and,
-    given the [source] it was formatted from, keeps every comment of [source] in order; otherwise
-    E1204. It is the formatter's last line of defense: [jac fmt] never prints or writes formatted
-    text that its own parser rejects or that loses or reorders a comment, so a printer bug surfaces
-    as a nonzero exit and a diagnostic instead of broken code or silent data loss. *)
+    given the [source] it was formatted from, keeps every comment of [source] (line, doc and raw
+    bootstrap comments, as a multiset: declarations may move with their comments); otherwise E1204.
+    It is the formatter's last line of defense: [jac fmt] never prints or writes formatted text that
+    its own parser rejects or that loses or alters a comment, so a printer bug surfaces as a nonzero
+    exit and a diagnostic instead of broken code or silent data loss. *)
 let check_reparses ?source ~file text : (string, Diag.t list) result =
   let refuse cause =
     Error
@@ -2008,7 +2029,7 @@ let check_reparses ?source ~file text : (string, Diag.t list) result =
       | Some source when comment_texts ~file source <> comment_texts ~file text ->
           refuse
             (Printf.sprintf
-               "Formatting `%s` would drop or reorder a comment. The output was discarded and the \
+               "Formatting `%s` would drop or alter a comment. The output was discarded and the \
                 file was not changed."
                file)
       | Some _ | None -> Ok text)

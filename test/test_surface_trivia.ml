@@ -919,8 +919,11 @@ let test_paren_type_comments () =
     "a dropped comment is refused" true
     (refused "type T = | Case Text (Int -- kept\n)\n" "type T = | Case Text Int\n");
   Alcotest.(check bool)
-    "reordered comments are refused" true
-    (refused "x = 1 -- a\ny = 2 -- b\n" "x = 1 -- b\ny = 2 -- a\n");
+    "declarations may move with their comments" false
+    (refused "-- b doc\nb = a\n-- a doc\na = 1\n" "-- a doc\na = 1\n-- b doc\nb = a\n");
+  Alcotest.(check bool)
+    "a doc comment turned into a line comment is refused" true
+    (refused "--| documented\nx = 1\n" "-- documented\nx = 1\n");
   Alcotest.(check bool) "kept comments pass" false (refused "x = 1 -- a\n" "x = 1 -- a\n")
 
 let test_trailing_comment_layouts () =
