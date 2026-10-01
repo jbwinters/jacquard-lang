@@ -659,7 +659,8 @@ a `paren` container (and its body) like a parenthesized expression, a group
 that owns comments keeps its parentheses with each comment on its own side of
 `(`, and positional constructor fields stay on one line when a field owns such
 a group. Comment-free types format as before. The formatter's reparse guard
-(E1204) now also refuses output that drops or reorders a comment, so a
-remaining printer gap fails loudly instead of losing a comment. One
+(E1204) now also refuses output that drops or alters a comment, or that would
+format differently on a second pass, so a remaining printer gap fails loudly
+instead of losing a comment or printing an unstable layout. One
 `test/test_surface_trivia.ml`
 case brings the current source inventory to `1138 / 75 / 35`.

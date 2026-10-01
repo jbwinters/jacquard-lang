@@ -2007,15 +2007,23 @@ let comment_texts ~file text =
     It is the formatter's last line of defense: [jac fmt] never prints or writes formatted text that
     its own parser rejects or that loses or alters a comment, so a printer bug surfaces as a nonzero
     exit and a diagnostic instead of broken code or silent data loss. *)
+let formatter_refusal ~summary cause =
+  Diag.error ~domain:Surface ~code:"E1204" ~summary ~cause
+    ~next_step:"Report this formatter bug with the input file; keep the source as written."
+    ~contrast:None ()
+
+(** [unstable_formatting ~file] is the E1204 refusal for output that would format differently on a
+    second pass: formatting must be a fixed point. *)
+let unstable_formatting ~file =
+  formatter_refusal ~summary:"The formatter could not reach a stable layout"
+    (Printf.sprintf
+       "Formatting `%s` succeeded, but formatting the result again changed it. The output was \
+        discarded and the file was not changed."
+       file)
+
 let check_reparses ?source ~file text : (string, Diag.t list) result =
-  let refuse cause =
-    Error
-      [
-        Diag.error ~domain:Surface ~code:"E1204"
-          ~summary:"The formatter produced text that does not parse" ~cause
-          ~next_step:"Report this formatter bug with the input file; keep the source as written."
-          ~contrast:None ();
-      ]
+  let refuse ?(summary = "The formatter produced text that does not parse") cause =
+    Error [ formatter_refusal ~summary cause ]
   in
   match Surface_parse.strict_file (Surface_parse.recover_string ~file text) with
   | Error diagnostics ->
@@ -2027,7 +2035,7 @@ let check_reparses ?source ~file text : (string, Diag.t list) result =
   | Ok _ -> (
       match source with
       | Some source when comment_texts ~file source <> comment_texts ~file text ->
-          refuse
+          refuse ~summary:"The formatter could not keep every comment"
             (Printf.sprintf
                "Formatting `%s` would drop or alter a comment. The output was discarded and the \
                 file was not changed."

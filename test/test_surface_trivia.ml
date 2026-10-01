@@ -909,7 +909,7 @@ let test_paren_type_comments () =
   Alcotest.(check string)
     "comment-free groups still collapse" "type T = | Case Text Int\n"
     (print_recovered "type T = | Case Text ((Int))\n");
-  (* the formatter's last line of defense refuses output that drops or reorders a comment *)
+  (* the formatter's last line of defense refuses output that drops or alters a comment *)
   let refused source printed =
     match Surface_print.check_reparses ~source ~file:"trivia.jac" printed with
     | Ok _ -> false
