@@ -39,7 +39,7 @@ type instance_registration = {
 val register_instances : ctx -> instance_registration list -> unit
 (** [register_instances ctx registrations] enforces scoped instance effects on [ctx] after
     validating each registration against the store (effect, its operations, a one-parameter
-    capability type, a term, a non-negative callback position). An invalid registration is API
+    capability type, a term, callback position 1 for slice 1). An invalid registration is API
     misuse: [Invalid_argument], and nothing is registered. Register before any affected signature is
     cached. Production contexts never register. *)
 

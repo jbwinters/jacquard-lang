@@ -865,11 +865,13 @@ let skolems ty =
   walk ty;
   List.sort_uniq Int.compare !ids
 
-(** Quantified variable ids of a scheme. The default walk reaches every variable [instantiate]
-    freshens: ambient payloads and instance entries included (design §9 A1.1). [~display:true]
-    keeps the walk display uses ([forall a e. ...]): parameters, row tails and results only, since
-    rendered rows show effect names, never payloads or labels. *)
-let quantified ?(display = false) (s : scheme) : int list * int list =
+(** Quantified variable ids of a scheme. [`Complete] (the default) reaches every variable
+    [instantiate] freshens, ambient payloads and instance entries included (design §9 A1.1).
+    [`Display] is the walk display uses ([forall a e. ...]): parameters, row tails and results only,
+    since rendered rows show effect names, never payloads or labels. [`Boundary] is [`Display] plus
+    instance entries: the host protocol's monomorphism checks keep their pre-TS.2 answer for every
+    program without a registered instance. *)
+let quantified ?(walk = `Complete) (s : scheme) : int list * int list =
   let tids = ref [] and rids = ref [] in
   let seen_t = Hashtbl.create 8 and seen_r = Hashtbl.create 8 in
   let rec go t =
@@ -894,14 +896,13 @@ let quantified ?(display = false) (s : scheme) : int list * int list =
     | TExactThunk inner -> go inner
   and go_row row =
     let row = repr_row row in
-    if not display then begin
-      List.iter (fun (_, args) -> List.iter go args) row.payloads;
+    if walk = `Complete then List.iter (fun (_, args) -> List.iter go args) row.payloads;
+    if walk <> `Display then
       List.iter
         (fun entry ->
           go entry.label;
           List.iter go entry.payload)
-        row.instances
-    end;
+        row.instances;
     match row.tail with
     | RVar { contents = RUnbound { id; level; _ } } when level > s.gen_level ->
         if not (Hashtbl.mem seen_r id) then begin
@@ -1070,7 +1071,7 @@ let show ?(name_of = fun h -> String.sub (Hash.to_hex h) 0 8) ?effect_name_of ?(
     [|] namespace required by surface syntax: [forall a | e. TYPE]. Variable naming is shared with
     the body rendering, so quantifier names line up. *)
 let show_scheme ?name_of ?effect_name_of ?(surface = false) (s : scheme) : string =
-  let tids, rids = quantified ~display:true s in
+  let tids, rids = quantified ~walk:`Display s in
   (* labels are never displayed (design §9 A1.4) *)
   let tids = List.filter (fun id -> not (is_label_id id)) tids in
   let body = show ?name_of ?effect_name_of ~surface s.ty in

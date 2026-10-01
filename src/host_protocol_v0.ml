@@ -809,7 +809,7 @@ let validate_target checker callable =
     map_error ~code:"E1603" "The selected target closure does not pass strict checking."
       (Check.force_term checker callable)
   in
-  let quantified_types, quantified_rows = Types.quantified scheme in
+  let quantified_types, quantified_rows = Types.quantified ~walk:`Boundary scheme in
   if quantified_types <> [] || quantified_rows <> [] then
     error ~code:"E1603" "The selected target is polymorphic rather than one closed invocation."
   else
@@ -987,7 +987,9 @@ let validate_operation checker ~effects entry =
     else if contract.Check.mode <> Kernel.Once then
       error ~code:"E1605" "An operation registry entry names a non-once operation."
     else
-      let quantified_types, quantified_rows = Types.quantified contract.Check.scheme in
+      let quantified_types, quantified_rows =
+        Types.quantified ~walk:`Boundary contract.Check.scheme
+      in
       if quantified_types <> [] || quantified_rows <> [] then
         error ~code:"E1604" "A configured operation has a polymorphic boundary signature."
       else

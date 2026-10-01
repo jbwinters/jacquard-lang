@@ -466,7 +466,7 @@ let test_determinacy_and_consumers () =
         (List.exists (fun id -> id < 0) (fst (Types.quantified scheme)));
       Alcotest.(check bool)
         "but not displayed" false
-        (List.exists (fun id -> id < 0) (fst (Types.quantified ~display:true scheme)))
+        (List.exists (fun id -> id < 0) (fst (Types.quantified ~walk:`Display scheme)))
   | _ -> Alcotest.fail "send did not check");
   (* a capability in the result determines the label (limit L3's inferred case) *)
   check_ok "result-only capability"

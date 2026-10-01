@@ -496,6 +496,17 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
       (Printf.sprintf "jacquard-diags-%d" (Unix.getpid ()))
   in
   let ( let* ) = Result.bind in
+  let rec remove_tree path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+        Sys.rmdir path
+      end
+      else Sys.remove path
+  in
+  at_exit (fun () ->
+      remove_tree root;
+      remove_tree (root ^ "-instances"));
   let* store = Store.open_store root in
   let* _ = Prelude.load ~dir:prelude_dir store in
   let* ctx = Check.make_ctx store in
