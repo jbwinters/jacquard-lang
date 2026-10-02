@@ -16,8 +16,12 @@ let test_registration () =
     (List.length (Check.instance_registrations (snd (Test_check.make_cctx ~instances:false ()))));
   (* registrations are validated against the store *)
   let valid = Instances_fixture.registration store in
+  (* each case runs on a fresh unregistered context, where the valid registration is accepted, so
+     each refusal is due to the defect it names rather than to a duplicate *)
+  let fresh_unregistered () = snd (Test_check.make_cctx ~instances:false ()) in
+  Check.register_instances (fresh_unregistered ()) [ valid ];
   let refused label registration =
-    match Check.register_instances ctx [ registration ] with
+    match Check.register_instances (fresh_unregistered ()) [ registration ] with
     | () -> Alcotest.failf "%s was accepted" label
     | exception Invalid_argument _ -> ()
   in
@@ -29,7 +33,9 @@ let test_registration () =
   refused "a scoped combinator that is a type" { valid with scoped = valid.capability };
   refused "a negative callback position" { valid with callback_position = -1 };
   refused "a callback position other than slice 1's" { valid with callback_position = 0 };
-  refused "a repeated registration" valid;
+  (match Check.register_instances ctx [ valid ] with
+  | () -> Alcotest.fail "a repeated registration was accepted"
+  | exception Invalid_argument _ -> ());
   (* a refused batch registers nothing, even its valid members *)
   let _, unregistered = Test_check.make_cctx ~instances:false () in
   (match Check.register_instances unregistered [ valid; valid ] with
@@ -623,6 +629,25 @@ let test_throw_emit () =
   refused "a State effect with the Throw shape" { state with shape = Instance_contract.Throw };
   refused "a State effect as Throw at position 0"
     { state with shape = Instance_contract.Throw; callback_position = 0 };
+  let registration_of (family : Instance_contract.family) : Check.instance_registration =
+    {
+      scoped = family.scoped;
+      instance_effect = family.instance_effect;
+      capability = family.capability;
+      operations = family.operations;
+      callback_position = 0;
+      shape = family.shape;
+    }
+  in
+  let throw_registration = registration_of throw and emit_registration = registration_of emit in
+  Check.register_instances (snd (Test_check.make_cctx ~instances:false ())) [ throw_registration ];
+  Check.register_instances (snd (Test_check.make_cctx ~instances:false ())) [ emit_registration ];
+  refused "a Throw effect with the Emit shape (its answer is result-only)"
+    { throw_registration with shape = Instance_contract.Emit };
+  refused "an Emit effect with the Throw shape (no answer parameter)"
+    { emit_registration with shape = Instance_contract.Throw };
+  refused "a Throw registration with State's operations"
+    { throw_registration with operations = state.operations };
   (* the answer is fresh at every reference (A3.2), and fail passes determinacy (A1.6) *)
   check_ok "fail"
     "(defterm ((binding fail () (lam ((pvar c)) (app (var throw.throw-at) (var c) (lit \"x\"))))))";
@@ -658,6 +683,10 @@ let test_throw_emit () =
     "(lam ((pvar c)) (handle (app (var throw.throw-at) (var c) (lit 1)) (ret (pvar x) (var x)) \
      (opclause throw.throw-at ((pvar r) (pvar e)) k (lit 0))))";
   code "forging a ThrowRef" "E0835" (Printf.sprintf "(ref #%s con)" (Hash.to_hex throw.carrier));
+  code "forging an EmitRef" "E0835" (Printf.sprintf "(ref #%s con)" (Hash.to_hex emit.carrier));
+  code "a user clause on emit.emit-at" "E0834"
+    "(lam ((pvar c)) (handle (app (var emit.emit-at) (var c) (lit 1)) (ret (pvar x) (var x)) \
+     (opclause emit.emit-at ((pvar r) (pvar w)) k (app (var k) (tuple)))))";
   code "a forwarding Throw wrapper" "E0831"
     (defterm "wrap" "(lam ((pvar f)) (app (var throw.scoped) (var f)))");
   code "an initializer given to Emit" "E0831"

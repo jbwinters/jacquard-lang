@@ -237,9 +237,10 @@ with the payload carried as a structured row entry) and a frame machine with two
 rules (`By_instance`, `Nearest`). Frames are immutable, so a multi-shot
 resumption copies inner handler frames exactly as the design specifies.
 
-What a run establishes (seed 210, 20,000 type-directed programs, sizes 2–12,
-mean program size 23.9 nodes, maximum 204; a run takes about 0.6 s). These are
-bounded, seeded tests, not proofs:
+What the original run (State instances only) established (seed 210, 20,000
+type-directed programs, sizes 2–12, mean program size 23.9 nodes, maximum 204;
+a run takes about 0.6 s). These figures are historical; the run after slice 2b
+follows the table. They are bounded, seeded tests, not proofs:
 
 | property | result |
 |---|---|
@@ -248,6 +249,23 @@ bounded, seeded tests, not proofs:
 | the escape and spawn checks are load-bearing: programs they reject, run anyway | 6,405 reach a stale capability; 135 are rejected for an escape through an outward `emit` payload alone |
 | `Instances` + `Nearest`: unsound | counterexamples found (at least one in the pinned run, plus the hand-written two-store case) |
 | coverage among well-typed programs | 388 with nested scopes, 235 with a scope under `amb`, 316 with a closure over a capability, 909 with a `collect`; the generator also produces capability- and thunk-typed parameters, payload mismatches, and spawned work |
+
+Slice 2b (§11 A3) extends the model with Throw and Emit instances. They use
+token-directed dispatch: a matching throw yields `err` and drops its
+continuation, and a matching emit is recorded in chronological order. The same
+seeded run (seed 210, 20,000 programs, about 0.9 s) then gives:
+
+- 6,831 well-typed programs under `Instances`, 0 stuck;
+- 6,800 well-typed programs under `Mono`;
+- 6,671 escape-rejected programs that, run anyway, reach a stale capability;
+  116 of them escape through an outward effect payload alone;
+- coverage of 833 programs with a Throw scope, 1,072 with an Emit scope, 986
+  with nested scopes, 372 with a scope under `amb`, 302 with a closure over a
+  capability, and 780 with a `collect`.
+
+A hand-written nearest-dispatch counterexample with two Throw scopes of
+different error types gets stuck under `Nearest`, as the State two-store case
+does.
 
 Targeted cases pin the two stores, same-typed instance blindness, mixed
 payloads (each instance keeps its own), spawned work, each escape route,
@@ -260,8 +278,8 @@ Limits: bounded random testing, not a proof. The model has one parameterized
 effect, no row variables (rows are closed sets with subsumption), monomorphic
 lambdas (no let-generalization of instance labels, and annotations name
 instances explicitly where the language would infer them), no `once` effects,
-and `emit` as its only outward payload effect (Throw is argued from it, not
-modelled). It models TS.0's unnamed operations through capabilities whose row
+and `emit` as its only ambient outward payload effect (ambient Throw is argued
+from it; Throw and Emit *instances* are modelled since slice 2b). It models TS.0's unnamed operations through capabilities whose row
 entry carries the payload, which is equivalent for typing because TS.0 keeps
 one payload per effect label per region. One divergence: the model's
 Mono mode also refuses spawned work with a non-empty row, whereas shipped TS.0
@@ -946,10 +964,11 @@ Emit. Any other use is E0831, as for State.
 
   A result-only parameter is sound only because Throw's served clause never
   resumes.
-- **Result transform.** The shape transforms the result using frozen
-  identities: the prelude's `result` type with its `ok`/`err` constructors, and
-  its `list` type with `nil`/`cons`. These identities belong to the Throw and
-  Emit identity sets.
+- **Result transform.** The shape transforms the result into the prelude's
+  `result` and `list` types. The contract module freezes the two type identities
+  as prerequisites (see Production registration). Their `ok`/`err` and
+  `nil`/`cons` constructors are fixed by those type declarations and by the
+  frozen scoped-term hashes.
 - Registration seeds each scoped term's trusted scheme (A2.3):
   - `forall a x | e. ((ThrowRef x) ->{throw-instance | e} a) ->{| e} Result x a`
   - `forall a w | e. ((EmitRef w) ->{emit-instance | e} a) ->{| e} (a, List w)`
@@ -1045,5 +1064,6 @@ No retained declaration hash changes.
   (E1101).
 - **Goldens:**
   - unchanged: the signature, ring-0 freeze and corpus hash goldens;
-  - changed: the prelude-hash and diagnostic goldens, and the rings and
-    operation-mode manifests (two new `once` operations).
+  - changed: the prelude-hash golden, the rings and operation-mode manifests
+    (two new `once` operations), and the tier and hidden-name transcripts. No
+    diagnostic text changes.

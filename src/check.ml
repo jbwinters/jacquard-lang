@@ -113,11 +113,12 @@ let register_builtin_signatures ctx signatures =
 (** [register_instances ctx registrations] enforces scoped instance effects (TS.2) on [ctx]. Each
     registration is validated against the store: the instance effect is an effect declaration, every
     operation is one of its operations, the capability type is a one-parameter type declaration, the
-    scoped term is a term, the callback position is 1 (the State shape [(init, callback)]), and no
-    registration repeats an effect, capability or scoped term already registered. Registration seeds
-    the scoped term's trusted scheme (design §10 A2.3), so its body is never checked under
-    registration. Register before any affected signature is cached. Production contexts register
-    State through [make_ctx]; misuse raises [Invalid_argument]. *)
+    scoped term is a term, the callback position and the effect's parameters fit the registration's
+    shape (design §11 A3.4), and no registration repeats an effect, capability or scoped term
+    already registered. Registration seeds the scoped term's trusted scheme (design §10 A2.3), so
+    its body is never checked under registration. Register before any affected signature is cached.
+    Production contexts register State, Throw and Emit through [make_ctx]; misuse raises
+    [Invalid_argument]. *)
 let register_instances ctx registrations =
   let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
   let locate hash = Store.locate_internal ctx.store hash in
@@ -2852,9 +2853,10 @@ and useful_row ctx (tys : ty list) (matrix : Kernel.pat list list) (q : Kernel.p
 (* Public API                                                          *)
 (* ------------------------------------------------------------------ *)
 
-(** [production_registrations store] is the State registration when [store] holds every frozen
-    instance identity (design §10 A2.5), none when it holds none (a reduced prelude), and an error
-    when it holds only some. *)
+(** [production_registrations store] is one registration per scoped instance family (State, Throw,
+    Emit) when [store] holds every frozen family identity (design §10 A2.5, §11 A3.4), none when it
+    holds none (a reduced prelude), and an error when it holds only some, or all of them without the
+    result and list types the Throw and Emit shapes return. *)
 let production_registrations store =
   let present hash = Result.is_ok (Store.locate_internal store hash) in
   let identities = List.concat_map Instance_contract.family_identities Instance_contract.families in
@@ -2934,7 +2936,8 @@ let make_ctx ?(instances = true) (store : Store.t) : (ctx, Diag.t list) result =
           instances = [];
         }
       in
-      (* State is registered from its frozen identities (design §10 A2.5); [~instances:false]
+      (* the instance families are registered from their frozen identities (§10 A2.5, §11 A3.4);
+         [~instances:false]
          builds the unregistered context tests use as a control *)
       if not instances then Ok ctx
       else

@@ -288,6 +288,19 @@ let test_throw_emit () =
        (throw_scoped
           (Printf.sprintf "(app (var throw.to-result) (lam () %s))" (throw_at "c" "(lit 7)"))));
   Alcotest.(check string)
+    "throw.catch does not catch an instance throw" "err(8)"
+    (run h
+       (throw_scoped
+          (Printf.sprintf "(app (var throw.catch) (lam () %s) (lam ((pvar e)) (lit 0)))"
+             (throw_at "c" "(lit 8)"))));
+  Alcotest.(check string)
+    "an instance scope does not catch an ambient throw (throw.catch)" "9"
+    (run h
+       (Printf.sprintf
+          "(app (var throw.catch) (lam () (match %s (clause (pwild) (lit 0)))) (lam ((pvar e)) \
+           (var e)))"
+          (throw_scoped "(app (var throw) (lit 9))")));
+  Alcotest.(check string)
     "an instance scope does not catch an ambient throw" "err(5)"
     (run h
        (Printf.sprintf "(app (var throw.to-result) (lam () %s))"
