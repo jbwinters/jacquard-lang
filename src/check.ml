@@ -48,10 +48,11 @@ type instance_registration = {
   capability : Hash.t;
   operations : Hash.t list;
   callback_position : int;
+  shape : Instance_contract.shape;
 }
-(** One registered scoped instance effect (TS.2, design §9 A1.0): the scoped combinator term, the
-    instance effect, its one-parameter capability type, its operations, and the position of the
-    scoped callback argument. Production contexts register none. *)
+(** One registered scoped instance effect (TS.2, design §9 A1.0, §11 A3.4): the scoped combinator
+    term, the instance effect, its one-parameter capability type, its operations, the position of
+    the scoped callback argument, and the scoped form's shape. *)
 
 type ctx = {
   store : Store.t;
@@ -121,9 +122,13 @@ let register_instances ctx registrations =
   let refuse cause = invalid_arg ("Check.register_instances: " ^ cause) in
   let locate hash = Store.locate_internal ctx.store hash in
   let check registered (registration : instance_registration) =
-    (match locate registration.instance_effect with
-    | Ok { decl = { Kernel.it = Kernel.DefEffect _; _ }; role = Store.Whole; _ } -> ()
-    | _ -> refuse "the instance effect is not an effect declaration");
+    let evars, ops =
+      match locate registration.instance_effect with
+      | Ok { decl = { Kernel.it = Kernel.DefEffect { evars; ops; _ }; _ }; role = Store.Whole; _ }
+        ->
+          (evars, ops)
+      | _ -> refuse "the instance effect is not an effect declaration"
+    in
     if registration.operations = [] then refuse "an instance effect needs operations";
     List.iter
       (fun operation ->
@@ -140,7 +145,72 @@ let register_instances ctx registrations =
     (match locate registration.scoped with
     | Ok { decl = { Kernel.it = Kernel.DefTerm _; _ }; _ } -> ()
     | _ -> refuse "the scoped combinator is not a term");
-    if registration.callback_position <> 1 then refuse "the callback position is not 1";
+    (match (registration.shape, registration.callback_position) with
+    | Instance_contract.State, 1 | (Instance_contract.Throw | Instance_contract.Emit), 0 -> ()
+    | _ -> refuse "the callback position does not match the scoped form's shape");
+    (* the shape's parameter discipline (A3.4): one payload parameter, the capability's argument,
+       carried by a first capability parameter of every operation; only Throw has a result-only
+       parameter, its operation's entire result *)
+    let rec occurs name (ty : Kernel.ty) =
+      match ty.it with
+      | Kernel.TVar var -> String.equal name var
+      | Kernel.TApp (head, args) -> occurs name head || List.exists (occurs name) args
+      | Kernel.TArrow (params, _, result) -> List.exists (occurs name) params || occurs name result
+      | Kernel.TTuple items -> List.exists (occurs name) items
+      | Kernel.TForall (vars, _, body) -> (not (List.mem name vars)) && occurs name body
+      | Kernel.TRef _ -> false
+    in
+    let rec mentions_capability (ty : Kernel.ty) =
+      match ty.it with
+      | Kernel.TRef (Kernel.Hashed h) -> Hash.equal h registration.capability
+      | Kernel.TApp (head, args) -> mentions_capability head || List.exists mentions_capability args
+      | Kernel.TArrow (params, _, result) ->
+          List.exists mentions_capability params || mentions_capability result
+      | Kernel.TTuple items -> List.exists mentions_capability items
+      | Kernel.TForall (_, _, body) -> mentions_capability body
+      | Kernel.TVar _ | Kernel.TRef (Kernel.Named _) -> false
+    in
+    let payload_vars =
+      List.sort_uniq String.compare
+        (List.map
+           (fun (op : Kernel.opspec) ->
+             match op.op_params with
+             | {
+                 Kernel.it =
+                   Kernel.TApp
+                     ( { Kernel.it = Kernel.TRef (Kernel.Hashed h); _ },
+                       [ { Kernel.it = Kernel.TVar payload; _ } ] );
+                 _;
+               }
+               :: rest
+               when Hash.equal h registration.capability
+                    && not (List.exists mentions_capability rest) ->
+                 payload
+             | _ -> refuse "every operation takes exactly one capability, first")
+           ops)
+    in
+    let payload =
+      match payload_vars with
+      | [ payload ] -> payload
+      | _ -> refuse "the operations disagree on the capability's payload"
+    in
+    let in_params =
+      List.filter
+        (fun var ->
+          List.exists (fun (op : Kernel.opspec) -> List.exists (occurs var) op.op_params) ops)
+        evars
+    in
+    if in_params <> [ payload ] then
+      refuse "only the capability's payload may occur in operation parameters";
+    (match (registration.shape, List.filter (fun var -> not (String.equal var payload)) evars) with
+    | (Instance_contract.State | Instance_contract.Emit), [] -> ()
+    | Instance_contract.Throw, [ answer ]
+      when List.for_all
+             (fun (op : Kernel.opspec) ->
+               match op.op_result.it with Kernel.TVar var -> String.equal var answer | _ -> false)
+             ops ->
+        ()
+    | _ -> refuse "the effect's parameters do not fit the scoped form's shape");
     if
       List.exists
         (fun (registered : instance_registration) ->
@@ -150,9 +220,11 @@ let register_instances ctx registrations =
         registered
     then refuse "an effect, capability or scoped term is already registered"
   in
-  (* the trusted scheme of a State-shaped scope (A2.3):
-     forall a s | e. (s, (StateRef s) ->{state-instance | e} a) ->{ | e} a, whose capability carries
-     a label variable bound by the callback's parameter *)
+  (* the trusted scheme of a scope (A2.3, A3.4), whose capability carries a label variable bound by
+     the callback's parameter:
+     State: forall a s | e. (s, (StateRef s) ->{state-instance | e} a) ->{ | e} a
+     Throw: forall a x | e. ((ThrowRef x) ->{throw-instance | e} a) ->{ | e} Result x a
+     Emit:  forall a w | e. ((EmitRef w) ->{emit-instance | e} a) ->{ | e} (a, List w) *)
   let seed (registration : instance_registration) =
     let payload = new_tvar 1 and result = new_tvar 1 and label = new_label_var 1 in
     let tail = new_rvar 1 in
@@ -165,9 +237,18 @@ let register_instances ctx registrations =
         tail;
       }
     in
+    let callback = TArrow ([ capability ], callback_row, result) in
+    let outward = { empty_row with tail } in
     let ty =
-      TArrow
-        ([ payload; TArrow ([ capability ], callback_row, result) ], { empty_row with tail }, result)
+      match registration.shape with
+      | Instance_contract.State -> TArrow ([ payload; callback ], outward, result)
+      | Instance_contract.Throw ->
+          TArrow ([ callback ], outward, TCon (Instance_contract.result_type, [ payload; result ]))
+      | Instance_contract.Emit ->
+          TArrow
+            ( [ callback ],
+              outward,
+              TTuple [ result; TCon (Instance_contract.list_type, [ payload ]) ] )
     in
     Hashtbl.replace ctx.term_sigs registration.scoped { ty; gen_level = 0 }
   in
@@ -2113,10 +2194,15 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
 and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instance_registration)
     args =
   let refuse fmt = err ~meta ~code:"E0831" fmt in
+  (* the argument pattern follows the shape (A3.3) *)
   let init, callback =
-    match args with
-    | [ init; callback ] when registration.callback_position = 1 -> (init, callback)
-    | _ -> refuse "a scoped combinator takes an initial value and a literal callback"
+    match (registration.shape, args) with
+    | Instance_contract.State, [ init; callback ] -> (Some init, callback)
+    | (Instance_contract.Throw | Instance_contract.Emit), [ callback ] -> (None, callback)
+    | Instance_contract.State, _ ->
+        refuse "a scoped combinator takes an initial value and a literal callback"
+    | (Instance_contract.Throw | Instance_contract.Emit), _ ->
+        refuse "this scoped combinator takes exactly one literal callback"
   in
   let param, body, annotation =
     match callback.Kernel.it with
@@ -2125,7 +2211,13 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
         (param, body, Some annotation)
     | _ -> refuse "the callback of a scoped combinator must be a literal one-parameter lambda"
   in
-  let init_ty = infer ctx env ~ambient ~required init in
+  (* the payload is the initializer's type, or a fresh caller-level variable that the scope's own
+     entries determine (A3.3) *)
+  let init_ty =
+    match init with
+    | Some init -> infer ctx env ~ambient ~required init
+    | None -> new_tvar ctx.level
+  in
   let label_id = fresh_id () in
   let label = TLabel (label_id, "scope") in
   let capability = TCon (registration.capability, [ label; init_ty ]) in
@@ -2175,7 +2267,14 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
   let escape where =
     err ~meta ~code:"E0832" "the instance opened here escapes its scope through %s" where
   in
-  if mentions_label label_id body_ty then escape "the scope's result";
+  (* non-escape is checked against the transformed result (A3.3) *)
+  let result_ty =
+    match registration.shape with
+    | Instance_contract.State -> body_ty
+    | Instance_contract.Throw -> TCon (Instance_contract.result_type, [ init_ty; body_ty ])
+    | Instance_contract.Emit -> TTuple [ body_ty; TCon (Instance_contract.list_type, [ init_ty ]) ]
+  in
+  if mentions_label label_id result_ty then escape "the scope's result";
   if row_mentions_label label_id outward then escape "the scope's effects";
   if row_mentions_label label_id !ambient then escape "the caller's effects";
   if List.exists (fun (_, args) -> List.exists (mentions_label label_id) args) required.payloads
@@ -2196,7 +2295,7 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
           escape "a definition group's signature"
       | _ -> ())
     env.group_schemes;
-  body_ty
+  result_ty
 
 (* ------------------------------------------------------------------ *)
 (* Declarations (W3.3)                                                 *)
@@ -2757,31 +2856,29 @@ and useful_row ctx (tys : ty list) (matrix : Kernel.pat list list) (q : Kernel.p
     instance identity (design §10 A2.5), none when it holds none (a reduced prelude), and an error
     when it holds only some. *)
 let production_registrations store =
-  let identities =
-    Instance_contract.
-      [ state_ref_type; state_ref_opaque_constructor; state_instance_effect; state_scoped ]
-    @ Instance_contract.instance_operations
-  in
   let present hash = Result.is_ok (Store.locate_internal store hash) in
+  let identities = List.concat_map Instance_contract.family_identities Instance_contract.families in
   match List.partition present identities with
   | _, [] ->
       Ok
-        [
-          {
-            scoped = Instance_contract.state_scoped;
-            instance_effect = Instance_contract.state_instance_effect;
-            capability = Instance_contract.state_ref_type;
-            operations = Instance_contract.instance_operations;
-            callback_position = 1;
-          };
-        ]
+        (List.map
+           (fun (family : Instance_contract.family) ->
+             {
+               scoped = family.scoped;
+               instance_effect = family.instance_effect;
+               capability = family.capability;
+               operations = family.operations;
+               callback_position = (match family.shape with Instance_contract.State -> 1 | _ -> 0);
+               shape = family.shape;
+             })
+           Instance_contract.families)
   | [], _ -> Ok []
   | _ ->
       Error
         [
           Diag.error ~domain:Checker ~code:"E0805"
             ~summary:"The scoped instance declarations are incomplete"
-            ~cause:"The store holds some, but not all, of the State instance declarations."
+            ~cause:"The store holds some, but not all, of the scoped instance declarations."
             ~next_step:"Load the complete, version-matched prelude and try again." ~contrast:None ();
         ]
 

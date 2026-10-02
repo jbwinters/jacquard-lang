@@ -34,9 +34,10 @@ type instance_registration = {
   capability : Hash.t;  (** the one-parameter capability type *)
   operations : Hash.t list;
   callback_position : int;  (** the scoped callback's argument position *)
+  shape : Instance_contract.shape;  (** the scoped form: State, Throw or Emit (§11 A3.4) *)
 }
 (** One registered scoped instance effect (TS.2, design docs/designs/scoped-effect-instances.md §9
-    A1.0). *)
+    A1.0, §11 A3.4). *)
 
 val register_instances : ctx -> instance_registration list -> unit
 (** [register_instances ctx registrations] enforces scoped instance effects on [ctx] after

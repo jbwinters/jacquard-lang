@@ -27,10 +27,45 @@ let state_put_at =
 let state_scoped =
   frozen "state.scoped" "b548fad24d2747db93d21b97739ebe7180e2deb2a138187a89de513d22778b9c"
 
-let instance_operations = [ state_get_at; state_put_at ]
+(* the prelude data types the Throw and Emit shapes return (design §11 A3.4); prerequisites of
+   their registration *)
+let result_type = frozen "result" "5552731cc63f81199617f3ecf4e4a8c14748c303d6ce78ce5b0f05f3026ad8db"
+let list_type = frozen "list" "03b4cd180ed05bf70d8a3e401dfea0688a46cf6b8c6469fd8e7e013c9e603c81"
+
+(** The shape of a scoped form (design §11 A3.4): State takes an initializer and returns the body's
+    result; Throw returns [Result e a]; Emit returns the body's result paired with the emitted list.
+*)
+type shape = State | Throw | Emit
+
+type family = {
+  shape : shape;
+  capability : Hash.t;  (** the capability type *)
+  carrier : Hash.t;  (** its private constructor *)
+  instance_effect : Hash.t;
+  operations : Hash.t list;
+  scoped : Hash.t;  (** the scoped term *)
+}
+(** One scoped instance family's frozen identities. *)
+
+let state_family =
+  {
+    shape = State;
+    capability = state_ref_type;
+    carrier = state_ref_opaque_constructor;
+    instance_effect = state_instance_effect;
+    operations = [ state_get_at; state_put_at ];
+    scoped = state_scoped;
+  }
+
+let families = [ state_family ]
+let instance_operations = List.concat_map (fun family -> family.operations) families
 
 (** [is_instance_operation hash] holds for an operation of a scoped instance effect. *)
 let is_instance_operation hash = List.exists (Hash.equal hash) instance_operations
 
 (** [is_private_carrier hash] holds for a capability type's private constructor. *)
-let is_private_carrier hash = Hash.equal hash state_ref_opaque_constructor
+let is_private_carrier hash = List.exists (fun family -> Hash.equal hash family.carrier) families
+
+(** [family_identities family] lists every frozen identity of [family]. *)
+let family_identities family =
+  [ family.capability; family.carrier; family.instance_effect; family.scoped ] @ family.operations
