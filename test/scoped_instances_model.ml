@@ -21,10 +21,22 @@
    - [Nearest] dispatch: an operation is handled by the nearest State frame, as Jacquard dispatches
      by operation identity today.
 
+   Slice 2b (§11 A3) adds two more instance kinds, each without an initializer:
+   - [ThrowScoped (c, body)] has type [Result e a]; [ThrowAt (c, v, t)] has the annotated answer
+     type [t], fresh at every use. A served throw yields [err v] and drops its continuation.
+   - [EmitScoped (c, body)] has type [(a, List w)]; [EmitAt (c, v)] records [v] in chronological
+     order.
+   Their payload is a metavariable fixed by unification with the scope's own operations. Every
+   scope, of any kind, checks non-escape on its transformed result, its outward row and the
+   environment. Dispatch for every kind follows the same two modes: [By_instance] serves an
+   operation at the frame holding its token (a non-matching frame forwards it outward), [Nearest]
+   at the nearest frame of its kind.
+
    What a run establishes is stated in the design document; the limits are the generator's size
    bound and sample count. *)
 
 type label = string
+type cap_kind = State_cap | Throw_cap | Emit_cap
 
 type ty =
   | TInt
@@ -33,7 +45,10 @@ type ty =
   | TText
   | TList of ty
   | TArr of ty * eff list * ty
-  | TCap of label * ty
+  | TCap of cap_kind * label * ty
+  | TResult of ty * ty  (** [Result e a]: error payload, then the body's answer *)
+  | TPair of ty * ty
+  | TMeta of int  (** a Throw or Emit scope's payload, fixed by unification *)
 
 (* Row entries are structured: an instance label (or amb), or an effect carrying a payload type
    ("state" under Mono, "emit" in both modes). No string encoding stands for a type. *)
@@ -61,6 +76,13 @@ type expr =
   | Detach of expr
       (** spawned work: runs after the whole program, outside every handler, as [async.spawn]'s
           child runs under the scheduler *)
+  | ThrowScoped of string * expr
+  | ThrowAt of expr * expr * ty  (** capability, error value, this use's answer type *)
+  | EmitScoped of string * expr
+  | EmitAt of expr * expr
+  | MatchResult of expr * string * expr * string * expr  (** [ok x -> a | err y -> b] *)
+  | Fst of expr
+  | Snd of expr
 
 (* --- typing --- *)
 
@@ -78,18 +100,63 @@ let rec mentions label = function
   | TInt | TBool | TUnit | TText -> false
   | TList t -> mentions label t
   | TArr (a, row, b) -> mentions label a || List.exists (eff_mentions label) row || mentions label b
-  | TCap (l, t) -> l = label || mentions label t
+  | TCap (_, l, t) -> l = label || mentions label t
+  | TResult (a, b) | TPair (a, b) -> mentions label a || mentions label b
+  | TMeta _ -> false (* callers zonk first *)
 
 and eff_mentions label = function Label l -> l = label | Carrying (_, t) -> mentions label t
 
-(* [sub a b]: a value of type [a] may be used where [b] is expected (rows are covariant sets). *)
-let rec sub a b =
-  match (a, b) with
+type metas = (int, ty) Hashtbl.t
+
+let rec zonk metas = function
+  | (TInt | TBool | TUnit | TText) as t -> t
+  | TList t -> TList (zonk metas t)
+  | TArr (a, row, b) -> TArr (zonk metas a, zonk_row metas row, zonk metas b)
+  | TCap (k, l, t) -> TCap (k, l, zonk metas t)
+  | TResult (a, b) -> TResult (zonk metas a, zonk metas b)
+  | TPair (a, b) -> TPair (zonk metas a, zonk metas b)
+  | TMeta i as t -> ( match Hashtbl.find_opt metas i with Some t -> zonk metas t | None -> t)
+
+and zonk_row metas row =
+  norm (List.map (function Label _ as e -> e | Carrying (n, t) -> Carrying (n, zonk metas t)) row)
+
+let rec occurs i = function
+  | TInt | TBool | TUnit | TText -> false
+  | TList t | TCap (_, _, t) -> occurs i t
+  | TArr (a, row, b) ->
+      occurs i a || occurs i b
+      || List.exists (function Carrying (_, t) -> occurs i t | Label _ -> false) row
+  | TResult (a, b) | TPair (a, b) -> occurs i a || occurs i b
+  | TMeta j -> i = j
+
+(* [unify metas a b]: [a] and [b] are equal once unsolved payloads are fixed; solves them. *)
+let rec unify metas a b =
+  match (zonk metas a, zonk metas b) with
+  | TMeta i, TMeta j when i = j -> true
+  | TMeta i, t | t, TMeta i ->
+      if occurs i t then false
+      else (
+        Hashtbl.replace metas i t;
+        true)
   | TInt, TInt | TBool, TBool | TUnit, TUnit | TText, TText -> true
-  | TList a, TList b -> sub a b
-  | TArr (a1, r1, b1), TArr (a2, r2, b2) -> sub a2 a1 && subset r1 r2 && sub b1 b2
-  | TCap (l1, t1), TCap (l2, t2) -> l1 = l2 && t1 = t2
+  | TList a, TList b -> unify metas a b
+  | TArr (a1, r1, b1), TArr (a2, r2, b2) ->
+      unify metas a1 a2 && unify metas b1 b2 && zonk_row metas r1 = zonk_row metas r2
+  | TCap (k1, l1, t1), TCap (k2, l2, t2) -> k1 = k2 && l1 = l2 && unify metas t1 t2
+  | TResult (a1, b1), TResult (a2, b2) | TPair (a1, b1), TPair (a2, b2) ->
+      unify metas a1 a2 && unify metas b1 b2
   | _ -> false
+
+(* [sub metas a b]: a value of type [a] may be used where [b] is expected (rows are covariant
+   sets; capability payloads are invariant). *)
+let rec sub metas a b =
+  match (zonk metas a, zonk metas b) with
+  | TList a, TList b -> sub metas a b
+  | TArr (a1, r1, b1), TArr (a2, r2, b2) ->
+      sub metas a2 a1 && sub metas b1 b2 && subset (zonk_row metas r1) (zonk_row metas r2)
+  | TResult (a1, b1), TResult (a2, b2) | TPair (a1, b1), TPair (a2, b2) ->
+      sub metas a1 a2 && sub metas b1 b2
+  | a, b -> unify metas a b
 
 let rec show_ty = function
   | TInt -> "Int"
@@ -101,17 +168,30 @@ let rec show_ty = function
       Printf.sprintf "(%s ->{%s} %s)" (show_ty a)
         (String.concat "," (List.map show_eff r))
         (show_ty b)
-  | TCap (l, t) -> Printf.sprintf "Cap<%s> %s" l (show_ty t)
+  | TCap (k, l, t) ->
+      Printf.sprintf "%s<%s> %s"
+        (match k with State_cap -> "Cap" | Throw_cap -> "ThrowRef" | Emit_cap -> "EmitRef")
+        l (show_ty t)
+  | TResult (e, a) -> Printf.sprintf "Result (%s) (%s)" (show_ty e) (show_ty a)
+  | TPair (a, b) -> Printf.sprintf "(%s, %s)" (show_ty a) (show_ty b)
+  | TMeta i -> Printf.sprintf "?%d" i
 
 and show_eff = function Label l -> l | Carrying (n, t) -> n ^ "<" ^ show_ty t ^ ">"
 
 type env = {
   vars : (string * ty) list;
   instances : (string * label) list;  (** capability binder -> its label, for annotations *)
-  fresh : int ref;
+  fresh : int ref;  (** instance labels and payload metavariables *)
+  metas : metas;
 }
 
 let mono_state = "state"
+
+(* Under Mono each kind is one effect; its row entry carries the payload. *)
+let mono_name = function
+  | State_cap -> mono_state
+  | Throw_cap -> "throw-instance"
+  | Emit_cap -> "emit-instance"
 
 (* Annotations name an instance by the capability binder that introduced it. Under Mono every
    capability has the one label [state]; its row entry carries the payload. *)
@@ -120,7 +200,10 @@ let rec resolve mode env = function
   | TList t -> TList (resolve mode env t)
   | TArr (a, row, b) ->
       TArr (resolve mode env a, norm (List.map (resolve_eff mode env) row), resolve mode env b)
-  | TCap (l, t) -> TCap (resolve_label env l, resolve mode env t)
+  | TCap (k, l, t) -> TCap (k, resolve_label env l, resolve mode env t)
+  | TResult (a, b) -> TResult (resolve mode env a, resolve mode env b)
+  | TPair (a, b) -> TPair (resolve mode env a, resolve mode env b)
+  | TMeta _ as t -> t
 
 and resolve_label env l =
   match List.assoc_opt l env.instances with
@@ -135,8 +218,43 @@ and resolve_eff mode env = function
       | Mono -> ill "under mono a state row entry is written with its payload, not %s" l)
   | Carrying (n, t) -> Carrying (n, resolve mode env t)
 
-let state_eff mode label payload =
-  match mode with Instances -> Label label | Mono -> Carrying (mono_state, payload)
+let instance_eff mode kind label payload =
+  match mode with Instances -> Label label | Mono -> Carrying (mono_name kind, payload)
+
+(* Instances: the scope's label may not appear in its transformed result, in its outward row, or in
+   the type of anything in the enclosing environment (a payload variable solved inside the scope
+   to a type that names a nested scope reaches the environment that way). *)
+let close_instance env label result row =
+  let result = zonk env.metas result in
+  let outward = zonk_row env.metas (List.filter (fun e -> e <> Label label) row) in
+  if mentions label result then ill "instance escapes through the result type %s" (show_ty result);
+  (match List.find_opt (eff_mentions label) outward with
+  | Some e -> ill "instance escapes through the effect %s" (show_eff e)
+  | None -> ());
+  (match List.find_opt (fun (_, t) -> mentions label (zonk env.metas t)) env.vars with
+  | Some (x, t) ->
+      ill "instance escapes through the environment: %s : %s" x (show_ty (zonk env.metas t))
+  | None -> ());
+  (result, outward)
+
+(* Mono: the region handles every operation of its kind in its body, so they must all carry its
+   payload (TS.0's one payload constraint per handled region); none remains outside. *)
+let close_mono env kind payload result row =
+  let name = mono_name kind in
+  List.iter
+    (function
+      | Carrying (n, t) when n = name && not (unify env.metas t payload) ->
+          ill "payload %s disagrees with the region's %s"
+            (show_ty (zonk env.metas t))
+            (show_ty (zonk env.metas payload))
+      | _ -> ())
+    row;
+  ( zonk env.metas result,
+    zonk_row env.metas (List.filter (function Carrying (n, _) -> n <> name | _ -> true) row) )
+
+let new_meta env =
+  incr env.fresh;
+  TMeta !(env.fresh)
 
 let rec infer mode env e : ty * eff list =
   match e with
@@ -153,74 +271,78 @@ let rec infer mode env e : ty * eff list =
   | App (f, arg) -> (
       let tf, rf = infer mode env f in
       let ta, ra = infer mode env arg in
-      match tf with
-      | TArr (p, latent, r) when sub ta p -> (r, union rf (union ra latent))
+      match zonk env.metas tf with
+      | TArr (p, latent, r) when sub env.metas ta p -> (r, union rf (union ra latent))
       | _ -> ill "bad application of %s to %s" (show_ty tf) (show_ty ta))
   | Let (x, e1, e2) ->
       let t1, r1 = infer mode env e1 in
       let t2, r2 = infer mode { env with vars = (x, t1) :: env.vars } e2 in
       (t2, union r1 r2)
   | Add (a, b) -> (
-      match (infer mode env a, infer mode env b) with
-      | (TInt, ra), (TInt, rb) -> (TInt, union ra rb)
+      let ta, ra = infer mode env a in
+      let tb, rb = infer mode env b in
+      match (unify env.metas ta TInt, unify env.metas tb TInt) with
+      | true, true -> (TInt, union ra rb)
       | _ -> ill "add expects Int")
   | If (c, a, b) -> (
       let tc, rc = infer mode env c in
       let ta, ra = infer mode env a in
       let tb, rb = infer mode env b in
-      match tc with
-      | TBool when ta = tb -> (ta, union rc (union ra rb))
+      match zonk env.metas tc with
+      | TBool when unify env.metas ta tb -> (ta, union rc (union ra rb))
       | _ -> ill "if: condition or branch mismatch")
   | Get c -> (
-      match infer mode env c with
-      | TCap (l, t), rc -> (t, union rc [ state_eff mode l t ])
-      | t, _ -> ill "get expects a capability, got %s" (show_ty t))
+      let tc, rc = infer mode env c in
+      match zonk env.metas tc with
+      | TCap (State_cap, l, t) -> (t, union rc [ instance_eff mode State_cap l t ])
+      | t -> ill "get expects a capability, got %s" (show_ty t))
   | Put (c, v) -> (
       let tc, rc = infer mode env c in
       let tv, rv = infer mode env v in
-      match tc with
-      | TCap (l, t) when tv = t -> (TUnit, union rc (union rv [ state_eff mode l t ]))
+      match zonk env.metas tc with
+      | TCap (State_cap, l, t) when unify env.metas tv t ->
+          (TUnit, union rc (union rv [ instance_eff mode State_cap l t ]))
       | _ -> ill "put: payload mismatch")
-  | Scoped (x, init, body) -> (
+  | Scoped (x, init, body) ->
       let ti, ri = infer mode env init in
-      match mode with
-      | Instances ->
-          incr env.fresh;
-          let label = Printf.sprintf "i%d" !(env.fresh) in
-          let body_env =
-            {
-              env with
-              vars = (x, TCap (label, ti)) :: env.vars;
-              instances = (x, label) :: env.instances;
-            }
-          in
-          let tb, rb = infer mode body_env body in
-          let outward = List.filter (fun e -> e <> Label label) rb in
-          (* non-escape: neither the result nor the payload of any effect leaving the scope may
-             mention the instance *)
-          if mentions label tb then ill "instance escapes through the result type %s" (show_ty tb);
-          (match List.find_opt (eff_mentions label) outward with
-          | Some e -> ill "instance escapes through the effect %s" (show_eff e)
-          | None -> ());
-          (tb, union ri outward)
-      | Mono ->
-          let body_env =
-            {
-              env with
-              vars = (x, TCap (mono_state, ti)) :: env.vars;
-              instances = (x, mono_state) :: env.instances;
-            }
-          in
-          let tb, rb = infer mode body_env body in
-          (* the region handles every State operation of its body, so they must all carry its
-             payload (TS.0's one payload constraint per handled region); none remains outside *)
-          List.iter
-            (function
-              | Carrying (n, t) when n = mono_state && t <> ti ->
-                  ill "payload %s disagrees with the region's %s" (show_ty t) (show_ty ti)
-              | _ -> ())
-            rb;
-          (tb, union ri (List.filter (function Carrying (n, _) -> n <> mono_state | _ -> true) rb)))
+      let t, row = scope mode env State_cap x ti body (fun tb -> tb) in
+      (t, union ri row)
+  | ThrowScoped (x, body) ->
+      let payload = new_meta env in
+      scope mode env Throw_cap x payload body (fun tb -> TResult (payload, tb))
+  | EmitScoped (x, body) ->
+      let payload = new_meta env in
+      scope mode env Emit_cap x payload body (fun tb -> TPair (tb, TList payload))
+  | ThrowAt (c, v, answer) -> (
+      let tc, rc = infer mode env c in
+      let tv, rv = infer mode env v in
+      match zonk env.metas tc with
+      | TCap (Throw_cap, l, p) when unify env.metas tv p ->
+          (* the answer is fresh at every use: a served throw never resumes *)
+          (resolve mode env answer, union rc (union rv [ instance_eff mode Throw_cap l p ]))
+      | _ -> ill "throw-at: capability or payload mismatch")
+  | EmitAt (c, v) -> (
+      let tc, rc = infer mode env c in
+      let tv, rv = infer mode env v in
+      match zonk env.metas tc with
+      | TCap (Emit_cap, l, p) when unify env.metas tv p ->
+          (TUnit, union rc (union rv [ instance_eff mode Emit_cap l p ]))
+      | _ -> ill "emit-at: capability or payload mismatch")
+  | MatchResult (scrutinee, x, on_ok, y, on_err) -> (
+      let ts, rs = infer mode env scrutinee in
+      match zonk env.metas ts with
+      | TResult (te, ta) ->
+          let t1, r1 = infer mode { env with vars = (x, ta) :: env.vars } on_ok in
+          let t2, r2 = infer mode { env with vars = (y, te) :: env.vars } on_err in
+          if unify env.metas t1 t2 then (t1, union rs (union r1 r2))
+          else ill "match: branches disagree"
+      | t -> ill "match expects a Result, got %s" (show_ty t))
+  | Fst p -> (
+      let tp, rp = infer mode env p in
+      match zonk env.metas tp with TPair (a, _) -> (a, rp) | _ -> ill "fst expects a pair")
+  | Snd p -> (
+      let tp, rp = infer mode env p in
+      match zonk env.metas tp with TPair (_, b) -> (b, rp) | _ -> ill "snd expects a pair")
   | Flip -> (TBool, [ amb ])
   | Amb body ->
       let tb, rb = infer mode env body in
@@ -232,15 +354,15 @@ let rec infer mode env e : ty * eff list =
       let _, rb = infer mode env body in
       let emitted = List.filter_map (function Carrying ("emit", t) -> Some t | _ -> None) rb in
       let rest = List.filter (function Carrying ("emit", _) -> false | _ -> true) rb in
-      match List.sort_uniq compare emitted with
+      match emitted with
       | [] -> (TList TUnit, rest)
-      | [ t ] -> (TList t, rest)
+      | t :: more when List.for_all (unify env.metas t) more -> (TList t, rest)
       | _ -> ill "collect: emitted values disagree")
   | Head (l, default) -> (
       let tl, rl = infer mode env l in
       let td, rd = infer mode env default in
-      match tl with
-      | TList t when t = td -> (t, union rl rd)
+      match zonk env.metas tl with
+      | TList t when unify env.metas t td -> (t, union rl rd)
       | _ -> ill "head: list and default disagree")
   | Detach body -> (
       (* SC.4 extended: detached work runs outside every scoped handler, so its row must be empty;
@@ -252,9 +374,32 @@ let rec infer mode env e : ty * eff list =
           ill "detached work performs scoped effects %s" (String.concat "," (List.map show_eff row))
       )
 
+(* A scope of [kind] binding [x] to a capability over [payload]; [transform] gives the scope's
+   result type from its body's. *)
+and scope mode env kind x payload body transform =
+  let label =
+    match mode with
+    | Instances ->
+        incr env.fresh;
+        Printf.sprintf "i%d" !(env.fresh)
+    | Mono -> mono_name kind
+  in
+  let body_env =
+    {
+      env with
+      vars = (x, TCap (kind, label, payload)) :: env.vars;
+      instances = (x, label) :: env.instances;
+    }
+  in
+  let tb, rb = infer mode body_env body in
+  match mode with
+  | Instances -> close_instance env label (transform tb) rb
+  | Mono -> close_mono env kind payload (transform tb) rb
+
 let check mode e =
-  match infer mode { vars = []; instances = []; fresh = ref 0 } e with
-  | t, [] -> Ok t
+  let env = { vars = []; instances = []; fresh = ref 0; metas = Hashtbl.create 8 } in
+  match infer mode env e with
+  | t, [] -> Ok (zonk env.metas t)
   | _, row -> Error ("unhandled effects: " ^ String.concat "," (List.map show_eff row))
   | exception Ill_typed message -> Error message
 
@@ -268,6 +413,9 @@ type value =
   | VList of value list
   | VClo of string * expr * (string * value) list
   | VCap of int
+  | VOk of value
+  | VErr of value
+  | VPair of value * value
 
 type frame =
   | FAppFun of expr * (string * value) list
@@ -287,6 +435,15 @@ type frame =
   | FHead1 of expr * (string * value) list
   | FHead2 of value
   | FDetached
+  | FThrowScope of int  (** handler frame of Throw instance [n] *)
+  | FThrowCap of expr * (string * value) list
+  | FThrowArg of value
+  | FEmitScope of int * value list  (** Emit instance [n], recorded so far, most recent first *)
+  | FEmitCap of expr * (string * value) list
+  | FEmitArg of value
+  | FMatch of string * expr * string * expr * (string * value) list
+  | FFst
+  | FSnd
 
 type dispatch = By_instance | Nearest
 type outcome = Value of value | Stuck of string | Out_of_fuel
@@ -304,9 +461,16 @@ let split target frames =
   in
   go [] frames
 
-let state_frame dispatch cap = function
-  | FScoped (n, _) -> ( match dispatch with By_instance -> n = cap | Nearest -> true)
+(* The frame that serves an operation of [kind] on capability [cap]: under [By_instance] the frame
+   holding that token (every other frame forwards it outward), under [Nearest] the nearest frame of
+   that kind. *)
+let instance_frame kind dispatch cap frame =
+  let serves n = match dispatch with By_instance -> n = cap | Nearest -> true in
+  match (kind, frame) with
+  | State_cap, FScoped (n, _) | Throw_cap, FThrowScope n | Emit_cap, FEmitScope (n, _) -> serves n
   | _ -> false
+
+let state_frame = instance_frame State_cap
 
 let run ?(fuel = 2000) dispatch e =
   let fresh = ref 0 in
@@ -343,6 +507,19 @@ let run ?(fuel = 2000) dispatch e =
     | Detach body ->
         detached := (body, env) :: !detached;
         return VUnit frames
+    | ThrowScoped (x, body) ->
+        incr fresh;
+        let n = !fresh in
+        eval body ((x, VCap n) :: env) (FThrowScope n :: frames)
+    | ThrowAt (c, v, _) -> eval c env (FThrowCap (v, env) :: frames)
+    | EmitScoped (x, body) ->
+        incr fresh;
+        let n = !fresh in
+        eval body ((x, VCap n) :: env) (FEmitScope (n, []) :: frames)
+    | EmitAt (c, v) -> eval c env (FEmitCap (v, env) :: frames)
+    | MatchResult (s, x, a, y, b) -> eval s env (FMatch (x, a, y, b, env) :: frames)
+    | Fst p -> eval p env (FFst :: frames)
+    | Snd p -> eval p env (FSnd :: frames)
   and return v frames =
     decr fuel;
     if !fuel <= 0 then raise Exit;
@@ -390,6 +567,31 @@ let run ?(fuel = 2000) dispatch e =
     | FHead2 (VList []) :: rest -> return v rest
     | FHead2 _ :: _ -> stuck "head of a non-list"
     | FDetached :: _ -> v
+    | FThrowCap (arg, env) :: rest -> eval arg env (FThrowArg v :: rest)
+    | FThrowArg (VCap cap) :: rest -> (
+        (* served: err, dropping the continuation up to and including the frame *)
+        match split (instance_frame Throw_cap dispatch cap) rest with
+        | Some (_, FThrowScope _, outer) -> return (VErr v) outer
+        | _ -> stuck "throw on a stale capability")
+    | FThrowArg _ :: _ -> stuck "throw on a non-capability"
+    | FThrowScope _ :: rest -> return (VOk v) rest
+    | FEmitCap (arg, env) :: rest -> eval arg env (FEmitArg v :: rest)
+    | FEmitArg (VCap cap) :: rest -> (
+        match split (instance_frame Emit_cap dispatch cap) rest with
+        | Some (inner, FEmitScope (n, items), outer) ->
+            return VUnit (inner @ (FEmitScope (n, v :: items) :: outer))
+        | _ -> stuck "emit on a stale capability")
+    | FEmitArg _ :: _ -> stuck "emit on a non-capability"
+    | FEmitScope (_, items) :: rest -> return (VPair (v, VList (List.rev items))) rest
+    | FMatch (x, a, y, b, env) :: rest -> (
+        match v with
+        | VOk r -> eval a ((x, r) :: env) rest
+        | VErr e -> eval b ((y, e) :: env) rest
+        | _ -> stuck "match on a non-Result")
+    | FFst :: rest -> (
+        match v with VPair (a, _) -> return a rest | _ -> stuck "fst of a non-pair")
+    | FSnd :: rest -> (
+        match v with VPair (_, b) -> return b rest | _ -> stuck "snd of a non-pair")
     | FAmb { pending; acc } :: rest -> (
         let acc = v :: acc in
         match pending with
@@ -422,6 +624,10 @@ let rec value_has_type v t =
   | VList vs, TList t -> List.for_all (fun v -> value_has_type v t) vs
   | VClo _, TArr _ -> true
   | VCap _, TCap _ -> true
+  | VOk v, TResult (_, a) -> value_has_type v a
+  | VErr v, TResult (e, _) -> value_has_type v e
+  | VPair (a, b), TPair (ta, tb) -> value_has_type a ta && value_has_type b tb
+  | _, TMeta _ -> true (* an unsolved payload: nothing constrains it *)
   | _ -> false
 (* closures and capabilities are checked by constructor only; generated result types are base types
    and lists of them, where the check is exact *)
@@ -437,7 +643,7 @@ let gen_expr : expr QCheck.Gen.t =
     incr fresh_name;
     Printf.sprintf "%s%d" prefix !fresh_name
   in
-  let literal = function
+  let rec literal = function
     | TInt -> map (fun n -> Int n) (int_range 0 9)
     | TBool -> map (fun b -> Bool b) bool
     | TText -> map (fun s -> Text s) (oneof_list [ "a"; "b" ])
@@ -446,18 +652,22 @@ let gen_expr : expr QCheck.Gen.t =
         return
           (Amb (match t with TInt -> Int 0 | TBool -> Bool true | TText -> Text "a" | _ -> Unit))
     | TArr (a, _, _) -> return (Lam ("_", a, Unit))
-    | TCap _ -> return Unit
+    | TResult (_, a) -> literal a >|= fun e -> ThrowScoped (name "t", e)
+    | TPair (a, _) -> literal a >|= fun e -> EmitScoped (name "e", e)
+    | TCap _ | TMeta _ -> return Unit
   in
-  (* vars: (name, ty, is_cap_with_binder) *)
-  let rec gen ty (vars : (string * ty) list) (caps : (string * ty) list) size =
+  (* caps: (binder, kind, payload) for every capability in scope *)
+  let rec gen ty (vars : (string * ty) list) (caps : (string * cap_kind * ty) list) size =
+    let of_kind kind = List.filter (fun (_, k, _) -> k = kind) caps in
+    let scaps = of_kind State_cap and tcaps = of_kind Throw_cap and ecaps = of_kind Emit_cap in
     let vars_of_type = List.filter (fun (_, t) -> t = ty) vars in
     let leaves =
       [ (3, literal ty) ]
       @ (if vars_of_type = [] then []
          else [ (4, map (fun (x, _) -> Var x) (oneof_list vars_of_type)) ])
-      @ (match List.filter (fun (_, payload) -> payload = ty) caps with
+      @ (match List.filter (fun (_, _, payload) -> payload = ty) scaps with
         | [] -> []
-        | matching -> [ (4, map (fun (c, _) -> Get (Var c)) (oneof_list matching)) ])
+        | matching -> [ (4, map (fun (c, _, _) -> Get (Var c)) (oneof_list matching)) ])
       @ if ty = TBool then [ (2, return Flip) ] else []
     in
     if size <= 0 then oneof_weighted leaves
@@ -474,7 +684,8 @@ let gen_expr : expr QCheck.Gen.t =
             oneof_list base_types >>= fun payload ->
             let c = name "c" in
             gen payload vars caps smaller >>= fun init ->
-            gen ty vars ((c, payload) :: caps) (size - 1) >|= fun body -> Scoped (c, init, body) );
+            gen ty vars ((c, State_cap, payload) :: caps) (size - 1) >|= fun body ->
+            Scoped (c, init, body) );
           ( 2,
             (* an escape attempt: a closure over the capability leaves its scope and is then
                called; under a permissive checker this reaches a stale capability *)
@@ -495,7 +706,45 @@ let gen_expr : expr QCheck.Gen.t =
             let x = name "y" in
             gen ty ((x, t1) :: vars) caps smaller >>= fun body ->
             gen t1 vars caps smaller >|= fun arg -> App (Lam (x, t1, body), arg) );
+          ( 1,
+            (* a Throw scope whose result is matched: ok returns the body's value, err handles the
+               error payload *)
+            oneof_list base_types >>= fun payload ->
+            let t = name "t" and x = name "x" and y = name "y" in
+            gen ty vars ((t, Throw_cap, payload) :: caps) (size - 1) >>= fun body ->
+            gen ty ((y, payload) :: vars) caps smaller >|= fun handler ->
+            MatchResult (ThrowScoped (t, body), x, Var x, y, handler) );
         ]
+        @ (if ty <> TUnit then []
+           else
+             [
+               ( 1,
+                 (* an escape attempt through the result: a closure over the Throw capability leaves
+               in ok and is then called *)
+                 oneof_list base_types >>= fun payload ->
+                 let t = name "t" and r = name "r" and f = name "f" in
+                 gen payload vars caps smaller >>= fun v ->
+                 gen TUnit vars caps smaller >|= fun rest ->
+                 Let
+                   ( r,
+                     ThrowScoped (t, Lam ("_", TUnit, ThrowAt (Var t, v, TUnit))),
+                     Let (name "u", MatchResult (Var r, f, App (Var f, Unit), name "z", Unit), rest)
+                   ) );
+               ( 1,
+                 (* an escape attempt through the error payload: throw a nested State scope's
+               capability, then use it outside that scope *)
+                 oneof_list base_types >>= fun payload ->
+                 let t = name "t" and d = name "d" and r = name "r" and k = name "k" in
+                 gen payload vars caps smaller >>= fun init ->
+                 gen TUnit vars caps smaller >|= fun rest ->
+                 Let
+                   ( r,
+                     ThrowScoped (t, Scoped (d, init, ThrowAt (Var t, Var d, TUnit))),
+                     Let
+                       ( name "u",
+                         MatchResult (Var r, name "o", Unit, k, Let (name "g", Get (Var k), Unit)),
+                         rest ) ) );
+             ])
         @ (if ty = TInt then
              [
                ( 2,
@@ -503,12 +752,49 @@ let gen_expr : expr QCheck.Gen.t =
                  gen TInt vars caps smaller >|= fun b -> Add (a, b) );
              ]
            else [])
-        @ (match caps with
+        @ (match ty with
+          | TList w ->
+              (* an Emit scope's record of emitted values *)
+              [
+                ( 1,
+                  oneof_list base_types >>= fun t1 ->
+                  let e = name "e" in
+                  gen t1 vars ((e, Emit_cap, w) :: caps) (size - 1) >|= fun body ->
+                  Snd (EmitScoped (e, body)) );
+              ]
+          | _ ->
+              (* an Emit scope's answer *)
+              [
+                ( 1,
+                  oneof_list base_types >>= fun payload ->
+                  let e = name "e" in
+                  gen ty vars ((e, Emit_cap, payload) :: caps) (size - 1) >|= fun body ->
+                  Fst (EmitScoped (e, body)) );
+              ])
+        @ (match tcaps with
+          | [] -> []
+          | _ ->
+              [
+                (* a throw at any answer type; outer capabilities forward through inner scopes *)
+                ( 1,
+                  oneof_list tcaps >>= fun (t, _, payload) ->
+                  gen payload vars caps smaller >|= fun v -> ThrowAt (Var t, v, ty) );
+              ])
+        @ (match ecaps with
           | [] -> []
           | _ when ty = TUnit ->
               [
                 ( 3,
-                  oneof_list caps >>= fun (c, payload) ->
+                  oneof_list ecaps >>= fun (e, _, payload) ->
+                  gen payload vars caps smaller >|= fun v -> EmitAt (Var e, v) );
+              ]
+          | _ -> [])
+        @ (match scaps with
+          | [] -> []
+          | _ when ty = TUnit ->
+              [
+                ( 3,
+                  oneof_list scaps >>= fun (c, _, payload) ->
                   gen payload vars caps smaller >|= fun v -> Put (Var c, v) );
               ]
           | _ -> [])
@@ -533,8 +819,8 @@ let gen_expr : expr QCheck.Gen.t =
                  gen ty vars caps smaller >|= fun d -> Head (Collect (Emit v), d) );
              ]
            else [])
-        @ (match caps with
-          | (other, _) :: _ when ty = TUnit ->
+        @ (match scaps with
+          | (other, _, _) :: _ when ty = TUnit ->
               [
                 (* an escape attempt through an outer handler: emit the capability out of its scope,
                    then use it (rejected by the payload non-escape rule; stale if run anyway) *)
@@ -553,25 +839,25 @@ let gen_expr : expr QCheck.Gen.t =
                 rejected by the detach rule *)
              [ (2, gen TUnit vars caps smaller >|= fun body -> Detach body) ]
            else [])
-        @ (match caps with
+        @ (match scaps with
           | [] -> []
           | _ ->
               [
                 (* a payload mismatch: put a value of another type (rejected) *)
                 ( 1,
-                  oneof_list caps >>= fun (c, payload) ->
+                  oneof_list scaps >>= fun (c, _, payload) ->
                   oneof_list (List.filter (fun t -> t <> payload) base_types) >>= fun wrong ->
                   gen wrong vars caps smaller >>= fun v ->
                   gen ty vars caps smaller >|= fun rest -> Let (name "m", Put (Var c, v), rest) );
                 (* a function taking the capability as a parameter, applied to it *)
                 ( 2,
-                  oneof_list caps >>= fun (c, payload) ->
+                  oneof_list scaps >>= fun (c, _, payload) ->
                   let p = name "p" in
-                  gen ty vars ((p, payload) :: caps) smaller >|= fun body ->
-                  App (Lam (p, TCap (c, payload), body), Var c) );
+                  gen ty vars ((p, State_cap, payload) :: caps) smaller >|= fun body ->
+                  App (Lam (p, TCap (State_cap, c, payload), body), Var c) );
                 (* a function taking a thunk over the capability, applied to one *)
                 ( 1,
-                  oneof_list caps >>= fun (c, payload) ->
+                  oneof_list scaps >>= fun (c, _, payload) ->
                   let k = name "k" in
                   gen payload vars caps smaller >>= fun v ->
                   gen ty vars caps smaller >|= fun rest ->
@@ -584,12 +870,12 @@ let gen_expr : expr QCheck.Gen.t =
               ])
         @
         (* a thunk that writes a capability, bound and applied later: higher-order transport *)
-        match caps with
+        match scaps with
         | [] -> []
         | _ ->
             [
               ( 3,
-                oneof_list caps >>= fun (c, payload) ->
+                oneof_list scaps >>= fun (c, _, payload) ->
                 let f = name "f" in
                 gen payload vars caps smaller >>= fun v ->
                 gen ty vars caps smaller >|= fun rest ->

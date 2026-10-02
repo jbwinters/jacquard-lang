@@ -199,54 +199,50 @@ let soundness mode dispatch programs =
     programs;
   tally
 
-let rec size = function
-  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> 1
-  | Lam (_, _, e) | Get e | Amb e | Emit e | Collect e | Detach e -> 1 + size e
-  | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Scoped (_, a, b) | Head (a, b) ->
-      1 + size a + size b
-  | If (a, b, c) -> 1 + size a + size b + size c
+let subterms = function
+  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> []
+  | Lam (_, _, e)
+  | Get e
+  | Amb e
+  | Emit e
+  | Collect e
+  | Detach e
+  | ThrowScoped (_, e)
+  | EmitScoped (_, e)
+  | Fst e
+  | Snd e ->
+      [ e ]
+  | App (a, b)
+  | Let (_, a, b)
+  | Add (a, b)
+  | Put (a, b)
+  | Scoped (_, a, b)
+  | Head (a, b)
+  | ThrowAt (a, b, _)
+  | EmitAt (a, b) ->
+      [ a; b ]
+  | If (a, b, c) | MatchResult (a, _, b, _, c) -> [ a; b; c ]
+
+let rec size e = 1 + List.fold_left (fun n e -> n + size e) 0 (subterms e)
+let rec exists p e = p e || List.exists (exists p) (subterms e)
 
 (* feature counts over a program: nested scopes, a scope under amb, closures over capabilities *)
-let rec count_scopes = function
-  | Scoped (_, a, b) -> 1 + count_scopes a + count_scopes b
-  | Lam (_, _, e) | Get e | Amb e | Emit e | Collect e | Detach e -> count_scopes e
-  | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
-      count_scopes a + count_scopes b
-  | If (a, b, c) -> count_scopes a + count_scopes b + count_scopes c
-  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> 0
+let is_scope = function Scoped _ | ThrowScoped _ | EmitScoped _ -> true | _ -> false
 
-let rec scope_under_amb = function
-  | Amb e -> count_scopes e > 0 || scope_under_amb e
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
-      scope_under_amb a || scope_under_amb b
-  | Lam (_, _, e) | Get e | Emit e | Collect e | Detach e -> scope_under_amb e
-  | If (a, b, c) -> scope_under_amb a || scope_under_amb b || scope_under_amb c
-  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
+let rec count_scopes e =
+  (if is_scope e then 1 else 0) + List.fold_left (fun n e -> n + count_scopes e) 0 (subterms e)
 
-let rec contains_operation = function
-  | Get _ | Put _ -> true
-  | Lam (_, _, e) | Amb e | Emit e | Collect e | Detach e -> contains_operation e
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Head (a, b) ->
-      contains_operation a || contains_operation b
-  | If (a, b, c) -> contains_operation a || contains_operation b || contains_operation c
-  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
+let scope_under_amb = exists (function Amb e -> count_scopes e > 0 | _ -> false)
 
-let rec closure_over_capability = function
-  | Lam (_, _, body) -> contains_operation body || closure_over_capability body
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
-      closure_over_capability a || closure_over_capability b
-  | Get e | Amb e | Emit e | Collect e | Detach e -> closure_over_capability e
-  | If (a, b, c) ->
-      closure_over_capability a || closure_over_capability b || closure_over_capability c
-  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
+let contains_operation =
+  exists (function Get _ | Put _ | ThrowAt _ | EmitAt _ -> true | _ -> false)
 
-let rec contains_collect = function
-  | Collect _ -> true
-  | Lam (_, _, e) | Get e | Amb e | Emit e | Detach e -> contains_collect e
-  | Scoped (_, a, b) | App (a, b) | Let (_, a, b) | Add (a, b) | Put (a, b) | Head (a, b) ->
-      contains_collect a || contains_collect b
-  | If (a, b, c) -> contains_collect a || contains_collect b || contains_collect c
-  | Int _ | Bool _ | Unit | Text _ | Var _ | Flip -> false
+let closure_over_capability =
+  exists (function Lam (_, _, body) -> contains_operation body | _ -> false)
+
+let contains_collect = exists (function Collect _ -> true | _ -> false)
+let contains_throw_scope = exists (function ThrowScoped _ -> true | _ -> false)
+let contains_emit_scope = exists (function EmitScoped _ -> true | _ -> false)
 
 let test_instances_sound () =
   let programs = generated () in
@@ -255,11 +251,13 @@ let test_instances_sound () =
   let nested = count (fun e -> count_scopes e >= 2)
   and under_amb = count scope_under_amb
   and closures = count closure_over_capability
-  and collects = count contains_collect in
+  and collects = count contains_collect
+  and throws = count contains_throw_scope
+  and emits = count contains_emit_scope in
   Printf.printf
     "well-typed features: nested scopes %d, scope under amb %d, closure over a capability %d, \
-     collect %d\n"
-    nested under_amb closures collects;
+     collect %d, throw scope %d, emit scope %d\n"
+    nested under_amb closures collects throws emits;
   List.iter
     (fun (label, n) -> Alcotest.(check bool) (Printf.sprintf "%s %d" label n) true (n >= 200))
     [
@@ -267,6 +265,8 @@ let test_instances_sound () =
       ("scope under amb", under_amb);
       ("closures over capabilities", closures);
       ("collects", collects);
+      ("throw scopes", throws);
+      ("emit scopes", emits);
     ];
   let sizes = List.map size programs in
   Printf.printf "generated %d programs, mean size %.1f, max %d\n" samples
@@ -384,6 +384,190 @@ let test_instance_typing_needs_instance_dispatch () =
     (Printf.sprintf "%d counterexamples" (List.length unsound))
     true (unsound <> [])
 
+(* --- slice 2b: Throw and Emit instances (§11 A3) --- *)
+
+let stuck_with suffix label = function
+  | Stuck message when String.ends_with ~suffix message -> ()
+  | Stuck message -> Alcotest.failf "%s: stuck with %s" label message
+  | Value _ -> Alcotest.failf "%s: ran to a value" label
+  | Out_of_fuel -> Alcotest.failf "%s: out of fuel" label
+
+let check_type label expected e =
+  match check Instances e with
+  | Ok t -> Alcotest.(check string) label (show_ty expected) (show_ty t)
+  | Error message -> Alcotest.failf "%s: rejected: %s" label message
+
+let refused prefix label e =
+  match check Instances e with
+  | Error message when String.starts_with ~prefix message -> ()
+  | Error message -> Alcotest.failf "%s: refused for another reason: %s" label message
+  | Ok t -> Alcotest.failf "%s: accepted at %s" label (show_ty t)
+
+(* an outer Throw scope (Text) holding an inner one (Int); the program throws on the outer one
+   from inside the inner, whose handler would add to an Int error *)
+let two_throws =
+  ThrowScoped
+    ( "o",
+      MatchResult
+        ( ThrowScoped
+            ( "i",
+              If (Bool false, ThrowAt (Var "i", Int 5, TInt), ThrowAt (Var "o", Text "outer", TInt))
+            ),
+          "v",
+          Var "v",
+          "n",
+          Add (Var "n", Int 1) ) )
+
+let test_two_throw_scopes () =
+  check_type "a Result over the outer error type" (TResult (TText, TInt)) two_throws;
+  rejects "mono: one throw payload per region" Mono two_throws;
+  (match value By_instance two_throws with
+  | VErr (VText "outer") -> ()
+  | _ -> Alcotest.fail "the outer throw passes the inner scope to its own");
+  (* the pinned example: an outer Throw holds an inner Throw and a State scope; the throw on the
+     outer scope skips the marker put and the inner scope's return *)
+  let pinned =
+    ThrowScoped
+      ( "o",
+        MatchResult
+          ( ThrowScoped
+              ( "i",
+                Scoped
+                  ( "s",
+                    Int 0,
+                    Let
+                      ( "_",
+                        ThrowAt (Var "o", Text "outer", TUnit),
+                        Let
+                          ( "_",
+                            Put (Var "s", Int 99),
+                            If (Bool false, ThrowAt (Var "i", Int 1, TInt), Get (Var "s")) ) ) ) ),
+            "v",
+            Var "v",
+            "n",
+            Var "n" ) )
+  in
+  check_type "pinned: Result Text Int" (TResult (TText, TInt)) pinned;
+  (match value By_instance pinned with
+  | VErr (VText "outer") -> ()
+  | _ -> Alcotest.fail "exactly err(outer)");
+  (* the answer type is fresh at every use within one scope *)
+  let per_use =
+    ThrowScoped
+      ("t", If (ThrowAt (Var "t", Int 1, TBool), Add (ThrowAt (Var "t", Int 2, TInt), Int 1), Int 0))
+  in
+  check_type "per-use answer types" (TResult (TInt, TInt)) per_use;
+  match value By_instance per_use with
+  | VErr (VInt 1) -> ()
+  | _ -> Alcotest.fail "the first throw wins"
+
+let test_nested_emit_order () =
+  let program =
+    EmitScoped
+      ( "a",
+        Let
+          ( "_",
+            EmitAt (Var "a", Int 1),
+            Let
+              ( "r",
+                EmitScoped
+                  ( "b",
+                    Let
+                      ( "_",
+                        EmitAt (Var "a", Int 2),
+                        Let
+                          ("_", EmitAt (Var "b", Text "x"), Let ("_", EmitAt (Var "a", Int 3), Unit))
+                      ) ),
+                Let ("_", EmitAt (Var "a", Int 4), Var "r") ) ) )
+  in
+  let expected = TPair (TPair (TUnit, TList TText), TList TInt) in
+  check_type "nested pairs" expected program;
+  (match value By_instance program with
+  | VPair (VPair (VUnit, VList [ VText "x" ]), VList [ VInt 1; VInt 2; VInt 3; VInt 4 ]) -> ()
+  | _ -> Alcotest.fail "each scope records its own emits in order, forwarded through the inner");
+  (* nearest dispatch records the outer emits in the inner scope: an ill-typed answer *)
+  match run Nearest program with
+  | Value v -> Alcotest.(check bool) "nearest: wrong type" false (value_has_type v expected)
+  | _ -> Alcotest.fail "nearest dispatch still runs to a value"
+
+let test_throw_inside_state () =
+  let program =
+    Scoped
+      ( "s",
+        Int 0,
+        Let
+          ( "_",
+            Put (Var "s", Int 1),
+            Let
+              ( "r",
+                ThrowScoped
+                  ("t", Let ("_", Put (Var "s", Int 2), ThrowAt (Var "t", Text "stop", TUnit))),
+                MatchResult (Var "r", "u", Int 0, "e", Get (Var "s")) ) ) )
+  in
+  accepts "state around a throw scope" Instances program;
+  Alcotest.(check int) "the throw keeps the store's last write" 2 (int_value By_instance program)
+
+let test_state_inside_emit () =
+  let program =
+    EmitScoped
+      ( "e",
+        Scoped
+          ( "s",
+            Int 5,
+            Let
+              ( "_",
+                EmitAt (Var "e", Get (Var "s")),
+                Let
+                  ( "_",
+                    Put (Var "s", Add (Get (Var "s"), Int 1)),
+                    Let ("_", EmitAt (Var "e", Get (Var "s")), Get (Var "s")) ) ) ) )
+  in
+  check_type "an emit scope over a state" (TPair (TInt, TList TInt)) program;
+  match value By_instance program with
+  | VPair (VInt 6, VList [ VInt 5; VInt 6 ]) -> ()
+  | _ -> Alcotest.fail "the emitted reads, then the final read"
+
+let test_throw_nearest_counterexample () =
+  accepts "instances accept two throw scopes" Instances two_throws;
+  (* the same well-typed program under nearest dispatch hands the outer Text error to the inner
+     scope, whose handler adds to it *)
+  stuck_with "add of a non-Int" "nearest dispatch confuses the throw scopes"
+    (run Nearest two_throws)
+
+let test_throw_emit_payload_escape () =
+  (* throw.scoped(fn c -> c), then the returned capability is used under an outer scope *)
+  let returned =
+    ThrowScoped
+      ( "outer",
+        Let
+          ( "r",
+            ThrowScoped ("c", Var "c"),
+            MatchResult (Var "r", "k", ThrowAt (Var "k", Int 1, TInt), "e", Int 0) ) )
+  in
+  refused "instance escapes through the result" "returning the throw capability" returned;
+  stuck_with "throw on a stale capability" "the returned capability" (run By_instance returned);
+  (* a throw carrying a nested State scope's capability *)
+  let carried =
+    Let
+      ( "r",
+        ThrowScoped ("t", Scoped ("d", Int 0, ThrowAt (Var "t", Var "d", TUnit))),
+        MatchResult (Var "r", "u", Int 0, "k", Get (Var "k")) )
+  in
+  refused "instance escapes through the environment" "throwing another scope's capability" carried;
+  stuck_with "get on a stale capability" "the thrown capability" (run By_instance carried);
+  (* the same two escapes for Emit *)
+  let emit_returned =
+    EmitScoped ("outer", Let ("p", EmitScoped ("e", Var "e"), EmitAt (Fst (Var "p"), Int 1)))
+  in
+  refused "instance escapes through the result" "returning the emit capability" emit_returned;
+  stuck_with "emit on a stale capability" "the returned emit capability"
+    (run By_instance emit_returned);
+  refused "instance escapes through the environment" "emitting another scope's capability"
+    (EmitScoped ("e", Scoped ("d", Int 0, EmitAt (Var "e", Var "d"))));
+  (* a value read from another scope may be thrown or emitted *)
+  accepts "a read value, not a capability" Instances
+    (ThrowScoped ("t", Scoped ("d", Int 3, ThrowAt (Var "t", Get (Var "d"), TUnit))))
+
 let suite =
   [
     Alcotest.test_case "two stores of different payload types" `Quick test_two_stores;
@@ -405,4 +589,12 @@ let suite =
       test_escape_check_is_load_bearing;
     Alcotest.test_case "instance typing requires instance dispatch (generated)" `Quick
       test_instance_typing_needs_instance_dispatch;
+    Alcotest.test_case "two throw scopes of different error types" `Quick test_two_throw_scopes;
+    Alcotest.test_case "nested emit scopes keep chronological order" `Quick test_nested_emit_order;
+    Alcotest.test_case "a throw inside state keeps the store" `Quick test_throw_inside_state;
+    Alcotest.test_case "state inside emit" `Quick test_state_inside_emit;
+    Alcotest.test_case "nearest dispatch confuses throw scopes of different error types" `Quick
+      test_throw_nearest_counterexample;
+    Alcotest.test_case "throw and emit payloads do not escape their scope" `Quick
+      test_throw_emit_payload_escape;
   ]
