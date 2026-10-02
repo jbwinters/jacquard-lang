@@ -527,14 +527,18 @@ the handler recursively performs the same operation to obtain a correctly typed 
 tries to consume the same resumption twice. Run and native build must reject the identical source at
 the shared affine-check boundary with E0816. The low-level pair above separately proves that an
 unchecked/host-driven second resume reaches byte-identical E0906 in both runtimes.
+Scoped instance operations (throw.throw-at, emit.emit-at) cannot be handled by a user handler at all,
+so their hostile handlers are refused earlier, identically, with E0834.
 
   $ ../gen_once_hostile.exe ../../prelude ../../prelude/operation-modes.manifest once-prelude
-  generated 31 once-hostile cases from reviewed inventory
+  generated 33 once-hostile cases from reviewed inventory
   $ passed=0; for f in once-prelude/*.jqd; do
   >   jacquard run "$f" > once-run.out 2>&1; run_status=$?
   >   jacquard build "$f" -o once-prog > once-build.out 2>&1; build_status=$?
   >   if [ "$run_status" = 1 ] && [ "$build_status" = 1 ] &&
-  >      diff -q once-run.out once-build.out >/dev/null && grep -q 'error\[E0816\]' once-run.out
+  >      diff -q once-run.out once-build.out >/dev/null &&
+  >      { grep -q 'error\[E0816\]' once-run.out ||
+  >        { case "$f" in *-instance-*) grep -q 'error\[E0834\]' once-run.out;; *) false;; esac; }; }
   >   then passed=$((passed + 1)); else echo "FAILED: $(basename "$f")"; fi
-  > done; echo "$passed/31 generated once-operation cases reject identically"
-  31/31 generated once-operation cases reject identically
+  > done; echo "$passed/33 generated once-operation cases reject identically"
+  33/33 generated once-operation cases reject identically
