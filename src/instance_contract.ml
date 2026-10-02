@@ -27,10 +27,74 @@ let state_put_at =
 let state_scoped =
   frozen "state.scoped" "b548fad24d2747db93d21b97739ebe7180e2deb2a138187a89de513d22778b9c"
 
-let instance_operations = [ state_get_at; state_put_at ]
+(* the prelude data types the Throw and Emit shapes return (design §11 A3.4); prerequisites of
+   their registration *)
+let result_type = frozen "result" "5552731cc63f81199617f3ecf4e4a8c14748c303d6ce78ce5b0f05f3026ad8db"
+let list_type = frozen "list" "03b4cd180ed05bf70d8a3e401dfea0688a46cf6b8c6469fd8e7e013c9e603c81"
+
+(** The shape of a scoped form (design §11 A3.4): State takes an initializer and returns the body's
+    result; Throw returns [Result e a]; Emit returns the body's result paired with the emitted list.
+*)
+type shape = State | Throw | Emit
+
+type family = {
+  shape : shape;
+  capability : Hash.t;  (** the capability type *)
+  carrier : Hash.t;  (** its private constructor *)
+  instance_effect : Hash.t;
+  operations : Hash.t list;
+  scoped : Hash.t;  (** the scoped term *)
+}
+(** One scoped instance family's frozen identities. *)
+
+let state_family =
+  {
+    shape = State;
+    capability = state_ref_type;
+    carrier = state_ref_opaque_constructor;
+    instance_effect = state_instance_effect;
+    operations = [ state_get_at; state_put_at ];
+    scoped = state_scoped;
+  }
+
+let throw_family =
+  {
+    shape = Throw;
+    capability =
+      frozen "throw-ref" "393b1fd3fed23fe932c542f08f147da2f2c1ba56fcc1baf9dda3a27179dc337d";
+    carrier =
+      frozen "throw-ref-opaque" "76f9120d1f63210f328e0412b575976cd6e8f7403e9f3f72c5af54fa0d600915";
+    instance_effect =
+      frozen "throw-instance" "95571f168a1bf5b202d5b6fa89cf2c612092eaea8163000d880a8b068be2f36d";
+    operations =
+      [ frozen "throw.throw-at" "2c2e1faf6052c0d01036770c0e1e9a93accd216ada42f87b9111e2d897da92a4" ];
+    scoped =
+      frozen "throw.scoped" "a71b34730d90d768f77e2a68069c8eae669b86072e08771d75dcad7751b36b2c";
+  }
+
+let emit_family =
+  {
+    shape = Emit;
+    capability =
+      frozen "emit-ref" "b7584505eacc0568b09056d97092945cb3d538f5e76835e8590de7cd5b51fbd5";
+    carrier =
+      frozen "emit-ref-opaque" "a763dfaf37f36d67fc875c1b390bad995cad617f182472176a36344ae0a52a0f";
+    instance_effect =
+      frozen "emit-instance" "0996f7760777d3b64f3998f911892175a0b15b4a3ec17378a80014cb5207d7fe";
+    operations =
+      [ frozen "emit.emit-at" "19209e295d92a67a62f83a004dd97cee88ef8b5aaba7b8d123633b4d6ed17dd2" ];
+    scoped = frozen "emit.scoped" "cf2c896b613ff5d60fccb686b21cf01af2c2330f52b1227bc27e635bfd601f3c";
+  }
+
+let families = [ state_family; throw_family; emit_family ]
+let instance_operations = List.concat_map (fun family -> family.operations) families
 
 (** [is_instance_operation hash] holds for an operation of a scoped instance effect. *)
 let is_instance_operation hash = List.exists (Hash.equal hash) instance_operations
 
 (** [is_private_carrier hash] holds for a capability type's private constructor. *)
-let is_private_carrier hash = Hash.equal hash state_ref_opaque_constructor
+let is_private_carrier hash = List.exists (fun family -> Hash.equal hash family.carrier) families
+
+(** [family_identities family] lists every frozen identity of [family]. *)
+let family_identities family =
+  [ family.capability; family.carrier; family.instance_effect; family.scoped ] @ family.operations

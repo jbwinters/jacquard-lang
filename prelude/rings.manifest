@@ -688,3 +688,11 @@ state-instance 1
 state.get-at 1
 state.put-at 1
 state.scoped 1
+throw-ref 1
+throw-instance 1
+throw.throw-at 1
+emit-ref 1
+emit-instance 1
+emit.emit-at 1
+throw.scoped 1
+emit.scoped 1

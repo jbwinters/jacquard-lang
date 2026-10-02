@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1159`
+- Alcotest/QCheck cases: `1167`
 - Cram transcript files: `76`
 - Documentation examples: `35` named examples across `8` documents
 
@@ -690,3 +690,29 @@ golden only gains lines.
 - Project context identities that include the prelude manifest change.
 
 The source inventory is now `1159 / 76 / 35`.
+
+Slice 2b of scoped effect instances (design §11 A3) adds
+`prelude/33-scoped-throw-emit.jqd`, which declares `throw.scoped`,
+`emit.scoped`, `throw-ref`, `emit-ref`, `throw-instance`, `emit-instance`,
+`throw.throw-at` and `emit.emit-at`. Every production checker context registers
+it.
+
+It adds eight cases:
+
+- one in `test/test_scoped_instances_checker.ml`;
+- one in `test/test_scoped_instances_runtime.ml`;
+- six in the executable model (`test/test_scoped_instances_model.ml`), which now
+  covers Throw and Emit instances and their nearest-dispatch counterexample.
+
+`test/cli/scoped-instances.t` pins the new interpreter result and the native
+refusal (E1101). Every retained prelude hash is unchanged.
+
+The migration is the same as for slice 2:
+
+- an existing store refuses the new prelude (E0705);
+- retained interface-v1 manifests and sealed artifacts fail with
+  `Prelude_changed`, and retained bundles fail with E1720;
+- project context identities change, and this slice re-pins the demo projects
+  `dice-coach`, `picnic-planner` and `suite`.
+
+The source inventory is now `1167 / 76 / 35`.

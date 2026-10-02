@@ -34,17 +34,18 @@ type instance_registration = {
   capability : Hash.t;  (** the one-parameter capability type *)
   operations : Hash.t list;
   callback_position : int;  (** the scoped callback's argument position *)
+  shape : Instance_contract.shape;  (** the scoped form: State, Throw or Emit (§11 A3.4) *)
 }
 (** One registered scoped instance effect (TS.2, design docs/designs/scoped-effect-instances.md §9
-    A1.0). *)
+    A1.0, §11 A3.4). *)
 
 val register_instances : ctx -> instance_registration list -> unit
 (** [register_instances ctx registrations] enforces scoped instance effects on [ctx] after
     validating each registration against the store (effect, its operations, a one-parameter
-    capability type, a term, callback position 1, no repeated effect, capability or scoped term) and
-    seeds each scoped term's trusted scheme. An invalid registration is API misuse:
-    [Invalid_argument], and nothing is registered. Register before any affected signature is cached.
-    [make_ctx] registers the production State declarations. *)
+    capability type, a term, a callback position and parameters that fit the shape, no repeated
+    effect, capability or scoped term) and seeds each scoped term's trusted scheme. An invalid
+    registration is API misuse: [Invalid_argument], and nothing is registered. Register before any
+    affected signature is cached. [make_ctx] registers the production State declarations. *)
 
 val instance_registrations : ctx -> instance_registration list
 (** [instance_registrations ctx] lists the instance effects [ctx] enforces. *)

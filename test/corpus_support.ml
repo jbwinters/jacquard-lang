@@ -334,6 +334,7 @@ module Instances_fixture = struct
       capability = hash store Resolve.KType "state-ref";
       operations = [ hash store Resolve.KOp "state.get-at"; hash store Resolve.KOp "state.put-at" ];
       callback_position = 1;
+      shape = Instance_contract.State;
     }
 end
 

@@ -1,0 +1,40 @@
+; TS.2 scoped effect instances, slice 2b: Throw and Emit (design
+; docs/designs/scoped-effect-instances.md §11 A3). Like state.scoped (file 32),
+; each scope mints an instance token and serves only the operations on its own
+; capability; any other operation is re-performed outward and resumed once. The
+; clauses are in direct style, so each once continuation is resumed at most once.
+
+(deftype throw-ref ((tvar e)) (con throw-ref-opaque))
+
+; the answer `a` is result-only: fresh at every reference, never a payload (A3.2)
+(defeffect throw-instance ((tvar e) (tvar a))
+  (op throw.throw-at once ((tapp (tref throw-ref) (tvar e)) (tvar e)) (tvar a)))
+
+(deftype emit-ref ((tvar w)) (con emit-ref-opaque))
+
+(defeffect emit-instance ((tvar w))
+  (op emit.emit-at once ((tapp (tref emit-ref) (tvar w)) (tvar w)) (ttuple)))
+
+(defterm ((binding throw.scoped ()
+  (lam ((pvar f))
+    (let nonrec (pvar t) (app (var instance.fresh-v0))
+      (handle (app (var f) (var t))
+        (ret (pvar x) (app (var ok) (var x)))
+        (opclause throw.throw-at ((pvar c) (pvar e)) k
+          (match (app (var instance.same-v0) (var c) (var t))
+            (clause (pcon true) (app (var err) (var e)))
+            (clause (pcon false) (app (var k) (app (var throw.throw-at) (var c) (var e))))))))))))
+
+; emissions keep chronological order, as in emit.collect
+(defterm ((binding emit.scoped ()
+  (lam ((pvar f))
+    (let nonrec (pvar t) (app (var instance.fresh-v0))
+      (handle (app (var f) (var t))
+        (ret (pvar x) (tuple (var x) (var nil)))
+        (opclause emit.emit-at ((pvar c) (pvar w)) k
+          (match (app (var instance.same-v0) (var c) (var t))
+            (clause (pcon true)
+              (match (app (var k) (tuple))
+                (clause (ptuple (pvar a) (pvar ws))
+                  (tuple (var a) (app (var cons) (var w) (var ws))))))
+            (clause (pcon false) (app (var k) (app (var emit.emit-at) (var c) (var w))))))))))))

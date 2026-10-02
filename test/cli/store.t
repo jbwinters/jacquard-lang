@@ -135,7 +135,7 @@ without a bootstrap twin and still refuses top-level expressions.
     Next step: Pass declarations to `store add`, not a top-level expression.
   [1]
   $ grep -c 'hidden' appstore/names.jqd
-  9
+  11
 
 The store records the prelude it was loaded with. Reopening with an edited prelude is refused
 before any change, and a `store add` that contains an expression installs nothing.
