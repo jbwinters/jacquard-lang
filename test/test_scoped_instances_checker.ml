@@ -561,6 +561,108 @@ let test_trusted_scheme () =
     "forall a b | e. (b, (StateRef b) ->{StateInstance | e} a) ->{StateInstance | e} a"
     (scheme_text (Test_check.make_cctx ~instances:false ()))
 
+let throw_scoped ?(var = "c") body =
+  Printf.sprintf "(app (var throw.scoped) (lam ((pvar %s)) %s))" var body
+
+let emit_scoped ?(var = "c") body =
+  Printf.sprintf "(app (var emit.scoped) (lam ((pvar %s)) %s))" var body
+
+let test_throw_emit () =
+  let ((store, ctx) as h) = fixture () in
+  let check_ok label src =
+    match Test_check.check_src h src with
+    | Ok _ -> ()
+    | Error diagnostics ->
+        Alcotest.failf "%s: %s" label (String.concat "\n" (List.map Diag.to_string diagnostics))
+  in
+  let code label expected src = Alcotest.(check string) label expected (code_of h src) in
+  let scheme_text ctx hash =
+    match Check.force_term ctx hash with
+    | Ok scheme -> Check.show_scheme ctx scheme
+    | Error diagnostics ->
+        Alcotest.failf "scheme: %s" (String.concat "\n" (List.map Diag.to_string diagnostics))
+  in
+  let throw = Instance_contract.throw_family and emit = Instance_contract.emit_family in
+  (* seeded schemes (A3.4) and the bodies on an unregistered context (A3.7) *)
+  Alcotest.(check string)
+    "throw.scoped's seeded scheme"
+    "forall a b | e. ((ThrowRef a) ->{ThrowInstance | e} b) ->{| e} Result a b"
+    (scheme_text ctx throw.scoped);
+  Alcotest.(check string)
+    "emit.scoped's seeded scheme"
+    "forall a b | e. ((EmitRef b) ->{EmitInstance | e} a) ->{| e} (a, List b)"
+    (scheme_text ctx emit.scoped);
+  let _, unregistered = Test_check.make_cctx ~instances:false () in
+  Alcotest.(check string)
+    "throw.scoped's body unregistered"
+    "forall a b | e. ((ThrowRef a) ->{ThrowInstance | e} b) ->{ThrowInstance | e} Result a b"
+    (scheme_text unregistered throw.scoped);
+  Alcotest.(check string)
+    "emit.scoped's body unregistered"
+    "forall a b | e. ((EmitRef b) ->{EmitInstance | e} a) ->{EmitInstance | e} (a, List b)"
+    (scheme_text unregistered emit.scoped);
+  List.iter
+    (fun (family : Instance_contract.family) ->
+      match Store.locate_internal store family.scoped with
+      | Ok { Store.decl; _ } -> (
+          match Check.check_top ctx (Kernel.Decl decl) with
+          | Ok _ -> Alcotest.fail "a trusted body was checked under registration"
+          | Error diagnostics ->
+              Alcotest.(check (list string))
+                "direct checking is refused" [ "E0834" ]
+                (List.map Diag.code_or_uncoded diagnostics))
+      | Error _ -> Alcotest.fail "a scoped term is not in the store")
+    [ throw; emit ];
+  (* shapes are validated (A3.4) *)
+  let state = Instances_fixture.registration store in
+  let refused label registration =
+    match Check.register_instances unregistered [ registration ] with
+    | () -> Alcotest.failf "%s was accepted" label
+    | exception Invalid_argument _ -> ()
+  in
+  refused "a State effect with the Throw shape" { state with shape = Instance_contract.Throw };
+  refused "a State effect as Throw at position 0"
+    { state with shape = Instance_contract.Throw; callback_position = 0 };
+  (* the answer is fresh at every reference (A3.2), and fail passes determinacy (A1.6) *)
+  check_ok "fail"
+    "(defterm ((binding fail () (lam ((pvar c)) (app (var throw.throw-at) (var c) (lit \"x\"))))))";
+  check_ok "fail at two result types"
+    (defterm "twice"
+       (Printf.sprintf "(lam () %s)"
+          (throw_scoped
+             "(let nonrec (pvar n) (app (var add) (app (var fail) (var c)) (lit 1)) (match (app \
+              (var fail) (var c)) (clause (pcon true) (var n)) (clause (pcon false) (lit 0))))")));
+  check_ok "an annotated thrower"
+    "(defterm ((binding fail-int ((tarrow ((tapp (tref throw-ref) (tref text))) (row (eref \
+     throw-instance)) (tref int))) (lam ((pvar c)) (app (var throw.throw-at) (var c) (lit \
+     \"x\"))))))";
+  (* E0832 through the transformed result and through payloads (A3.3) *)
+  code "a Throw scope returning its capability" "E0832" (throw_scoped "(var c)");
+  code "an Emit scope returning its capability" "E0832" (emit_scoped "(var c)");
+  code "a thrown capability of an enclosing scope" "E0832"
+    (scoped ~var:"s" "(lit 0)" (throw_scoped ~var:"t" "(app (var throw.throw-at) (var t) (var s))"));
+  code "an emitted capability of an enclosing scope" "E0832"
+    (scoped ~var:"s" "(lit 0)" (emit_scoped ~var:"e" "(app (var emit.emit-at) (var e) (var s))"));
+  code "an emitted thunk over an inner capability" "E0832"
+    (emit_scoped ~var:"e"
+       (scoped ~var:"s" "(lit 0)"
+          "(app (var emit.emit-at) (var e) (lam () (app (var state.get-at) (var s))))"));
+  (* E0833, E0834, E0835, E0831 *)
+  code "a spawned Throw" "E0833"
+    (Printf.sprintf "(lam () %s)"
+       (throw_scoped "(app (var async.spawn) (lam () (app (var throw.throw-at) (var c) (lit 1))))"));
+  code "a spawned Emit" "E0833"
+    (Printf.sprintf "(lam () %s)"
+       (emit_scoped "(app (var async.spawn) (lam () (app (var emit.emit-at) (var c) (lit 1))))"));
+  code "a user clause on throw.throw-at" "E0834"
+    "(lam ((pvar c)) (handle (app (var throw.throw-at) (var c) (lit 1)) (ret (pvar x) (var x)) \
+     (opclause throw.throw-at ((pvar r) (pvar e)) k (lit 0))))";
+  code "forging a ThrowRef" "E0835" (Printf.sprintf "(ref #%s con)" (Hash.to_hex throw.carrier));
+  code "a forwarding Throw wrapper" "E0831"
+    (defterm "wrap" "(lam ((pvar f)) (app (var throw.scoped) (var f)))");
+  code "an initializer given to Emit" "E0831"
+    "(app (var emit.scoped) (lit 0) (lam ((pvar c)) (lit 1)))"
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let h = Test_check.make_cctx ~instances:false () in
@@ -592,6 +694,7 @@ let suite =
     Alcotest.test_case "determinacy, display and row consumers" `Quick
       test_determinacy_and_consumers;
     Alcotest.test_case "the trusted scheme of state.scoped" `Quick test_trusted_scheme;
+    Alcotest.test_case "Throw and Emit scoped instances" `Quick test_throw_emit;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]
