@@ -4,8 +4,8 @@
   Slice 1, the checker (§8, §9 A1.10), is implemented and checked by
   `test/test_scoped_instances_checker.ml`. Slice 2, the State runtime and
   production registration (§10 A2), is implemented and checked by
-  `test/test_scoped_instances_runtime.ml`. Slice 2b (Throw and Emit), slice 3
-  (native) and slice 4 (docs) remain.
+  `test/test_scoped_instances_runtime.ml`. Slice 2b (Throw and Emit, §11 A3)
+  follows. Slice 3 (native) and slice 4 (docs) remain.
 - Date: 2026-09-24
 - Base: `main` after TS.0 (effect-payload containment, PR #112).
 - Model: `test/scoped_instances_model.ml`, checked by
@@ -848,3 +848,201 @@ Until then, `register_instances` keeps refusing callback positions other than 1.
   - unchanged: the signature, ring-0 freeze and corpus hash goldens;
   - changed: the prelude-hash, diagnostic, rings and operation-mode
     manifests, listed in the PR.
+
+## 11. Amendment A3 (slice 2b: Throw and Emit instances)
+
+- Status: amendment to the approved design for slice 2b. It specifies the
+  Throw and Emit instance declarations, their scoped forms, how the
+  registration generalizes, their handlers and the migration. It corrects
+  A2.7's premise about Throw's answer type. It does not change the dispatch
+  rule (§4) or the State runtime (A2).
+- Date: 2026-10-01.
+
+### A3.0 Correction to A2.7
+
+A2.7 assumed that each handled region fixes ambient Throw's answer type. It does
+not. Ambient `throw` declares the answer `a` as a declaration parameter, but `a`
+is not a *payload* parameter. For an ordinary effect, payload parameters are
+only the declaration parameters that occur in operation *parameters*. (The
+frozen Async and Channel effects and registered instance effects have none.) A
+parameter that occurs only in an operation's result stays operation-polymorphic:
+each reference gets a fresh type. Ambient `throw` and `abort` work this way.
+
+The instance operation `throw.throw-at` follows the same rule, and its entry
+payload comes only from the capability's arguments, so neither of A2.7's options
+is needed. A3.4 also supersedes A2.7's last sentence: callback position 0 is
+allowed for the Throw and Emit shapes.
+
+### A3.1 Declarations
+
+The prelude gains one file, sorted last, declaring the following:
+
+- **Throw:**
+  - `throw-ref e`, with a private carrier `throw-ref-opaque`;
+  - `throw-instance e a`, with the operation
+    `throw.throw-at : once (ThrowRef e, e) -> a`.
+- **Emit:**
+  - `emit-ref w`, with a private carrier `emit-ref-opaque`;
+  - `emit-instance w`, with the operation
+    `emit.emit-at : once (EmitRef w, w) -> ()`;
+- `throw.scoped` and `emit.scoped`.
+
+Both operations are `once`, like ambient `throw` and `emit`. Their bodies reuse
+the hidden token builtins of A2.2, so no new builtin is added. Existing
+declarations and their hashes are unchanged; the prelude hash golden only gains
+lines.
+
+### A3.2 The answer type
+
+`throw.throw-at`'s result `a` is fresh at every reference and never appears in a
+row.
+
+- An instance entry's payload is its capability's arguments only, here `[e]`.
+  Each label still determines one payload (A1.1), and determinacy (A1.6) is
+  unchanged.
+- `fail(c) = throw.throw-at(c, "x")` publishes
+  `forall a. (ThrowRef Text) ->{throw-instance} a`. It can be used at different
+  result types within one scope.
+- `fail` passes determinacy (A1.6): its label is fixed by `c`, and `a` is a type
+  variable, not a label.
+
+### A3.3 The scoped forms
+
+- `throw.scoped(fn (c) -> body) : Result e a`
+- `emit.scoped(fn (c) -> body) : (a, List w)`
+
+Each form is a checker form (A1.7) whose callback is a literal one-parameter
+lambda at position 0. Neither form has an initializer. The checker form picks
+its argument pattern by shape: `[init; f]` for State and `[f]` for Throw and
+Emit. Any other use is E0831, as for State.
+
+- Both scopes run their callback on the current continuation under a language
+  handler, so neither needs the fresh-continuation flag (A1.4 audit). Flagged
+  tails inherited from outside are preserved as before.
+
+- The payload variable is fresh at the caller's level. The scope's own entries
+  determine it by unification. It is never generalized inside the scope.
+- Non-escape (E0832) is checked against the **transformed** result
+  (`Result payload body` or `(body, List payload)`). That check covers escape
+  through the error or emitted values. All the A1.7 checks still apply too: the
+  outward row, the caller's ambient, the handler requirements and the
+  environment.
+
+### A3.4 The registration
+
+- A registration gains a **shape**: State (A2), Throw or Emit.
+  - The callback position must match the shape: 1 for State, 0 for Throw and
+    Emit.
+- Validation is tied to the shape:
+  - Exactly one of the instance effect's parameters occurs in operation
+    parameters, and it is the capability's argument.
+  - Each operation has exactly one capability parameter, in first position.
+  - State and Emit allow no other parameter.
+  - Throw requires exactly one result-only parameter, and it is
+    `throw.throw-at`'s entire result type.
+  - `register_instances` checks that each registration's shape and callback
+    position agree.
+
+  A result-only parameter is sound only because Throw's served clause never
+  resumes.
+- **Result transform.** The shape transforms the result using frozen
+  identities: the prelude's `result` type with its `ok`/`err` constructors, and
+  its `list` type with `nil`/`cons`. These identities belong to the Throw and
+  Emit identity sets.
+- Registration seeds each scoped term's trusted scheme (A2.3):
+  - `forall a x | e. ((ThrowRef x) ->{throw-instance | e} a) ->{| e} Result x a`
+  - `forall a w | e. ((EmitRef w) ->{emit-instance | e} a) ->{| e} (a, List w)`
+- **The contract.** The contract module keeps one record per family: the
+  capability type, the private constructor, the instance effect, the
+  operations, the scoped term and the shape.
+  - The union of the families' operations drives the stale trap (A2.4).
+  - The union of their private constructors drives the carrier refusals in the
+    checker (E0835), the evaluator, the store and the native compiler.
+- **Production registration** builds one registration per family from its
+  record. Each registration's shape is copied from its record.
+  - Registration is all-or-nothing over the families' identities, as in A2.5. A
+    store with none of them registers nothing.
+  - The frozen `result` and `list` identities, also kept in the contract module,
+    are prerequisites. A store that holds any family identity but lacks one of
+    them is an internal error; otherwise they are not consulted.
+  - A reduced prelude that holds file 32 but not the new file is therefore an
+    internal error. Such test fixtures are updated.
+- **Public names.** `throw.scoped`, `emit.scoped`, `throw-ref`, `emit-ref`,
+  `throw-instance`, `emit-instance`, `throw.throw-at` and `emit.emit-at` enter
+  the prelude namespace.
+
+### A3.5 The handlers
+
+The clauses are written in direct style. Each resumes its continuation at most
+once, so E0816 and E0817 hold.
+
+- **Throw:**
+  - `ret x -> ok(x)`
+  - served: `throw.throw-at(c, e)` with `instance.same-v0(c, t)` gives `err(e)`,
+    dropping its continuation;
+  - forwarded: `k(throw.throw-at(c, e))`.
+- **Emit:**
+  - `ret x -> (x, nil)`
+  - served: `match k(()) { (a, ws) -> (a, cons(w, ws)) }`, which keeps the
+    order chronological like `emit.collect`;
+  - forwarded: `k(emit.emit-at(c, w))`.
+
+Each re-perform runs in the clause body, outside the clause's own handler
+(A2.2).
+
+### A3.6 Migration
+
+The migration is the same as A2.6:
+
+- store re-initialization (E0705);
+- `Prelude_changed` for retained interface-v1 manifests and sealed artifacts;
+- E1720 for retained bundles;
+- changed project context identities, so the demo projects are re-pinned.
+
+No retained declaration hash changes.
+
+### A3.7 Slice-2b evidence
+
+- **Model:** the executable model gains Throw and Emit instances, with
+  token-directed dispatch, a nearest-dispatch counterexample, and payload-escape
+  refusals.
+- **Checker:**
+  - registration shapes and their validation;
+  - both seeded schemes, pinned;
+  - the bodies checked on an unregistered context, pinned with payloads
+    omitted from the display. Variable names here are schematic; the tests
+    assert the exact rendered strings.
+    - Throw: `((ThrowRef e) ->{ThrowInstance | r} a) ->{ThrowInstance | r} Result e a`
+    - Emit: `((EmitRef w) ->{EmitInstance | r} a) ->{EmitInstance | r} (a, List w)`
+  - E0834 when a body is checked directly;
+  - the per-use result type;
+  - E0832 through error and emitted values, and through another scope's
+    payload;
+  - E0833 for `throw.throw-at` and `emit.emit-at` in a spawned child;
+  - E0834 for user clauses on the new operations;
+  - E0835 for the new carriers;
+  - E0831 for wrappers and arity errors.
+- **Runtime:**
+  - two Throw scopes with different error types;
+  - forwarding between nested scopes, including a nested Throw that skips all
+    intervening code after the throw. Pinned example: an outer Throw scope `o`
+    contains an inner Throw scope and a State scope. Inside them, the program
+    throws `"outer"` on `o`, then would put a marker into the store. The result
+    is exactly `err("outer")`, the marker put never runs, and the inner scope
+    returns nothing;
+  - ambient `throw.catch` and `throw.to-result` do not intercept an instance
+    throw, and the reverse;
+  - Emit order and forwarding;
+  - Throw inside State, and State inside Emit;
+  - multi-shot resumption around an Emit scope, with each branch's exact
+    ordered result and no E0906. Pinned example: an Emit scope emits `0`, then
+    performs a two-way multi-shot fork. Each branch emits and returns `1` or
+    `2`. The branches are exactly `(1, [0, 1])` and `(2, [0, 2])`;
+  - no E0906 across forwarding;
+  - the stale trap for both operations.
+- **Native:** the native backend refuses a program that uses these scopes
+  (E1101).
+- **Goldens:**
+  - unchanged: the signature, ring-0 freeze and corpus hash goldens;
+  - changed: the prelude-hash and diagnostic goldens, and the rings and
+    operation-mode manifests (two new `once` operations).
