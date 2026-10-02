@@ -1,5 +1,5 @@
-Scoped effect instances, slice 2 (docs/designs/scoped-effect-instances.md §10
-A2): `state.scoped` runs on the interpreter, where each scope serves only its own
+Scoped effect instances, slices 2 and 2b (docs/designs/scoped-effect-instances.md §10, §11
+A2, A3): `state.scoped` runs on the interpreter, where each scope serves only its own
 capability's operations. The native backend refuses it until slice 3 gives the
 instance-token builtins native intrinsics (E1101).
 
@@ -17,6 +17,29 @@ instance-token builtins native intrinsics (E1101).
   $ jacquard run two-stores.jqd
   (11, 20)
   $ jacquard build two-stores.jqd -o two-stores
+  error[E1101]: Program is outside the native v1 compilation subset
+    Cause: Not yet compilable in native v1: be8cdc305501d4d20b599fe43bbb1520bec8b22685262b185f3453cf0556d7d9 reachable member is not a term binding
+    Next step: Run the program with the interpreter or rewrite the unsupported construct.
+  error[E1101]: Program is outside the native v1 compilation subset
+    Cause: Not yet compilable in native v1: e148cc2fcadc1f54ce9d168c763074ea45a52c43a1fbc86dfd223ca0e8ca5572 reachable member is not a term binding
+    Next step: Run the program with the interpreter or rewrite the unsupported construct.
+  [1]
+
+Throw and Emit scopes (§11 A3) run on the interpreter too: a throw on an outer
+capability forwards through an inner scope, and emissions keep their order.
+
+  $ cat > throw-emit.jqd <<'EOF_JQD'
+  > (tuple
+  >   (app (var throw.scoped) (lam ((pvar outer))
+  >     (app (var throw.scoped) (lam ((pvar inner))
+  >       (app (var throw.throw-at) (var outer) (lit "outer"))))))
+  >   (app (var emit.scoped) (lam ((pvar e))
+  >     (let nonrec (pwild) (app (var emit.emit-at) (var e) (lit 1))
+  >       (app (var emit.emit-at) (var e) (lit 2))))))
+  > EOF_JQD
+  $ jacquard run throw-emit.jqd
+  (err("outer"), ((), cons(1, cons(2, nil))))
+  $ jacquard build throw-emit.jqd -o throw-emit
   error[E1101]: Program is outside the native v1 compilation subset
     Cause: Not yet compilable in native v1: be8cdc305501d4d20b599fe43bbb1520bec8b22685262b185f3453cf0556d7d9 reachable member is not a term binding
     Next step: Run the program with the interpreter or rewrite the unsupported construct.
