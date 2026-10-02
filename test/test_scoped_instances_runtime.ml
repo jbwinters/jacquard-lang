@@ -250,6 +250,97 @@ let test_eval_smuggling () =
       | Error error -> Alcotest.failf "smuggling: %s" (Runtime_err.to_string error))
   | Kernel.Decl _ -> Alcotest.fail "expected an expression"
 
+let throw_scoped ?(var = "c") body =
+  Printf.sprintf "(app (var throw.scoped) (lam ((pvar %s)) %s))" var body
+
+let emit_scoped ?(var = "c") body =
+  Printf.sprintf "(app (var emit.scoped) (lam ((pvar %s)) %s))" var body
+
+let throw_at c v = Printf.sprintf "(app (var throw.throw-at) (var %s) %s)" c v
+let emit_at c v = Printf.sprintf "(app (var emit.emit-at) (var %s) %s)" c v
+
+let test_throw_emit () =
+  let h = make () in
+  Alcotest.(check string) "a Throw scope that returns" "ok(1)" (run h (throw_scoped "(lit 1)"));
+  Alcotest.(check string)
+    "a Throw scope that throws" "err(7)"
+    (run h (throw_scoped (throw_at "c" "(lit 7)")));
+  (* a nested Throw on the outer capability skips every intervening computation (A3.7) *)
+  Alcotest.(check string)
+    "nested Throw forwards to its own scope" "err(\"outer\")"
+    (run h
+       (throw_scoped ~var:"o"
+          (scoped ~var:"s" "(lit 0)"
+             (throw_scoped ~var:"i" (seq (throw_at "o" "(lit \"outer\")") (put "s" "(lit 1)"))))));
+  Alcotest.(check string)
+    "two Throw scopes of different types" "ok(err(\"text\"))"
+    (run h
+       (throw_scoped ~var:"n"
+          (throw_scoped ~var:"t"
+             (seq
+                "(match (var false) (clause (pcon true) (app (var throw.throw-at) (var n) (lit \
+                 1))) (clause (pcon false) (tuple)))"
+                (throw_at "t" "(lit \"text\")")))));
+  (* ambient handlers and instance scopes do not intercept each other *)
+  Alcotest.(check string)
+    "an ambient handler does not catch an instance throw" "err(7)"
+    (run h
+       (throw_scoped
+          (Printf.sprintf "(app (var throw.to-result) (lam () %s))" (throw_at "c" "(lit 7)"))));
+  Alcotest.(check string)
+    "an instance scope does not catch an ambient throw" "err(5)"
+    (run h
+       (Printf.sprintf "(app (var throw.to-result) (lam () %s))"
+          (throw_scoped "(app (var throw) (lit 5))")));
+  (* Emit keeps chronological order and forwards between nested scopes *)
+  Alcotest.(check string)
+    "nested Emit scopes" "(((), cons(2, nil)), cons(1, cons(3, nil)))"
+    (run h
+       (emit_scoped ~var:"o"
+          (emit_scoped ~var:"i"
+             (seq (emit_at "o" "(lit 1)") (seq (emit_at "i" "(lit 2)") (emit_at "o" "(lit 3)"))))));
+  (* Throw inside State keeps the store; State inside Emit emits what it reads *)
+  Alcotest.(check string)
+    "Throw inside State" "(err(\"e\"), 5)"
+    (run h
+       (scoped ~var:"s" "(lit 0)"
+          (Printf.sprintf "(tuple %s %s)"
+             (throw_scoped ~var:"t" (seq (put "s" "(lit 5)") (throw_at "t" "(lit \"e\")")))
+             (get "s"))));
+  Alcotest.(check string)
+    "State inside Emit" "((), cons(2, nil))"
+    (run h
+       (emit_scoped ~var:"e"
+          (scoped ~var:"s" "(lit 1)" (seq (put "s" "(lit 2)") (emit_at "e" (get "s"))))));
+  (* a multi-shot handler around an Emit scope: each branch keeps its own list, with no E0906 *)
+  define h "(defeffect fork2 () (op choose () (tref bool)))";
+  Alcotest.(check string)
+    "multi-shot around an Emit scope" "((1, cons(0, cons(1, nil))), (2, cons(0, cons(2, nil))))"
+    (run h
+       (Printf.sprintf
+          "(handle %s (ret (pvar x) (tuple (var x) (var x))) (opclause choose () k (tuple (match \
+           (app (var k) (var true)) (clause (ptuple (pvar a) (pwild)) (var a))) (match (app (var \
+           k) (var false)) (clause (ptuple (pvar b) (pwild)) (var b))))))"
+          (emit_scoped ~var:"e"
+             (seq (emit_at "e" "(lit 0)")
+                (Printf.sprintf
+                   "(match (app (var choose)) (clause (pcon true) %s) (clause (pcon false) %s))"
+                   (seq (emit_at "e" "(lit 1)") "(lit 1)")
+                   (seq (emit_at "e" "(lit 2)") "(lit 2)"))))));
+  (* the stale trap covers both operations (A2.4) *)
+  let stale label src =
+    match run_unchecked h src with
+    | Error (Runtime_err.Stale_capability _) -> ()
+    | Ok value -> Alcotest.failf "%s returned %s" label (Value.show value)
+    | Error error -> Alcotest.failf "%s: %s" label (Runtime_err.to_string error)
+  in
+  stale "a stale Throw capability"
+    (Printf.sprintf "(match %s (clause (pcon ok (pvar d)) %s) (clause (pwild) (lit 0)))"
+       (throw_scoped "(var c)") (throw_at "d" "(lit 1)"));
+  stale "a stale Emit capability"
+    (Printf.sprintf "(match %s (clause (ptuple (pvar d) (pwild)) %s))" (emit_scoped "(var c)")
+       (emit_at "d" "(lit 1)"))
+
 let suite =
   [
     Alcotest.test_case "stores, same-typed and independent scopes" `Quick test_stores;
@@ -258,4 +349,5 @@ let suite =
     Alcotest.test_case "ambient handlers around a scope" `Quick test_ambient_handlers;
     Alcotest.test_case "the stale-capability trap" `Quick test_stale_trap;
     Alcotest.test_case "a capability smuggled through eval is trapped" `Quick test_eval_smuggling;
+    Alcotest.test_case "Throw and Emit scopes" `Quick test_throw_emit;
   ]
