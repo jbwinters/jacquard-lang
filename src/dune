@@ -10,5 +10,6 @@
   Task_capability
   Task_handle
   Channel_handle
+  Instance_token
   Schedule_control)
  (libraries digestif unix yojson))

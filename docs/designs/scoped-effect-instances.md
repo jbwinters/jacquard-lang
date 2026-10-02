@@ -2,9 +2,10 @@
 
 - Status: design with an executable model. Implementation is TS.2 (task 211).
   Slice 1, the checker (§8, §9 A1.10), is implemented and checked by
-  `test/test_scoped_instances_checker.ml`; it registers the instance
-  declarations on test checker contexts only, so production programs are
-  unchanged. Slices 2 to 4 remain.
+  `test/test_scoped_instances_checker.ml`. Slice 2, the State runtime and
+  production registration (§10 A2), is implemented and checked by
+  `test/test_scoped_instances_runtime.ml`. Slice 2b (Throw and Emit), slice 3
+  (native) and slice 4 (docs) remain.
 - Date: 2026-09-24
 - Base: `main` after TS.0 (effect-payload containment, PR #112).
 - Model: `test/scoped_instances_model.ml`, checked by
@@ -625,3 +626,225 @@ Slice 1 implements the State shape (`state-instance`, `get-at`, `put-at`,
 Slice 1 registers the instance declarations only on test checker contexts;
 production contexts have an empty registration, which a test asserts. Slice 1
 is checker evidence only; runtime dispatch soundness is slice 2's.
+
+## 10. Amendment A2 (slice 2: the State runtime)
+
+- Status: amendment to the approved design for slice 2, revised after review.
+  It fixes the runtime representation, the State handler and its trusted
+  scheme, the stale-capability trap, production registration and the
+  migration. It does not change the dispatch rule (§4). It amends §6's
+  compatibility claims (A2.6).
+- Date: 2026-10-01.
+
+§8 slice 2 ("forwarding instance handlers for State, Throw, and Emit") is
+split. Slice 2 builds State. Slice 2b builds Throw and Emit, whose result and
+payload rules land in their own amendment before they are registered (A1.10,
+A2.7).
+
+### A2.1 The capability value and its contract
+
+- A capability's runtime value is an **instance token**: a new runtime value
+  variant beside the task and channel handles.
+  - Tokens are minted from a process-wide counter, so two distinct scopes
+    never share one, across evaluator contexts, runs and domains.
+  - The multi-shot copies of one scope's frame share that scope's token
+    (A1.2).
+  - A token is never compared by structure and displays as `<capability>`.
+    Observation gives it an opaque projection.
+  - Runtime fingerprints hash a new constant tag of their own, never the
+    counter, so replay stays deterministic.
+  - The evaluator treats a token as an atom: it is not a task-like
+    scope-checked handle, because the trap (A2.4) is the defence. Every
+    exhaustive match over runtime values gains a case: display, observation,
+    the host protocol and the scheduler core.
+  - `instance.same-v0` returns false when either argument is not a token,
+    which only an `eval` disguise can produce. The operation then forwards
+    and ends at the trap.
+  - The host protocol v0 refuses it (E1604) and gains no wire form.
+- A new contract module freezes the identities of the State instance
+  declarations: the capability type, its private constructor, the instance
+  effect, its two operations and the scoped term. This follows the pattern of
+  the Async and Channel contracts. The evaluator, the store and the native
+  compiler key every instance rule on these frozen hashes; the checker
+  registration (A2.5) is built from them.
+- The capability type's only constructor (`state-ref-opaque`) is a private
+  carrier:
+  - the checker refuses it (E0835, slice 1);
+  - the evaluator's constructor lookup, the store's private-carrier indexing
+    and the native compiler refuse it, as they refuse the task and channel
+    carriers.
+
+### A2.2 The prelude declarations and the handler
+
+- The prelude gains one file, sorted last, declaring:
+  - `state-ref s`;
+  - `state-instance s`, with operations
+    `state.get-at : (StateRef s) -> s` and
+    `state.put-at : (StateRef s, s) -> ()`, both `multi` like `state.get` and
+    `state.put`;
+  - `state.scoped`.
+
+  Existing declarations and their hashes are unchanged; the prelude hash
+  golden only gains lines.
+- Two hidden trusted builtins support the handler:
+  - `instance.fresh-v0 : forall c. () -> c` mints a token;
+  - `instance.same-v0 : forall c. (c, c) -> Bool` compares two.
+
+  They follow the existing hidden-builtin rule. Their names join the prelude's
+  hide list, and an explicit hash reference in source fails closed. Only
+  trusted prelude bodies reach them, so their generic schemes act as coercions
+  inside those bodies only. Their schemes are quantified rather than
+  monomorphic. Neither takes a callback, so neither needs the
+  fresh-continuation flag (A1.4 audit). Slice 3 gives them native intrinsics;
+  until then the native backend refuses them (E1101).
+- `state.scoped(init, f)` keeps its store in the function-of-state style of
+  `state.run`. It mints `t = instance.fresh-v0()` and applies
+  `handle f(t) with …` to `init`, with these clauses:
+  - `ret x -> fn (s) -> x`: a body that performs no State operation returns
+    its value.
+  - **Served get:** `state.get-at(c) k`, when `instance.same-v0(c, t)`, gives
+    `fn (s) -> k(s)(s)`.
+  - **Served put:** `state.put-at(c, v) k`, when `instance.same-v0(c, t)`,
+    gives `fn (_) -> k(())(v)`.
+  - **Forwarded get:** otherwise `fn (s) -> k(state.get-at(c))(s)`.
+  - **Forwarded put:** otherwise `fn (s) -> k(state.put-at(c, v))(s)`.
+
+  The forwarding re-perform sits inside the store lambda. A clause body runs
+  outside its own handler, so the re-perform reaches the next scope or the
+  trap. Each forwarding clause resumes its continuation exactly once and
+  leaves its own store untouched (§4). Multi-shot copying and in-order
+  threading of an outer store follow from the immutable continuation frames.
+- The scope's result is the body's value, matching the checker form (A1.7).
+
+### A2.3 The trusted scheme
+
+- The body of `state.scoped` handles instance operations, which E0834 refuses
+  under registration. The body is trusted code and is never checked under
+  registration.
+- Registration (`register_instances`, which `make_ctx` calls) seeds the term
+  signature of `state.scoped` with the exact scheme
+  `forall a s | e. (s, (StateRef s) ->{state-instance | e} a) ->{| e} a`.
+  - The callback row's instance entry carries a label variable bound by the
+    capability parameter.
+  - `term_scheme` never checks a registered scoped term's body, so scheme
+    sweeps (prelude zero-diagnostic checks, tier and interface sweeps,
+    governance and host preflight) see the seeded scheme. A source reference
+    still goes through the checker form or E0831.
+  - The scheme is pinned in the checker tests
+    (`test/test_scoped_instances_checker.ml`).
+- A test checks the body as an ordinary handler on an unregistered context,
+  with the hidden builtins' signatures installed, and pins the result. It
+  displays as `(s, (StateRef s) ->{StateInstance | e} a) ->{StateInstance | e} a`;
+  the display omits payloads, and the one `StateInstance s` payload is forced
+  across every forwarded instance.
+  This is evidence that the body is well typed outside the instance
+  discipline. The seeded scheme refines it in two ways:
+  - forwarded operations become distinct-label entries in `e`;
+  - each label keeps its own payload.
+
+  Those refinements rest on §4's dispatch rule, the model (§5) and A2.8's
+  interpreter tests, not on this check.
+- A declaration of the same scoped term checked directly (for example, an
+  imported object) bypasses the seeded scheme and is refused (E0834). This
+  fails closed.
+
+### A2.4 The stale-capability trap
+
+- An instance operation that finds no frame of its scope on the current
+  continuation is a **stale capability**: a new runtime refusal, E0920. It
+  is defence in depth like E0906, reachable only through unchecked `eval`
+  (A1.2).
+- Three guards, keyed by the frozen operation identities, make sure no driver
+  ever receives an instance operation:
+  - the exhausted handler search raises E0920 before the root-handler lookup,
+    the root observer notification and operation capture, which covers async
+    children and both capture modes;
+  - root-handler registration refuses an instance operation;
+  - direct routed dispatch refuses one.
+- The trap is not a liveness flag. A multi-shot resumption may re-enter a
+  copied scope frame after another copy has returned (A1.2).
+
+### A2.5 Production registration
+
+- `Check.make_ctx` registers State automatically when the store locates all
+  of the frozen identities, including the hidden private constructor through
+  the store's internal lookup. Registration is all-or-nothing: a store holding
+  some but not all of them is an internal error.
+  - A test-only option builds an unregistered context.
+  - `register_instances` refuses a duplicate effect, capability or scoped
+    term.
+- The eval checker and every frontend, governance and posterior checker get
+  the registration through `make_ctx`.
+- Consequences for slice 1's tests:
+  - the test-only fixture is retired;
+  - the checker tests move to the production declarations;
+  - the assertion that production registers nothing is inverted;
+  - the unregistered control uses the test-only option;
+  - the diagnostic goldens are regenerated with the production names.
+- From slice 2 on, the registered checker paths (A1) run for every program.
+  The evidence that existing programs are unaffected is:
+  - the complete existing suite passing under registration;
+  - unchanged signature, ring-0 freeze and corpus hash goldens;
+  - every retained prelude hash identical.
+- The public names `state.scoped`, `state-ref`, `state-instance`,
+  `state.get-at` and `state.put-at` enter the prelude namespace. A user
+  program that already defines one of them is affected like any other prelude
+  addition.
+
+### A2.6 Migration (amends §6)
+
+Adding prelude declarations changes the prelude manifest, so this slice has
+three operational effects:
+
+- An existing store refuses the new prelude (E0705, "added declarations").
+  Re-initialize the store.
+- Retained interface-v1 manifests and sealed checked artifacts that record the
+  prelude manifest fail verification with `Prelude_changed`, and retained
+  bundles fail with E1720. Regenerate them.
+- Project context identities that include the prelude manifest change.
+
+No retained declaration hash changes. The release evidence records all three
+effects. §6's "store: none" applies to identities, not to these manifest
+checks.
+
+### A2.7 Throw and Emit (slice 2b)
+
+Slice 2b specifies Throw and Emit in its own amendment before registering
+them. Review of this amendment fixed these constraints for that work:
+
+- **Result type.** Throw's operation result must not need a declaration
+  parameter outside the capability's payload. Ambient Throw uses an effect
+  parameter `a`, and making `a` a parameter breaks A1.1's "each label
+  determines one payload". Slice 2b either gives `throw-at` an empty result
+  type, or extends A1.1 and the registration to payloads made of the
+  capability arguments plus per-region result parameters, unified per region
+  as in TS.0.
+- **Registration.** The registration gains a result shape (the body's result,
+  `Result e a`, or the body's result with the emitted list) and callback
+  position 0 for scopes without an initializer. Non-escape is checked against
+  the transformed result type.
+- **Clause style.** Throw and Emit clauses resume `once` operations, so they
+  are written in direct style: the store-lambda style would let a once
+  resumption escape its clause (E0817).
+
+Until then, `register_instances` keeps refusing callback positions other than 1.
+
+### A2.8 Slice-2 evidence
+
+- **Interpreter tests mirror the model's targeted cases:**
+  - two stores of different types;
+  - same-typed instances, where an outer `put` reaches the outer store;
+  - nested and independent scopes;
+  - forwarding through an inner scope, including higher-order transport;
+  - multi-shot resumption inside and around a scope;
+  - ambient `emit.collect` and `throw.to-result` inside and around a scope;
+  - a body that performs no State operation.
+- **The stale trap is tested through `eval`, through each of its three
+  guards, and in both capture modes,** with no root observer notified.
+- **Trusted scheme:** a test pins the seeded scheme, and another checks the
+  body on an unregistered context.
+- **The native backend refuses** a program that uses a scope (E1101).
+- **Goldens:**
+  - unchanged: the signature, ring-0 freeze and corpus hash goldens;
+  - changed: the prelude-hash, diagnostic, rings and operation-mode
+    manifests, listed in the PR.

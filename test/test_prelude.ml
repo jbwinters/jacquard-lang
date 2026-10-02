@@ -125,7 +125,7 @@ let test_reviewed_operation_modes store =
   in
   let declared = prelude_source_modes () |> List.map row |> List.sort String.compare in
   let frozen = reviewed |> List.map row |> List.sort String.compare in
-  Alcotest.(check int) "current prelude operation inventory size" 38 (List.length declared);
+  Alcotest.(check int) "current prelude operation inventory size" 40 (List.length declared);
   Alcotest.(check (list string))
     "every operation from every prelude DefEffect has an exact reviewed mode" declared frozen;
   test_retained_multi_hashes store;
@@ -138,35 +138,47 @@ let test_reviewed_operation_modes store =
         Kernel.{ it = App ({ it = Ref (op, Op); meta }, List.init arity (fun _ -> arg)); meta }
       in
       let expression = Kernel.{ it = Tuple [ perform; { it = Lit (LInt 7); meta } ]; meta } in
-      let captured =
+      (* a scoped instance operation reaching the root is a stale capability: it is trapped before
+         capture, so no driver ever receives it (TS.2, design §10 A2.4) *)
+      if Instance_contract.is_instance_operation op then
         match Eval.run_state_capturing ctx (Eval.expr_state expression) with
-        | Ok (Eval.COp { kont; _ }) -> kont
-        | Ok (Eval.CValue value) ->
-            Alcotest.failf "%s.%s unexpectedly returned %s" reviewed.effect_name reviewed.op_name
-              (Value.show value)
+        | Error (Runtime_err.Stale_capability _) -> ()
+        | Ok _ ->
+            Alcotest.failf "%s.%s reached the root unrefused" reviewed.effect_name reviewed.op_name
         | Error error ->
-            Alcotest.failf "%s.%s capture failed: %s" reviewed.effect_name reviewed.op_name
+            Alcotest.failf "%s.%s wrong root refusal: %s" reviewed.effect_name reviewed.op_name
               (Runtime_err.to_string error)
-      in
-      let resume value =
-        Result.bind (Eval.resume_captured_state ctx captured (Value.VInt value)) (fun state ->
-            Eval.run_state_capturing ctx state)
-      in
-      (match resume 11 with
-      | Ok (Eval.CValue _) -> ()
-      | Ok (Eval.COp _) -> Alcotest.fail "first resume unexpectedly performed another operation"
-      | Error error -> Alcotest.failf "first resume failed: %s" (Runtime_err.to_string error));
-      match (reviewed.mode, resume 12) with
-      | Kernel.Once, Error Runtime_err.Once_resumed_twice -> ()
-      | Kernel.Multi, Ok (Eval.CValue _) -> ()
-      | Kernel.Once, Error error | Kernel.Multi, Error error ->
-          Alcotest.failf "%s.%s wrong second-resume error: %s" reviewed.effect_name reviewed.op_name
-            (Runtime_err.to_string error)
-      | Kernel.Once, Ok _ ->
-          Alcotest.failf "%s.%s allowed a second once resume" reviewed.effect_name reviewed.op_name
-      | Kernel.Multi, Ok (Eval.COp _) ->
-          Alcotest.failf "%s.%s second multi resume performed another operation"
-            reviewed.effect_name reviewed.op_name)
+      else
+        let captured =
+          match Eval.run_state_capturing ctx (Eval.expr_state expression) with
+          | Ok (Eval.COp { kont; _ }) -> kont
+          | Ok (Eval.CValue value) ->
+              Alcotest.failf "%s.%s unexpectedly returned %s" reviewed.effect_name reviewed.op_name
+                (Value.show value)
+          | Error error ->
+              Alcotest.failf "%s.%s capture failed: %s" reviewed.effect_name reviewed.op_name
+                (Runtime_err.to_string error)
+        in
+        let resume value =
+          Result.bind (Eval.resume_captured_state ctx captured (Value.VInt value)) (fun state ->
+              Eval.run_state_capturing ctx state)
+        in
+        (match resume 11 with
+        | Ok (Eval.CValue _) -> ()
+        | Ok (Eval.COp _) -> Alcotest.fail "first resume unexpectedly performed another operation"
+        | Error error -> Alcotest.failf "first resume failed: %s" (Runtime_err.to_string error));
+        match (reviewed.mode, resume 12) with
+        | Kernel.Once, Error Runtime_err.Once_resumed_twice -> ()
+        | Kernel.Multi, Ok (Eval.CValue _) -> ()
+        | Kernel.Once, Error error | Kernel.Multi, Error error ->
+            Alcotest.failf "%s.%s wrong second-resume error: %s" reviewed.effect_name
+              reviewed.op_name (Runtime_err.to_string error)
+        | Kernel.Once, Ok _ ->
+            Alcotest.failf "%s.%s allowed a second once resume" reviewed.effect_name
+              reviewed.op_name
+        | Kernel.Multi, Ok (Eval.COp _) ->
+            Alcotest.failf "%s.%s second multi resume performed another operation"
+              reviewed.effect_name reviewed.op_name)
 
 let test_loads_with_zero_diagnostics () =
   let store, _ctx = Eval_support.make_prelude_ctx () in

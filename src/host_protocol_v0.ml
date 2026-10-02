@@ -725,8 +725,8 @@ let encode_boundary_value ~budget value =
                ("kind", `String "constructor");
              ])
     | Value.VSecret _ | Value.VConstructor _ | Value.VOp _ | Value.VClosure _ | Value.VBuiltin _
-    | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VResume _
-    | Value.VOnceResume _ ->
+    | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VInstance _
+    | Value.VResume _ | Value.VOnceResume _ ->
         error ~code:"E1604"
           "The Core value is opaque, callable, or owned by one evaluator run and cannot cross v0."
   in
@@ -924,8 +924,8 @@ let validate_argument_value checker ~expected value =
           let* () = map_result boundary_type_supported fields |> Result.map (fun _ -> ()) in
           validate_all fields args
     | Value.VSecret _ | Value.VConstructor _ | Value.VOp _ | Value.VClosure _ | Value.VBuiltin _
-    | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VResume _
-    | Value.VOnceResume _ ->
+    | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VInstance _
+    | Value.VResume _ | Value.VOnceResume _ ->
         error ~code:"E1604" "A run-owned or callable value cannot be an invoke argument."
   and validate_all expected values =
     match (expected, values) with

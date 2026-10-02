@@ -386,6 +386,8 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
   | Kernel.Ref (h, Kernel.Con) ->
       if Concurrency_contract.is_task_private_hash h || Channel_contract.is_channel_private_hash h
       then refuse ctx "the opaque scoped-handle carrier is scheduler-private";
+      if Instance_contract.is_private_carrier h then
+        refuse ctx "a capability can only be obtained from its scoped combinator";
       note_con ctx h;
       k (ACon h)
   | Kernel.Ref (h, Kernel.Op) ->
@@ -718,6 +720,8 @@ and lower_app ctx env ~tail (f : Kernel.expr) (args : Kernel.expr list) (k : ato
             Concurrency_contract.is_task_private_hash h
             || Channel_contract.is_channel_private_hash h
           then refuse ctx "the opaque scoped-handle carrier is scheduler-private";
+          if Instance_contract.is_private_carrier h then
+            refuse ctx "a capability can only be obtained from its scoped combinator";
           note_con ctx h;
           let arity = con_arity ctx h in
           if List.length args <> arity then

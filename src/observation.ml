@@ -37,6 +37,7 @@ let rec of_value (v : Value.t) =
   | Value.VConstructor _ -> Opaque "constructor"
   | Value.VTask _ -> Opaque "task"
   | Value.VChannel _ -> Opaque "channel"
+  | Value.VInstance _ -> Opaque "capability"
 
 let rec render v =
   (* rendering walks the value too, so it draws on fuel like the projection *)

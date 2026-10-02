@@ -5,9 +5,9 @@ open Jacquard
 
 let golden_file = "../corpus/golden/sigs.golden"
 
-let make_cctx () =
+let make_cctx ?instances () =
   let store, _ectx = Eval_support.make_prelude_ctx () in
-  match Check.make_ctx store with
+  match Check.make_ctx ?instances store with
   | Error ds -> Eval_support.fail_diags "make_ctx" ds
   | Ok ctx -> (
       match Prelude.builtin_signatures store with

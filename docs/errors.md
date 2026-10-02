@@ -203,6 +203,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | inference | E0917 | inference failed numerically: every possible path or run underflowed to zero weight, or a weight or the total is non-finite or negative | two `observe` factors of `1e-200` under `jacquard infer enumerate` |
 | inference | E0918 | exact enumeration exceeded its `--max-branches` terminal-path budget | a two-branch coin model under `jacquard infer enumerate --max-branches 1` |
 | runtime | E0919 | the invocation's computation fuel ran out; the run is incomplete, neither a pass nor a failure (docs/computation-fuel.md) | `spin(n) = spin(add(n, 1))` under `jacquard run --fuel 2000` |
+| runtime | E0920 | a scoped instance operation found no frame of its scope on the current continuation (a stale capability, reachable only through unchecked `eval`) | a capability smuggled out of `state.scoped` through `eval-code` and used later |
 
 ## Warp (E10xx)
 

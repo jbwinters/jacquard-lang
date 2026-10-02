@@ -141,6 +141,11 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
               "audit-sequence-v0";
               "governance.fresh-audit-run-id";
               "governance.require-audit-run-id";
+              (* TS.2 (design §10 A2.1, A2.2): the private capability carrier and the token
+                 builtins only the trusted state.scoped body uses *)
+              "state-ref-opaque";
+              "instance.fresh-v0";
+              "instance.same-v0";
             ];
           let bind_operation_alias effect_name operation_name alias =
             match Store.lookup_kind store effect_name Resolve.KEffect with
@@ -534,6 +539,18 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           in
           join (Buffer.create 32) 1 args)
   | _ -> ());
+  (* TS.2 instance tokens (design §10 A2.1): a non-token argument, reachable only through an eval
+     disguise, is never the scope's own, so its operation forwards and ends at the stale trap *)
+  optional_internal "instance.fresh-v0" (fun args ->
+      match args with
+      | [] -> Ok (Value.VInstance (Instance_token.fresh ()))
+      | args -> type_err "instance.fresh-v0" args);
+  optional_internal "instance.same-v0" (fun args ->
+      match args with
+      | [ Value.VInstance left; Value.VInstance right ] ->
+          Ok (vbool (Instance_token.same left right))
+      | [ _; _ ] -> Ok (vbool false)
+      | args -> type_err "instance.same-v0" args);
   optional_internal "governance.fresh-audit-run-id" (fun args ->
       match args with
       | [] -> Ok (Value.VHash (Eval.fresh_audit_run_id ctx))
@@ -1473,7 +1490,33 @@ let grant ?console_read ?secret_getenv (ctx : Eval.ctx) name ~infer_cache ~out ~
 (** Builtin type signatures for the checker (W3.2): the marker bodies would type as [code], so the
     checker consults these instead, mirroring how {!wire_builtins} overrides evaluation. Arrows are
     pure (closed empty rows); the checker's open coercion supplies call-site slack. *)
-let builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t list) result =
+let rec builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t list) result =
+  Result.map (fun base -> base @ instance_signatures store) (base_builtin_signatures store)
+
+(* TS.2 hidden token builtins (design §10 A2.2): quantified, so they act as coercions inside the
+   trusted state.scoped body only; their names are hidden after load. *)
+and instance_signatures store =
+  match
+    ( Store.lookup_internal_kind store "instance.fresh-v0" Resolve.KTerm,
+      Store.lookup_internal_kind store "instance.same-v0" Resolve.KTerm,
+      Store.lookup_kind store "bool" Resolve.KType )
+  with
+  | ( Some { Resolve.hash = fresh; _ },
+      Some { Resolve.hash = same; _ },
+      Some { Resolve.hash = bool; _ } ) ->
+      let capability = Types.new_tvar 1 in
+      let other = Types.new_tvar 1 in
+      [
+        (fresh, { Types.ty = Types.TArrow ([], Types.empty_row, capability); gen_level = 0 });
+        ( same,
+          {
+            Types.ty = Types.TArrow ([ other; other ], Types.empty_row, Types.TCon (bool, []));
+            gen_level = 0;
+          } );
+      ]
+  | _ -> []
+
+and base_builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, Diag.t list) result =
   let ( let* ) = Result.bind in
   let* int_h = lookup_hash store ~kind:Resolve.KType "int" in
   let* bool_h = lookup_hash store ~kind:Resolve.KType "bool" in

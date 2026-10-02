@@ -317,55 +317,24 @@ let once_diag effect_name operation body =
      (handle (app (var %s)) (ret (pvar x) (var x)) (opclause %s () k %s))"
     effect_name operation operation operation body
 
-(* TS.2 slice 1 test fixture: a State-shaped scoped instance effect, declared in a test store and
-   registered on test checker contexts only (design docs/designs/scoped-effect-instances.md §9
-   A1.10). Production contexts never register it. *)
+(* TS.2: the production State instance declarations (prelude/32-scoped-instances.jqd), which every
+   checker context built by [Check.make_ctx] registers (design
+   docs/designs/scoped-effect-instances.md §10 A2.5). The slice-1 test fixture is retired. *)
 module Instances_fixture = struct
-  let source =
-    {|(deftype state-ref ((tvar s)) (con state-ref-opaque))
-  (defeffect state-instance ((tvar s))
-    (op get-at ((tapp (tref state-ref) (tvar s))) (tvar s))
-    (op put-at ((tapp (tref state-ref) (tvar s)) (tvar s)) (ttuple)))
-  (defterm ((binding state.scoped () (lam ((pvar init) (pvar f)) (var init)))))
-  |}
-
-  (* Install [source] into [store], checking each declaration with [ctx] first. *)
-  let install store ctx =
-    match Reader.parse_string ~file:"instances-fixture.jqd" source with
-    | Error diagnostics -> Error diagnostics
-    | Ok forms ->
-        List.fold_left
-          (fun installed form ->
-            Result.bind installed (fun () ->
-                Result.bind (Kernel.of_form form) (fun top ->
-                    Result.bind
-                      (Resolve.resolve (Store.names_view store) top)
-                      (fun resolved ->
-                        Result.bind (Check.check_top ctx resolved) (fun _ ->
-                            match resolved with
-                            | Kernel.Decl declaration ->
-                                Result.map (fun _ -> ()) (Store.put_decl store declaration)
-                            | Kernel.Expr _ -> Ok ())))))
-          (Ok ()) forms
-
   let hash store kind name =
     match Store.lookup_kind store name kind with
     | Some { Resolve.hash; _ } -> hash
     | None -> failwith ("instances fixture: missing " ^ name)
 
-  (** The registration for the installed fixture. *)
+  (** The production State registration. *)
   let registration store : Check.instance_registration =
     {
       scoped = hash store Resolve.KTerm "state.scoped";
       instance_effect = hash store Resolve.KEffect "state-instance";
       capability = hash store Resolve.KType "state-ref";
-      operations = [ hash store Resolve.KOp "get-at"; hash store Resolve.KOp "put-at" ];
+      operations = [ hash store Resolve.KOp "state.get-at"; hash store Resolve.KOp "state.put-at" ];
       callback_position = 1;
     }
-
-  (** [install_and_register store ctx] installs the fixture and registers it on [ctx]. *)
-  let install_and_register store ctx =
-    Result.map (fun () -> Check.register_instances ctx [ registration store ]) (install store ctx)
 end
 
 (** The W3.7 golden diagnostic battery: 20+ sources covering every checker code (the coverage test
@@ -455,25 +424,26 @@ let diag_cases : (string * string * string list option) list =
       None );
   ]
 
-(** TS.2 cases, checked on a separate context that registers [Instances_fixture], so every other
-    case keeps a production-shaped, unregistered context. *)
+(** TS.2 cases on the production State instance declarations. *)
 let diag_instance_cases : (string * string * string list option) list =
   [
     ( "instance-undetermined",
-      "(lam ((pvar c)) (ann (lam () (app (var get-at) (var c))) (tarrow () (row (eref \
+      "(lam ((pvar c)) (ann (lam () (app (var state.get-at) (var c))) (tarrow () (row (eref \
        state-instance)) (tref int))))",
       None );
     ("instance-scoped-outside-form", "(app (var state.scoped) (lit 0))", None);
     ("instance-escape", "(app (var state.scoped) (lit 0) (lam ((pvar c)) (var c)))", None);
     ( "instance-fresh-continuation",
       "(lam () (app (var state.scoped) (lit 0) (lam ((pvar c)) (app (var async.spawn) (lam () (app \
-       (var get-at) (var c)))))))",
+       (var state.get-at) (var c)))))))",
       None );
     ( "instance-user-clause",
-      "(lam ((pvar c)) (handle (app (var get-at) (var c)) (ret (pvar x) (var x)) (opclause get-at \
-       ((pvar r)) k (app (var k) (lit 1)))))",
+      "(lam ((pvar c)) (handle (app (var state.get-at) (var c)) (ret (pvar x) (var x)) (opclause \
+       state.get-at ((pvar r)) k (app (var k) (lit 1)))))",
       None );
-    ("instance-capability-forged", "(var state-ref-opaque)", None);
+    ( "instance-capability-forged",
+      "(ref #6479a109eaded4a975ecf1b0e4ef243de65222aaee824f9a5731f75249820d70 con)",
+      None );
     ( "instance-capability-stored",
       "(deftype box () (con box (field held (tapp (tref state-ref) (tref int)))))",
       None );
@@ -504,20 +474,12 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
       end
       else Sys.remove path
   in
-  at_exit (fun () ->
-      remove_tree root;
-      remove_tree (root ^ "-instances"));
+  at_exit (fun () -> remove_tree root);
   let* store = Store.open_store root in
   let* _ = Prelude.load ~dir:prelude_dir store in
   let* ctx = Check.make_ctx store in
   let* sigs = Prelude.builtin_signatures store in
   Check.register_builtin_signatures ctx sigs;
-  let* instance_store = Store.open_store (root ^ "-instances") in
-  let* _ = Prelude.load ~dir:prelude_dir instance_store in
-  let* instance_ctx = Check.make_ctx instance_store in
-  let* instance_sigs = Prelude.builtin_signatures instance_store in
-  Check.register_builtin_signatures instance_ctx instance_sigs;
-  let* () = Instances_fixture.install_and_register instance_store instance_ctx in
   let run_case (store, ctx) (name, src, granted) =
     let render ds = List.map (fun d -> name ^ " | " ^ Diag.to_string d) ds in
     let* forms = Reader.parse_string ~file:(name ^ ".jqd") src in
@@ -596,7 +558,7 @@ let diag_golden_lines ~prelude_dir : (string list, Diag.t list) result =
         all checker (lines :: acc) rest
   in
   let* bootstrap = all (store, ctx) [] diag_cases in
-  let* instances = all (instance_store, instance_ctx) [] diag_instance_cases in
+  let* instances = all (store, ctx) [] diag_instance_cases in
   let rec collect run acc = function
     | [] -> Ok (List.concat (List.rev acc))
     | case :: rest ->

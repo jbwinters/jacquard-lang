@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1152`
-- Cram transcript files: `75`
+- Alcotest/QCheck cases: `1159`
+- Cram transcript files: `76`
 - Documentation examples: `35` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -670,3 +670,23 @@ The scoped effect instance checker (slice 1 of
 `test/test_scoped_instances_checker.ml` suite and instance-entry, label-sort and
 occurs cases in `test/test_types.ml`. Instance declarations are registered on
 test checker contexts only. The source inventory is now `1152 / 75 / 35`.
+
+The State runtime of scoped effect instances (slice 2, design §10 A2) adds
+`prelude/32-scoped-instances.jqd` (`state.scoped`, `state-ref`,
+`state-instance`, `state.get-at`, `state.put-at`) and registers it on every
+production checker context. It adds seven cases: the new
+`test/test_scoped_instances_runtime.ml` suite and the trusted-scheme case in
+`test/test_scoped_instances_checker.ml`. It also adds one cram file,
+`test/cli/scoped-instances.t`, which pins the interpreter result and the native
+refusal (E1101). Every retained prelude hash is unchanged; the prelude hash
+golden only gains lines.
+
+**Migration:**
+
+- An existing store refuses the new prelude (E0705, "added declarations");
+  re-initialize the store.
+- Retained interface-v1 manifests and sealed checked artifacts fail with
+  `Prelude_changed`, and retained bundles fail with E1720; regenerate them.
+- Project context identities that include the prelude manifest change.
+
+The source inventory is now `1159 / 76 / 35`.
