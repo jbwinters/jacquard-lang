@@ -144,6 +144,8 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
               (* TS.2 (design §10 A2.1, A2.2): the private capability carrier and the token
                  builtins only the trusted state.scoped body uses *)
               "state-ref-opaque";
+              "throw-ref-opaque";
+              "emit-ref-opaque";
               "instance.fresh-v0";
               "instance.same-v0";
             ];

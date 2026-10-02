@@ -2859,6 +2859,16 @@ let production_registrations store =
   let present hash = Result.is_ok (Store.locate_internal store hash) in
   let identities = List.concat_map Instance_contract.family_identities Instance_contract.families in
   match List.partition present identities with
+  | _, [] when not (present Instance_contract.result_type && present Instance_contract.list_type) ->
+      (* the Throw and Emit shapes return the prelude's result and list types (A3.4) *)
+      Error
+        [
+          Diag.error ~domain:Checker ~code:"E0805"
+            ~summary:"The scoped instance declarations are incomplete"
+            ~cause:
+              "The store holds the scoped instance declarations but not the result or list type."
+            ~next_step:"Load the complete, version-matched prelude and try again." ~contrast:None ();
+        ]
   | _, [] ->
       Ok
         (List.map

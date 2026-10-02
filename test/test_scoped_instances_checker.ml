@@ -9,7 +9,7 @@ let fresh () = Test_check.make_cctx ()
 let test_registration () =
   let store, ctx = fresh () in
   Alcotest.(check int)
-    "a production context registers State" 1
+    "a production context registers State, Throw and Emit" 3
     (List.length (Check.instance_registrations ctx));
   Alcotest.(check int)
     "an unregistered control registers nothing" 0
@@ -39,7 +39,7 @@ let test_registration () =
     "a refused batch registers nothing" 0
     (List.length (Check.instance_registrations unregistered));
   Alcotest.(check int)
-    "refused registrations add nothing" 1
+    "refused registrations add nothing" 3
     (List.length (Check.instance_registrations ctx))
 
 let fixture () = fresh ()
