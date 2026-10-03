@@ -341,9 +341,17 @@ type head =
 
 let intrinsic_accepts arity count = arity < 0 || arity = count
 
+(* a builtin marker naming a hidden token builtin is a builtin only at its frozen hash (A4.2); a
+   copy, which a raw quote can produce, is refused rather than minting tokens *)
+let refuse_forged_token_marker ctx (h : Hash.t) name =
+  if Instance_contract.is_token_builtin_name name && not (Instance_contract.is_token_builtin h) then
+    refuse ctx
+      (Printf.sprintf "a builtin marker for the private `%s` outside its frozen identity" name)
+
 let classify_member_head ctx (h : Hash.t) : head =
   match Hashtbl.find_opt ctx.builtin_names h with
   | Some name -> (
+      refuse_forged_token_marker ctx h name;
       match Hashtbl.find_opt ctx.intrinsics name with
       | Some arity -> HIntrinsic (name, arity)
       | None -> refuse ctx (Printf.sprintf "builtin `%s` is not yet implemented natively" name))
@@ -380,6 +388,7 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
   | Kernel.Ref (h, Kernel.Term) -> (
       match Hashtbl.find_opt ctx.builtin_names h with
       | Some name ->
+          refuse_forged_token_marker ctx h name;
           if Hashtbl.mem ctx.intrinsics name then k (member_value_atom ctx h)
           else refuse ctx (Printf.sprintf "builtin `%s` is not yet implemented natively" name)
       | None -> k (member_value_atom ctx h))
