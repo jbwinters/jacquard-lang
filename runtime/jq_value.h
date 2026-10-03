@@ -56,6 +56,7 @@ enum jq_tag {
   JQ_FRAME = 12,      /* a suspended activation (task 71): code, ix, slots */
   JQ_SECRET = 13,     /* opaque bytes; generic rendering is always redacted */
   JQ_TASK = 14,       /* opaque run/scope-local structured-concurrency handle */
+  JQ_INSTANCE = 15,   /* a scoped effect instance capability: an opaque token (TS.2 A4.1) */
 };
 
 #define JQ_RC_STATIC UINT32_MAX
@@ -502,6 +503,11 @@ static inline bool jq_real_lit_match(double a, double b) {
 }
 
 /* intrinsics (each consumes its arguments; names mangle . and - to _) */
+/* TS.2 scoped instance tokens (design docs/designs/scoped-effect-instances.md §12 A4.1): a
+   childless block whose payload word is a process-wide identifier; compared by identifier */
+jq_value jq_instance_fresh(void);
+jq_value jq_i_instance_fresh_v0(jq_rt *rt, const jq_value *a);
+jq_value jq_i_instance_same_v0(jq_rt *rt, const jq_value *a);
 jq_value jq_i_add(jq_rt *rt, const jq_value *a);
 jq_value jq_i_sub(jq_rt *rt, const jq_value *a);
 jq_value jq_i_mul(jq_rt *rt, const jq_value *a);

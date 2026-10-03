@@ -67,6 +67,7 @@ void jq_free_walk(jq_block *root) {
     case JQ_REAL:
     case JQ_HASH:
     case JQ_TASK:
+    case JQ_INSTANCE:
       break;
     case JQ_CODE:
       /* payload: [0] head TEXT; then (kind, datum) pairs — kinds are raw,

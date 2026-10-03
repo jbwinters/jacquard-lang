@@ -286,6 +286,33 @@ static jq_handler_entry entry_const(uint32_t op, int64_t v) {
                                                   UINT16_MAX) };
 }
 
+static void test_instance_tokens(void) {
+  /* TS.2 A4.1: tokens are unique, compared by identifier, consumed by same-v0, opaque in show;
+     ASAN owns the proof that every reference is released exactly once */
+  jq_rt rt = { 0 };
+  rt.v_true = jq_int(1);
+  rt.v_false = jq_int(0);
+  jq_value a = jq_instance_fresh(), b = jq_instance_fresh();
+  CHECK(jq_block_of(a)->tag == JQ_INSTANCE, "a token has its own tag");
+  CHECK(jq_block_of(a)->payload[0] != jq_block_of(b)->payload[0], "tokens are unique");
+  jq_dup(a);
+  jq_dup(a);
+  CHECK(jq_i_instance_same_v0(&rt, (jq_value[]){ a, a }) == rt.v_true, "a token is itself");
+  jq_dup(a);
+  jq_dup(b);
+  CHECK(jq_i_instance_same_v0(&rt, (jq_value[]){ a, b }) == rt.v_false, "two tokens differ");
+  jq_dup(a);
+  CHECK(jq_i_instance_same_v0(&rt, (jq_value[]){ a, jq_int(3) }) == rt.v_false,
+        "a non-token is never the token");
+  char *shown = jq_show(a);
+  CHECK(strcmp(shown, "<capability>") == 0, "a capability displays opaquely");
+  free(shown);
+  CHECK(jq_block_of(a)->rc == 1 && jq_block_of(b)->rc == 1, "same-v0 consumed its arguments");
+  jq_drop(a);
+  jq_drop(b);
+  printf("ok instance tokens\n");
+}
+
 static void test_handler_push_pop(void) {
   /* push takes ownership of the clause closures, pop releases them; the
      captured tuple's free is ASAN's proof */
@@ -1028,6 +1055,7 @@ int main(int argc, char **argv) {
   test_unit();
   test_statics();
   test_blocks();
+  test_instance_tokens();
   test_handler_push_pop();
   test_perform_nearest();
   test_perform_args_ownership();
