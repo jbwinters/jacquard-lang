@@ -7,7 +7,7 @@ Test count: `1167`
 
 Cram count: `76`
 
-Documentation example count: `35` across `8` documents
+Documentation example count: `36` across `8` documents
 
 ## Decision
 
