@@ -1083,9 +1083,11 @@ No retained declaration hash changes.
   childless boxed block whose raw payload word holds an identifier drawn from a
   process-wide atomic counter, so tokens minted by independent runtimes in one
   process never collide.
-- Like every native value, a token is confined to the runtime that created it.
-  Native allocation and reference counts are not synchronized, and A4 does not
-  change that.
+- **Threading.** Native allocation is process-global and unsynchronized, and
+  reference counts are not atomic. So a process runs native code on one thread
+  at a time, independent runtimes included, and every value, tokens included,
+  stays with the runtime that created it. A4 relies on that existing constraint
+  and does not change it. The atomic identifier counter is defensive only.
 - `instance.same-v0` compares identifiers, never block addresses, and consumes
   both arguments. It returns false when either argument is not a token, as in
   the interpreter (A2.1). Reuse of reclaimed blocks cannot confuse two tokens:
@@ -1093,7 +1095,8 @@ No retained declaration hash changes.
   is compared, not the block.
 - Each per-tag operation handles the new tag:
   - the reclamation walk finds no children, as for a task handle;
-  - both display paths render `<capability>`;
+  - the native renderer (`jq_show`, used by display, `debug.inspect` and error
+    messages) renders `<capability>`;
   - applying a token raises the same type error text as the interpreter.
 - `instance.fresh-v0` is the first nullary intrinsic, and it is impure.
   Specialization and constant lowering never fold or hoist an intrinsic call,
@@ -1110,12 +1113,19 @@ are frozen in the instance contract alongside the family identities.
 - **Discovery** pre-seeds the native builtin table with exactly these two
   hashes. For each one it confirms through the store's internal lookup that the
   member is the expected builtin marker.
+  - A store without the instance declarations (a reduced prelude) seeds
+    nothing. A reachable use then fails as a hidden member, as before.
+  - A frozen hash that is present but is not the expected marker is an internal
+    build error.
   - This is stricter than the interpreter's builtin wiring, whose internal
     lookup can fall back to a public binding of the same name. The native
     compiler never resolves the token builtins by name.
-- **Forged markers are refused.** Any other member whose body is a builtin
-  marker naming either token builtin is refused at build time (E1101), even
-  though a raw quote can produce one. In the interpreter such a member is only a
+- **Forged markers are refused.** When lowering a reachable reference, the
+  native compiler refuses (E1101) any member whose body is a builtin marker
+  naming either token builtin but whose hash is not a frozen one. A raw quote
+  can produce such a member. The refusal applies to reachable code only; merely
+  holding such a member elsewhere in the store does not break unrelated
+  builds. In the interpreter such a member is only a
   code value: builtins are registered by hash, so it can never mint a token.
   Neither engine lets source reach the builtins.
 - An explicit hash reference to a hidden builtin still fails closed at
@@ -1131,8 +1141,9 @@ are frozen in the instance contract alongside the family identities.
   interpreter's fresh continuation), the runtime raises E0920. This happens
   before any root grant, inference interception or unhandled-operation path,
   which is the interpreter's order (A2.4).
-- **How it is reported.** The runtime reports the trap through its coded
-  diagnostic formatter, using the interpreter's summary, next step and cause.
+- **How it is reported.** The runtime reports the trap through
+  `jq_diagnostic_failf`, its coded diagnostic formatter, using the
+  interpreter's summary, next step and cause.
   The cause names the operation by the same name the interpreter uses, and the
   exit status is 2.
   - Inside inference, the existing inference wrapping applies, exactly as for
