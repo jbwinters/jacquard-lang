@@ -1,0 +1,19 @@
+; TS.2 A4.4/A4.5: multi-shot resumption inside and around a State scope, A3.7's
+; Emit fork, and a fork nested between two Emit scopes with an inner forward to
+; the outer scope -- each branch keeps its own copy, with no E0906
+(defeffect fork () (op choose () (tref bool)))
+(defterm ((binding both () (lam ((pvar body))
+  (handle (app (var body))
+    (ret (pvar x) (tuple (var x) (var x)))
+    (opclause choose () k
+      (tuple (match (app (var k) (var true)) (clause (ptuple (pvar a) (pwild)) (var a)))
+             (match (app (var k) (var false)) (clause (ptuple (pvar b) (pwild)) (var b))))))))))
+(defterm ((binding sum () (lam ((pvar body))
+  (handle (app (var body))
+    (ret (pvar x) (var x))
+    (opclause choose () k (app (var add) (app (var k) (var true)) (app (var k) (var false)))))))))
+(tuple
+  (app (var sum) (lam () (app (var state.scoped) (lit 0) (lam ((pvar c)) (let nonrec (pwild) (app (var choose)) (let nonrec (pwild) (app (var state.put-at) (var c) (app (var add) (app (var state.get-at) (var c)) (lit 1))) (app (var state.get-at) (var c))))))))
+  (app (var state.scoped) (lit 0) (lam ((pvar c)) (app (var sum) (lam () (let nonrec (pwild) (app (var choose)) (let nonrec (pwild) (app (var state.put-at) (var c) (app (var add) (app (var state.get-at) (var c)) (lit 1))) (app (var state.get-at) (var c))))))))
+  (app (var both) (lam () (app (var emit.scoped) (lam ((pvar e)) (let nonrec (pwild) (app (var emit.emit-at) (var e) (lit 0)) (match (app (var choose)) (clause (pcon true) (let nonrec (pwild) (app (var emit.emit-at) (var e) (lit 1)) (lit 1))) (clause (pcon false) (let nonrec (pwild) (app (var emit.emit-at) (var e) (lit 2)) (lit 2)))))))))
+  (app (var emit.scoped) (lam ((pvar o)) (app (var both) (lam () (app (var emit.scoped) (lam ((pvar i)) (let nonrec (pwild) (app (var emit.emit-at) (var o) (lit 0)) (let nonrec (pvar b) (app (var choose)) (let nonrec (pwild) (app (var emit.emit-at) (var i) (match (var b) (clause (pcon true) (lit 1)) (clause (pcon false) (lit 2)))) (var b)))))))))))

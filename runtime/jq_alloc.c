@@ -14,6 +14,7 @@
 
 #include "jq_value.h"
 
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -154,6 +155,16 @@ jq_value jq_text(const uint8_t *bytes, uint64_t len) {
   jq_block *b = alloc_bytes_block(JQ_TEXT, len);
   b->payload[0] = len;
   if (len) memcpy(&b->payload[1], bytes, len);
+  return jq_of_block(b);
+}
+
+/* identifiers are process-wide so tokens of independent runtimes never collide; the counter is
+   atomic defensively, native code runs on one thread at a time (A4.1) */
+static _Atomic uint64_t jq_instance_counter;
+
+jq_value jq_instance_fresh(void) {
+  jq_block *b = jq_alloc_block(JQ_INSTANCE, 0, 1);
+  b->payload[0] = atomic_fetch_add_explicit(&jq_instance_counter, 1, memory_order_relaxed) + 1;
   return jq_of_block(b);
 }
 

@@ -716,3 +716,17 @@ The migration is the same as for slice 2:
   `dice-coach`, `picnic-planner` and `suite`.
 
 The source inventory is now `1167 / 76 / 35`.
+
+Slice 3 of scoped effect instances (design §12 A4) compiles scopes natively.
+
+- **Token value.** The runtime gains a `JQ_INSTANCE` token value with
+  `instance.fresh-v0` and `instance.same-v0` intrinsics. They are bound only at
+  their frozen hidden identities; the native build refuses a forged marker.
+- **Stale trap.** E0920 is reported byte-identically in both engines.
+- **Evidence:**
+  - native-gauntlet twins g48–g52 and stale fixtures e08–e10, run by the existing
+    `test/cli/native-effects.t`;
+  - token tests in the C runtime check;
+  - `test/cli/scoped-instances.t`, which now checks interpreter/native parity.
+
+No test case or cram file is added, so the source inventory stays `1167 / 76 / 35`.

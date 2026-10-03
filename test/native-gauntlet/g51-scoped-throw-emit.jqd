@@ -1,0 +1,25 @@
+; TS.2 A4.5: nested Throw forwards to its own scope and skips intervening code;
+; Throw inside State keeps the store; State inside Emit; Emit order; ambient
+; handlers and instance scopes do not intercept each other
+(tuple
+  (app (var throw.scoped) (lam ((pvar o))
+    (app (var state.scoped) (lit 0) (lam ((pvar s))
+      (app (var throw.scoped) (lam ((pvar i))
+        (let nonrec (pwild) (app (var throw.throw-at) (var o) (lit "outer"))
+          (app (var state.put-at) (var s) (lit 1)))))))))
+  (app (var state.scoped) (lit 0) (lam ((pvar s))
+    (tuple
+      (app (var throw.scoped) (lam ((pvar t))
+        (let nonrec (pwild) (app (var state.put-at) (var s) (lit 5)) (app (var throw.throw-at) (var t) (lit "e")))))
+      (app (var state.get-at) (var s)))))
+  (app (var emit.scoped) (lam ((pvar e))
+    (app (var state.scoped) (lit 1) (lam ((pvar s))
+      (let nonrec (pwild) (app (var state.put-at) (var s) (lit 2))
+        (app (var emit.emit-at) (var e) (app (var state.get-at) (var s))))))))
+  (app (var emit.scoped) (lam ((pvar o))
+    (app (var emit.scoped) (lam ((pvar i))
+      (let nonrec (pwild) (app (var emit.emit-at) (var o) (lit 1))
+        (let nonrec (pwild) (app (var emit.emit-at) (var i) (lit 2))
+          (app (var emit.emit-at) (var o) (lit 3))))))))
+  (app (var throw.scoped) (lam ((pvar c))
+    (app (var throw.to-result) (lam () (app (var throw.throw-at) (var c) (lit 7)))))))

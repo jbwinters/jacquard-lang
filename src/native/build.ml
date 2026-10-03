@@ -20,6 +20,8 @@ let base_ldflags = "-O2 -flto"
     is refused by lowering with the builtin's name. *)
 let intrinsics : (string * int) list =
   [
+    ("instance.fresh-v0", 0);
+    ("instance.same-v0", 2);
     ("add", 2);
     ("sub", 2);
     ("mul", 2);
@@ -158,6 +160,20 @@ let discover ?(roots = []) (store : Store.t) : discovery =
             end)
   in
   reach roots;
+  (* the hidden token builtins (A4.2): ordinary lookup refuses hidden members, so seed exactly the
+     frozen marker hashes after confirming them through the trusted internal lookup *)
+  List.iter
+    (fun (hash, name) ->
+      match Store.locate_internal store hash with
+      | Error _ -> () (* a reduced prelude without the instance declarations *)
+      | Ok { Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ }; role = Store.Member i; _ }
+        -> (
+          match List.nth_opt bindings i with
+          | Some b when builtin_marker_name b.Kernel.value = Some name ->
+              Hashtbl.replace d.builtin_names hash name
+          | _ -> failwith ("Build.discover: a frozen token builtin is not its marker: " ^ name))
+      | Ok _ -> failwith ("Build.discover: a frozen token builtin is not a term member: " ^ name))
+    Instance_contract.token_builtins;
   d
 
 (* ------------------------------------------------------------------ *)

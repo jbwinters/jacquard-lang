@@ -1455,3 +1455,21 @@ jq_value jq_g_dist_draw(jq_rt *rt, jq_value d) {
   jq_drop(d);
   return x;
 }
+
+/* TS.2 scoped instance tokens (A4.1). same-v0 consumes both arguments and is false unless both
+   are tokens with one identifier, as in the interpreter */
+static bool is_instance(jq_value v) {
+  return !jq_is_int(v) && jq_block_of(v)->tag == JQ_INSTANCE;
+}
+jq_value jq_i_instance_fresh_v0(jq_rt *rt, const jq_value *a) {
+  (void)rt;
+  (void)a;
+  return jq_instance_fresh();
+}
+jq_value jq_i_instance_same_v0(jq_rt *rt, const jq_value *a) {
+  bool same = is_instance(a[0]) && is_instance(a[1]) &&
+              jq_block_of(a[0])->payload[0] == jq_block_of(a[1])->payload[0];
+  jq_drop(a[0]);
+  jq_drop(a[1]);
+  return vbool(rt, same);
+}

@@ -298,6 +298,10 @@ static void show_into(jq_buf *b, jq_value v) {
        deterministic scheduler ID. Jacquard publishes no Show instance for Task. */
     buf_adds(b, "<task>");
     break;
+  case JQ_INSTANCE:
+    /* a capability is opaque: its identifier never appears (A4.1) */
+    buf_adds(b, "<capability>");
+    break;
   case JQ_CODE:
     /* Value.show: "(quote " ^ Printer.inline_form payload ^ ")" */
     buf_adds(b, "(quote ");

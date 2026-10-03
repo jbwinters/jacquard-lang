@@ -98,3 +98,20 @@ let is_private_carrier hash = List.exists (fun family -> Hash.equal hash family.
 (** [family_identities family] lists every frozen identity of [family]. *)
 let family_identities family =
   [ family.capability; family.carrier; family.instance_effect; family.scoped ] @ family.operations
+
+(* the hidden token builtins' marker members (design §12 A4.2): the native compiler binds the
+   token intrinsics to exactly these hashes, never by name *)
+let token_builtins =
+  [
+    ( frozen "instance.fresh-v0" "e148cc2fcadc1f54ce9d168c763074ea45a52c43a1fbc86dfd223ca0e8ca5572",
+      "instance.fresh-v0" );
+    ( frozen "instance.same-v0" "be8cdc305501d4d20b599fe43bbb1520bec8b22685262b185f3453cf0556d7d9",
+      "instance.same-v0" );
+  ]
+
+(** [is_token_builtin_name name] holds for a hidden token builtin's marker name. *)
+let is_token_builtin_name name =
+  List.exists (fun (_, known) -> String.equal known name) token_builtins
+
+(** [is_token_builtin hash] holds for a frozen token builtin marker member. *)
+let is_token_builtin hash = List.exists (fun (known, _) -> Hash.equal known hash) token_builtins

@@ -43,7 +43,10 @@ let () =
   let checker = checked (Check.make_ctx store) in
   Check.register_builtin_signatures checker (checked (Prelude.builtin_signatures store));
   (match Check.check_top checker (Kernel.Expr expression) with
-  | Error [ diagnostic ] when List.mem (Diag.code_or_uncoded diagnostic) [ "E0801"; "E0804" ] -> ()
+  | Error [ diagnostic ]
+    when List.mem (Diag.code_or_uncoded diagnostic) [ "E0801"; "E0804"; "E0832" ] ->
+      (* E0832: a leaked capability, whose later use is the stale-capability trap (TS.2 A4.3) *)
+      ()
   | Error diagnostics ->
       fail
         ("unexpected fixture diagnostic: "
