@@ -393,10 +393,10 @@ source:
 state.scoped   : forall a s | e. (s, (StateRef s) ->{StateInstance | e} a) ->{| e} a
 throw.scoped   : forall a x | e. ((ThrowRef x) ->{ThrowInstance | e} a) ->{| e} Result x a
 emit.scoped    : forall a w | e. ((EmitRef w) ->{EmitInstance | e} a) ->{| e} (a, List w)
-state.get-at   : (StateRef s) -> s
-state.put-at   : (StateRef s, s) -> ()
-throw.throw-at : (ThrowRef x, x) -> a
-emit.emit-at   : (EmitRef w, w) -> ()
+state.get-at   : (StateRef s) ->{StateInstance} s
+state.put-at   : (StateRef s, s) ->{StateInstance} ()
+throw.throw-at : (ThrowRef x, x) ->{ThrowInstance} a
+emit.emit-at   : (EmitRef w, w) ->{EmitInstance} ()
 ```
 
 An operation on another scope's capability passes through an inner scope
@@ -419,19 +419,25 @@ The checker enforces these rules:
 - **Non-escape.** A capability cannot leave its scope through the result, a
   closure, a thrown or emitted value, or an enclosing variable (E0832). Return
   or store the values you read, not the capability.
-- **Spawned work.** A capability cannot be used in work that runs on a fresh
-  continuation: `async.spawn`, `async.scope`, or the `dist.sample-lw` and
-  `dist.sample-lw-weights-v1` thunks (E0833). Because their rows share a tail,
-  a sibling callback in a body that spawns cannot use one either.
+- **Spawned work.** Work that runs on a fresh continuation (`async.spawn`,
+  `async.scope`, and the `dist.sample-lw` and `dist.sample-lw-weights-v1`
+  thunks) cannot perform an operation on a capability whose scope is outside
+  that work (E0833). It may open and discharge its own scope, and merely
+  capturing an unused capability is allowed. Because their rows share a tail, a
+  sibling callback in a body that spawns is restricted the same way.
 - **Handlers.** A user handler cannot handle an instance operation (E0834).
-- **Opacity.** Capabilities cannot be forged or taken apart (E0835), nor
-  stored in a nominal type's field or a user operation's signature (E0836).
+- **Opacity.** Capabilities cannot be forged or taken apart (E0835). A
+  capability type cannot be written directly into a nominal type's field or a
+  user operation's signature (E0836). A declared type parameter may carry one,
+  subject to non-escape.
 - **Determinacy.** A row annotation or published scheme that names an instance
   effect needs a capability that determines it. A top-level expression cannot
   leave an instance operation unhandled (E0830).
 
-A capability smuggled out through unchecked `eval` is caught at run time when it
-is next used (E0920). Scopes run identically in native builds. The design, its
+These guarantees cover statically checked code; the results of unchecked `eval`
+are outside them. A capability smuggled out through `eval` is trapped at run
+time (E0920) when an operation on it finds no frame of its scope on the current
+continuation. Scopes run identically in native builds. The design, its
 limits and the evidence are in `docs/designs/scoped-effect-instances.md`.
 
 **Migration.** These declarations were added to the prelude:
