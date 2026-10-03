@@ -21,3 +21,6 @@ demos/worlds/agent-dream.jqd|builtin `text.contains?` is not yet implemented nat
 demos/tooling/repair-warp-tests.jqd|error[E0301]: This reference names something that is not in scope.
 demos/tooling/showcase-warp-tests.jqd|error[E0301]: This reference names something that is not in scope.
 demos/worlds/escrow/main.jqd|error[E0301]: This reference names something that is not in scope.
+#
+# TS.2 slice 3: scoped effect instances (state/throw/emit.scoped) compile
+# natively; no corpus, demo or benchmark file uses a scope, so no entry changes.

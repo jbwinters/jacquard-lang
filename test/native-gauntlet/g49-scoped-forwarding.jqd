@@ -1,0 +1,11 @@
+; TS.2 A4.5: an inner scope forwards the outer capability's operations, through
+; higher-order transport; a body with no State operation returns its value
+(defterm ((binding bump () (lam ((pvar c))
+  (app (var state.put-at) (var c) (app (var add) (app (var state.get-at) (var c)) (lit 1)))))))
+(defterm ((binding twice () (lam ((pvar f)) (let nonrec (pwild) (app (var f)) (app (var f)))))))
+(tuple
+  (app (var state.scoped) (lit 1) (lam ((pvar outer))
+    (app (var state.scoped) (lit 0) (lam ((pvar inner))
+      (let nonrec (pwild) (app (var twice) (lam () (app (var bump) (var outer))))
+        (tuple (app (var state.get-at) (var outer)) (app (var state.get-at) (var inner))))))))
+  (app (var state.scoped) (lit 42) (lam ((pvar c)) (lit 42))))

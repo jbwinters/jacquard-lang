@@ -1,0 +1,16 @@
+; TS.2 A4.5: two stores of different types, same-typed instances (an outer put
+; reaches the outer store), and independent scopes agree on both engines
+(tuple
+  (app (var state.scoped) (lit 0) (lam ((pvar n))
+    (app (var state.scoped) (lit "a") (lam ((pvar t))
+      (let nonrec (pwild) (app (var state.put-at) (var n) (lit 1))
+        (tuple (app (var state.get-at) (var n)) (app (var state.get-at) (var t))))))))
+  (app (var state.scoped) (lit 10) (lam ((pvar outer))
+    (app (var state.scoped) (lit 20) (lam ((pvar inner))
+      (let nonrec (pwild) (app (var state.put-at) (var outer) (lit 11))
+        (tuple (app (var state.get-at) (var outer)) (app (var state.get-at) (var inner))))))))
+  (tuple
+    (app (var state.scoped) (lit 0) (lam ((pvar c))
+      (let nonrec (pwild) (app (var state.put-at) (var c) (lit 1)) (app (var state.get-at) (var c)))))
+    (app (var state.scoped) (lit 0) (lam ((pvar c))
+      (let nonrec (pwild) (app (var state.put-at) (var c) (lit 2)) (app (var state.get-at) (var c)))))))

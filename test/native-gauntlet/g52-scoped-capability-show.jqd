@@ -1,0 +1,2 @@
+; TS.2 A4.1: a capability is opaque in generic inspection on both engines
+(app (var state.scoped) (lit 0) (lam ((pvar c)) (app (var debug.inspect) (var c))))

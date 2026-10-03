@@ -41,6 +41,9 @@ passing them directly to each engine to retain defensive runtime coverage.
   identical: e05-code-form-bad-head (exit 2)
   identical: e06-erasure-splice-not-code (exit 2)
   identical: e07-erasure-text-join (exit 2)
+  identical: e08-stale-state-get (exit 2)
+  identical: e09-stale-throw-forwarded (exit 2)
+  identical: e10-stale-emit (exit 2)
   identical: g01-choose-tuple (exit 0)
   identical: g02-thrice (exit 0)
   identical: g03-deep-inner-count (exit 0)
@@ -88,6 +91,11 @@ passing them directly to each engine to retain defensive runtime coverage.
   identical: g45-numeric-presentation (exit 0)
   identical: g46-inference-outcomes (exit 0)
   identical: g47-real-literal-identity (exit 0)
+  identical: g48-scoped-two-stores (exit 0)
+  identical: g49-scoped-forwarding (exit 0)
+  identical: g50-scoped-multishot (exit 0)
+  identical: g51-scoped-throw-emit (exit 0)
+  identical: g52-scoped-capability-show (exit 0)
 
 Opaque host values are the exception to the public direct-member carrier: their
 marker identity is absent from the store's derived-hash index, so the checker and

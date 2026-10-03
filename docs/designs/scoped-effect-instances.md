@@ -5,8 +5,9 @@
   `test/test_scoped_instances_checker.ml`. Slice 2, the State runtime and
   production registration (§10 A2), is implemented and checked by
   `test/test_scoped_instances_runtime.ml`. Slice 2b, Throw and Emit (§11 A3),
-  is implemented in the same suites. Slice 3, native support (§12 A4),
-  follows. Slice 4 (docs) remains.
+  is implemented in the same suites. Slice 3, native support (§12 A4), is
+  implemented: twins g48-g52 and stale fixtures e08-e10 agree in both
+  engines. Slice 4 (docs) remains.
 - Date: 2026-09-24
 - Base: `main` after TS.0 (effect-payload containment, PR #112).
 - Model: `test/scoped_instances_model.ml`, checked by
