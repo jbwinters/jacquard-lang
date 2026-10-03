@@ -1079,62 +1079,105 @@ No retained declaration hash changes.
 
 ### A4.1 The native token
 
-- A native token is a runtime value with its own tag. It is a pooled block that
-  holds an identifier drawn from a process-wide atomic counter. Two scopes never
-  share a token, even when the runtime is embedded in several threads.
-- `instance.same-v0` compares identifiers, never block addresses, so reuse of a
-  block by the reference-counting reclamation cannot confuse two tokens. It
-  returns false when either argument is not a token, as in the interpreter
-  (A2.1).
-- A token displays as `<capability>`, has no children for the reclamation walk,
-  and cannot be applied.
+- A native token is a runtime value with its own tag, `JQ_INSTANCE`. It is a
+  childless boxed block whose raw payload word holds an identifier drawn from a
+  process-wide atomic counter, so tokens minted by independent runtimes in one
+  process never collide.
+- Like every native value, a token is confined to the runtime that created it.
+  Native allocation and reference counts are not synchronized, and A4 does not
+  change that.
+- `instance.same-v0` compares identifiers, never block addresses, and consumes
+  both arguments. It returns false when either argument is not a token, as in
+  the interpreter (A2.1). Reuse of reclaimed blocks cannot confuse two tokens:
+  reuse takes its shells only from dying constructor values, and the identifier
+  is compared, not the block.
+- Each per-tag operation handles the new tag:
+  - the reclamation walk finds no children, as for a task handle;
+  - both display paths render `<capability>`;
+  - applying a token raises the same type error text as the interpreter.
+- `instance.fresh-v0` is the first nullary intrinsic, and it is impure.
+  Specialization and constant lowering never fold or hoist an intrinsic call,
+  and the native build keeps it that way.
 - The native runtime computes no runtime fingerprint, so A2.1's fingerprint tag
   has no native counterpart.
 
 ### A4.2 Discovering the hidden builtins
 
 The two token builtins are hidden after the prelude loads (A2.2), so neither the
-public name index nor ordinary store lookup reaches them.
+public name index nor ordinary store lookup reaches them. Their marker hashes
+are frozen in the instance contract alongside the family identities.
 
-- The native compiler resolves them by name through the store's hidden-only
-  lookup, as the interpreter's trusted builtin wiring does. It accepts each one
-  only if its body is a builtin marker.
-- Source still cannot name them: an explicit hash reference fails closed at
-  resolution, on both engines.
-- A hidden member that is not a builtin marker is still refused.
+- **Discovery** pre-seeds the native builtin table with exactly these two
+  hashes. For each one it confirms through the store's internal lookup that the
+  member is the expected builtin marker.
+  - This is stricter than the interpreter's builtin wiring, whose internal
+    lookup can fall back to a public binding of the same name. The native
+    compiler never resolves the token builtins by name.
+- **Forged markers are refused.** Any other member whose body is a builtin
+  marker naming either token builtin is refused at build time (E1101), even
+  though a raw quote can produce one. In the interpreter such a member is only a
+  code value: builtins are registered by hash, so it can never mint a token.
+  Neither engine lets source reach the builtins.
+- An explicit hash reference to a hidden builtin still fails closed at
+  resolution on both engines. A hidden member that is not one of the frozen
+  markers is still refused.
 
 ### A4.3 The native stale trap
 
 - Each native operation descriptor records whether its operation is a scoped
   instance operation, keyed on the frozen operation identities (A3.4).
-- When an instance operation finds no handler frame of its scope, the native
-  runtime raises E0920. It raises it after the in-language handler search and
-  before any root grant, inference interception or the unhandled-operation
-  path, which is the interpreter's order (A2.4). The diagnostic text and exit
-  status are byte-identical to the interpreter's.
-- A2.4's other two guards have no native counterpart. Native root grants are
-  fixed at build time and never include an instance operation; the build
-  asserts this. Native code has no routed dispatch.
-- Natively, a checked program cannot reach the trap at all, because `eval` is
-  refused at native build time. Evidence uses the unchecked test probe, which
-  runs a statically refused leaking program on both engines.
+- **Where it fires.** When an instance operation's handler search is exhausted
+  (the native search stops at its handler floor, the counterpart of the
+  interpreter's fresh continuation), the runtime raises E0920. This happens
+  before any root grant, inference interception or unhandled-operation path,
+  which is the interpreter's order (A2.4).
+- **How it is reported.** The runtime reports the trap through its coded
+  diagnostic formatter, using the interpreter's summary, next step and cause.
+  The cause names the operation by the same name the interpreter uses, and the
+  exit status is 2.
+  - Inside inference, the existing inference wrapping applies, exactly as for
+    E0906.
+- **The other guards.** A2.4's other two guards have no native counterpart.
+  Native root grants are fixed at build time and never include an instance
+  operation, which the build asserts. Native code has no routed dispatch.
+- **Reachability.** A checked program cannot reach the trap natively, because
+  `eval` is refused at native build time. The evidence therefore uses the
+  unchecked test probe. The probe's accepted static refusals gain E0832; it
+  still requires exactly one diagnostic. It runs a statically refused leaking
+  program on both engines and compares the complete error output and exit
+  status.
 
-### A4.4 Slice-3 evidence
+### A4.4 Continuations
+
+Cloning a frame for multi-shot resumption shares the values it holds, tokens and
+once-resumption blocks with their used flag included. This mirrors the
+interpreter's per-capture once state and A1.2's shared token. A forwarding
+clause resumes only after its re-perform returns, so a copied frame never
+re-applies a used once resumption. The generated re-entry points resume after
+the suspended call.
+
+### A4.5 Slice-3 evidence
 
 - **Differential twins**, the same program on both engines:
   - two stores;
   - forwarding;
-  - multi-shot resumption, including A3.7's pinned Emit fork with no E0906;
+  - multi-shot resumption, including A3.7's pinned Emit fork and a fork nested
+    between two Emit scopes with an inner forward to the outer scope, both with
+    no E0906;
   - Throw and Emit nesting;
   - ambient-handler independence;
   - `<capability>` display.
 - **The stale trap** on both engines, through the unchecked probe, for State,
   Throw and Emit.
-- **C-level tests** of the token intrinsics: uniqueness, comparison, and
-  reclamation under the address sanitizer.
+- **C-level tests** of the token intrinsics: uniqueness, comparison,
+  consumption of both arguments, and reclamation under the address sanitizer.
 - **`test/cli/scoped-instances.t`** changes from refusal to interpreter/native
-  parity. It also checks that an explicit hash reference to a hidden builtin
-  is refused identically on both engines.
-- **Inventories:** the intrinsics inventory marks both builtins native. The
-  native eligibility manifest is unchanged, because no corpus, demo or
-  benchmark file uses a scope.
+  parity. It also checks two refusals:
+  - an explicit hash reference to a hidden builtin is refused identically on
+    both engines;
+  - a forged marker is refused at native build time.
+- **Inventories:**
+  - The intrinsics inventory marks both builtins native.
+  - The native eligibility manifest is unchanged. No corpus, demo or benchmark
+    file uses a scope, which is checked by searching for the scoped forms and
+    the instance operations.
