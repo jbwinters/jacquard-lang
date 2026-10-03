@@ -5,8 +5,8 @@
   `test/test_scoped_instances_checker.ml`. Slice 2, the State runtime and
   production registration (§10 A2), is implemented and checked by
   `test/test_scoped_instances_runtime.ml`. Slice 2b, Throw and Emit (§11 A3),
-  is implemented in the same suites. Slice 3 (native) and slice 4 (docs)
-  remain.
+  is implemented in the same suites. Slice 3, native support (§12 A4),
+  follows. Slice 4 (docs) remains.
 - Date: 2026-09-24
 - Base: `main` after TS.0 (effect-payload containment, PR #112).
 - Model: `test/scoped_instances_model.ml`, checked by
@@ -1067,3 +1067,74 @@ No retained declaration hash changes.
   - changed: the prelude-hash golden, the rings and operation-mode manifests
     (two new `once` operations), and the tier and hidden-name transcripts. No
     diagnostic text changes.
+
+## 12. Amendment A4 (slice 3: native support)
+
+- Status: amendment to the approved design for slice 3. It specifies how the
+  native backend represents instance tokens, discovers the hidden token
+  builtins, and traps stale capabilities. It supersedes the "native refuses
+  (E1101)" bullets of A2.8 and A3.7. It does not change the dispatch rule (§4)
+  or any language-level rule.
+- Date: 2026-10-03.
+
+### A4.1 The native token
+
+- A native token is a runtime value with its own tag. It is a pooled block that
+  holds an identifier drawn from a process-wide atomic counter. Two scopes never
+  share a token, even when the runtime is embedded in several threads.
+- `instance.same-v0` compares identifiers, never block addresses, so reuse of a
+  block by the reference-counting reclamation cannot confuse two tokens. It
+  returns false when either argument is not a token, as in the interpreter
+  (A2.1).
+- A token displays as `<capability>`, has no children for the reclamation walk,
+  and cannot be applied.
+- The native runtime computes no runtime fingerprint, so A2.1's fingerprint tag
+  has no native counterpart.
+
+### A4.2 Discovering the hidden builtins
+
+The two token builtins are hidden after the prelude loads (A2.2), so neither the
+public name index nor ordinary store lookup reaches them.
+
+- The native compiler resolves them by name through the store's hidden-only
+  lookup, as the interpreter's trusted builtin wiring does. It accepts each one
+  only if its body is a builtin marker.
+- Source still cannot name them: an explicit hash reference fails closed at
+  resolution, on both engines.
+- A hidden member that is not a builtin marker is still refused.
+
+### A4.3 The native stale trap
+
+- Each native operation descriptor records whether its operation is a scoped
+  instance operation, keyed on the frozen operation identities (A3.4).
+- When an instance operation finds no handler frame of its scope, the native
+  runtime raises E0920. It raises it after the in-language handler search and
+  before any root grant, inference interception or the unhandled-operation
+  path, which is the interpreter's order (A2.4). The diagnostic text and exit
+  status are byte-identical to the interpreter's.
+- A2.4's other two guards have no native counterpart. Native root grants are
+  fixed at build time and never include an instance operation; the build
+  asserts this. Native code has no routed dispatch.
+- Natively, a checked program cannot reach the trap at all, because `eval` is
+  refused at native build time. Evidence uses the unchecked test probe, which
+  runs a statically refused leaking program on both engines.
+
+### A4.4 Slice-3 evidence
+
+- **Differential twins**, the same program on both engines:
+  - two stores;
+  - forwarding;
+  - multi-shot resumption, including A3.7's pinned Emit fork with no E0906;
+  - Throw and Emit nesting;
+  - ambient-handler independence;
+  - `<capability>` display.
+- **The stale trap** on both engines, through the unchecked probe, for State,
+  Throw and Emit.
+- **C-level tests** of the token intrinsics: uniqueness, comparison, and
+  reclamation under the address sanitizer.
+- **`test/cli/scoped-instances.t`** changes from refusal to interpreter/native
+  parity. It also checks that an explicit hash reference to a hidden builtin
+  is refused identically on both engines.
+- **Inventories:** the intrinsics inventory marks both builtins native. The
+  native eligibility manifest is unchanged, because no corpus, demo or
+  benchmark file uses a scope.
