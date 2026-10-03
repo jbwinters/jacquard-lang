@@ -390,12 +390,12 @@ signature; their bodies are trusted prelude terms, so this is not executable
 source:
 
 ```text
-state.scoped   : forall a s | e. (s, (StateRef s) ->{state-instance | e} a) ->{| e} a
-throw.scoped   : forall a x | e. ((ThrowRef x) ->{throw-instance | e} a) ->{| e} Result x a
-emit.scoped    : forall a w | e. ((EmitRef w) ->{emit-instance | e} a) ->{| e} (a, List w)
+state.scoped   : forall a s | e. (s, (StateRef s) ->{StateInstance | e} a) ->{| e} a
+throw.scoped   : forall a x | e. ((ThrowRef x) ->{ThrowInstance | e} a) ->{| e} Result x a
+emit.scoped    : forall a w | e. ((EmitRef w) ->{EmitInstance | e} a) ->{| e} (a, List w)
 state.get-at   : (StateRef s) -> s
 state.put-at   : (StateRef s, s) -> ()
-throw.throw-at : (ThrowRef e, e) -> a
+throw.throw-at : (ThrowRef x, x) -> a
 emit.emit-at   : (EmitRef w, w) -> ()
 ```
 
@@ -413,20 +413,22 @@ state.scoped(10, fn (outer) ->
 
 The checker enforces these rules:
 
-- **Direct use.** Call a scoped form directly with a literal one-parameter
-  lambda. A wrapper, an alias, or passing the form as a value is refused
-  (E0831).
+- **Direct use.** Call a scoped form directly, with a literal one-parameter
+  lambda as its callback. A wrapper, an alias, an annotated head, or passing
+  the form as a value is refused (E0831).
 - **Non-escape.** A capability cannot leave its scope through the result, a
   closure, a thrown or emitted value, or an enclosing variable (E0832). Return
   or store the values you read, not the capability.
 - **Spawned work.** A capability cannot be used in work that runs on a fresh
-  continuation: `async.spawn`, `async.scope`, or the `dist.sample-lw` thunks
-  (E0833).
+  continuation: `async.spawn`, `async.scope`, or the `dist.sample-lw` and
+  `dist.sample-lw-weights-v1` thunks (E0833). Because their rows share a tail,
+  a sibling callback in a body that spawns cannot use one either.
 - **Handlers.** A user handler cannot handle an instance operation (E0834).
 - **Opacity.** Capabilities cannot be forged or taken apart (E0835), nor
-  stored in a nominal type's field (E0836).
-- **Annotations.** A row annotation that names an instance effect needs a
-  capability parameter that determines it (E0830).
+  stored in a nominal type's field or a user operation's signature (E0836).
+- **Determinacy.** A row annotation or published scheme that names an instance
+  effect needs a capability that determines it. A top-level expression cannot
+  leave an instance operation unhandled (E0830).
 
 A capability smuggled out through unchecked `eval` is caught at run time when it
 is next used (E0920). Scopes run identically in native builds. The design, its
@@ -435,9 +437,11 @@ limits and the evidence are in `docs/designs/scoped-effect-instances.md`.
 **Migration.** These declarations were added to the prelude:
 
 - an existing store refuses the new prelude (E0705), so re-initialize it;
-- retained interface manifests, sealed artifacts and bundles must be
-  regenerated;
+- retained interface manifests and sealed artifacts (`Prelude_changed`) and
+  bundles (E1720) must be regenerated;
 - project dependency pins must be refreshed with `jacquard project pin`.
+
+No existing declaration hash changed.
 
 ## 5. The seams: data and control, converted lawfully
 
