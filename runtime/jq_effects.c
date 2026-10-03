@@ -90,6 +90,7 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
   /* a scoped instance operation whose scope is not on the continuation is a stale capability
      (TS.2 A4.3): trapped before root grants, inference interception and the unhandled path, as
      in the interpreter, with its diagnostic text */
+  /* the trap exits the process, so the operation's arguments are not released */
   if (op_ord < rt->n_ops && rt->op_meta && rt->op_meta[op_ord] && rt->op_meta[op_ord]->instance)
     jq_diagnostic_failf(
         2, "E0920", "A capability was used outside its scope",

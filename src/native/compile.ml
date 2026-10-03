@@ -409,7 +409,10 @@ and lower_general ctx env ~tail (e : Kernel.expr) (k : atom -> expr) : expr =
           match Canon.hash_decl decl with
           | Ok { Canon.named; _ } -> (
               match List.nth_opt named i with
-              | Some (_, h) -> k (member_value_atom ctx h)
+              | Some (_, h) ->
+                  (* the same validated lowering as a term reference: a builtin marker member,
+                     forged token markers included (A4.2), is checked here too *)
+                  lower_general ctx env ~tail { e with Kernel.it = Kernel.Ref (h, Kernel.Term) } k
               | None -> refuse ctx "groupref outside its group")
           | Error _ -> refuse ctx "group hashing failed (corrupt store)")
       | Error _ -> refuse ctx "group member does not resolve (corrupt store)")

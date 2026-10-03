@@ -72,3 +72,26 @@ lowering, where it is refused.
   build 1
   $ diff hidden-i.out hidden-n.out && head -1 hidden-i.out
   hidden-ref.jqd:1:6-82: error[E0805]: A referenced declaration has the wrong kind or is unavailable
+
+A group-local reference to a forged marker is refused the same way, and a group
+that holds an unused forged marker still compiles.
+
+  $ cat > forged-group.jqd <<'EOF_JQD'
+  > (defterm ((binding forged () (quote (builtin-marker instance.same-v0)))
+  >           (binding reveal () (lam () (var forged)))))
+  > (app (var reveal))
+  > EOF_JQD
+  $ jacquard run forged-group.jqd
+  (quote (builtin-marker instance.same-v0))
+  $ jacquard build forged-group.jqd -o forged-group
+  error[E1101]: Program is outside the native v1 compilation subset
+    Cause: Not yet compilable in native v1: reveal a builtin marker for the private `instance.same-v0` outside its frozen identity
+    Next step: Run the program with the interpreter or rewrite the unsupported construct.
+  [1]
+  $ cat > forged-unused.jqd <<'EOF_JQD'
+  > (defterm ((binding forged () (quote (builtin-marker instance.fresh-v0)))
+  >           (binding answer () (lam () (lit 42)))))
+  > (app (var answer))
+  > EOF_JQD
+  $ jacquard build forged-unused.jqd -o forged-unused > /dev/null && ./forged-unused
+  42

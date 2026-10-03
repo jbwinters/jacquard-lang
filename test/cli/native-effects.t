@@ -24,6 +24,7 @@ passing them directly to each engine to retain defensive runtime coverage.
   >       jacquard build "$f" -o rejected > refused-n.out 2>&1; rn=$?
   >       if [ "$ri" != 1 ] || [ "$rn" != 1 ] || ! grep -q 'error\[E0832\]' refused-i.out || ! diff -q refused-i.out refused-n.out > /dev/null; then echo "STATIC REFUSAL FAILED: $n"; exit 1; fi
   >       ../effect_payload_runtime_probe.exe run "$f" > i.out 2>&1; ie=$?
+  >       grep -q 'error\[E0920\]' i.out || { echo "NO STALE TRAP: $n"; exit 1; }
   >       ../effect_payload_runtime_probe.exe build "$f" prog > /dev/null 2>&1 || { echo "PROBE REFUSED: $n"; continue; } ;;
   >     *)
   >       jacquard run "$f" > i.out 2>&1; ie=$?
