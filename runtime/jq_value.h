@@ -186,6 +186,7 @@ typedef struct jq_op_info {
   const char *effect_name;
   const char *op_name; /* feeds <op effect.op> and perform dispatch (task 70) */
   uint32_t ordinal;    /* the link-time perform/grant index */
+  uint8_t instance;    /* a scoped instance operation: trapped at the root (TS.2 A4.3) */
 } jq_op_info;
 
 struct jq_rt;

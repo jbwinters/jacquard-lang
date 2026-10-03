@@ -1,0 +1,7 @@
+; TS.2 A4.3: a leaked Throw capability used inside a live Throw scope is not
+; that scope's own, so the scope forwards it outward to the stale trap (E0920)
+(let nonrec (pvar r) (app (var throw.scoped) (lam ((pvar k)) (var k)))
+  (match (var r)
+    (clause (pcon ok (pvar d))
+      (app (var throw.scoped) (lam ((pvar t)) (app (var throw.throw-at) (var d) (lit 1)))))
+    (clause (pwild) (app (var throw.scoped) (lam ((pvar t)) (lit 0))))))

@@ -1027,7 +1027,7 @@ int main(int argc, char **argv) {
   }
   if (argc > 1 && strcmp(argv[1], "unhandled-op") == 0) {
     /* no handler, no grant: the interpreter's exact rendering, exit 3 */
-    static const jq_op_info print_info = { NULL, "console", "print", 0 };
+    static const jq_op_info print_info = { NULL, "console", "print", 0, 0 };
     static const jq_op_info *meta[1] = { &print_info };
     jq_rt rt = { 0 };
     rt.op_meta = meta;

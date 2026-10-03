@@ -1,0 +1,5 @@
+; TS.2 A4.3: a capability leaked out of its scope is refused statically (E0832);
+; run anyway through the unchecked probe, its later use is a stale capability
+; (E0920) on both engines, before any root handler
+(let nonrec (pvar c) (app (var state.scoped) (lit 0) (lam ((pvar k)) (var k)))
+  (app (var state.get-at) (var c)))

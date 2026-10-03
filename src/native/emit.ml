@@ -936,8 +936,9 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   in
   List.iter
     (fun o ->
-      line st.decls "const jq_op_info %s = { NULL, %s, %s, %d };" (oi_name o.ohash)
-        (c_string o.oeffect) (c_string o.oname) o.oord;
+      line st.decls "const jq_op_info %s = { NULL, %s, %s, %d, %d };" (oi_name o.ohash)
+        (c_string o.oeffect) (c_string o.oname) o.oord
+        (if Instance_contract.is_instance_operation o.ohash then 1 else 0);
       st.declared <- SSet.add ("oi:" ^ hex12 o.ohash) st.declared)
     oplist;
   let n_ops = List.length oplist in
@@ -965,6 +966,15 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
       ("infer", canonical_effect_hash "infer", [ ("complete", "jq_g_infer_complete") ]);
     ]
   in
+  (* a scoped instance operation is never granted at the root (TS.2 A4.3) *)
+  List.iter
+    (fun (_, granted, _) ->
+      if
+        List.exists
+          (fun (family : Instance_contract.family) -> Hash.equal family.instance_effect granted)
+          Instance_contract.families
+      then invalid_arg "native grants include a scoped instance effect")
+    implemented;
   (* one granted flag per effect a manifest checks, plus the implemented
      grant set (--allow parsing always sets those). An effect discharged
      in-language never reaches a manifest, and its unused flag would be a

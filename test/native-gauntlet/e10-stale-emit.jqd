@@ -1,0 +1,4 @@
+; TS.2 A4.3: a leaked Emit capability's later use is a stale capability (E0920)
+(let nonrec (pvar r) (app (var emit.scoped) (lam ((pvar k)) (var k)))
+  (match (var r)
+    (clause (ptuple (pvar d) (pwild)) (app (var emit.emit-at) (var d) (lit 1)))))

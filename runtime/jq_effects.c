@@ -87,6 +87,15 @@ jq_value jq_perform(jq_rt *rt, uint32_t op_ord, uint16_t n, const jq_value *args
        those entries), the sentinel keeps propagating */
     return r;
   }
+  /* a scoped instance operation whose scope is not on the continuation is a stale capability
+     (TS.2 A4.3): trapped before root grants, inference interception and the unhandled path, as
+     in the interpreter, with its diagnostic text */
+  if (op_ord < rt->n_ops && rt->op_meta && rt->op_meta[op_ord] && rt->op_meta[op_ord]->instance)
+    jq_diagnostic_failf(
+        2, "E0920", "A capability was used outside its scope",
+        "Use a capability only inside its scope; do not pass it through unchecked eval.",
+        "operation `%s` used a capability whose scope is not on the current continuation",
+        rt->op_meta[op_ord]->op_name);
   /* root grants (the --allow natives) */
   if (op_ord < rt->n_ops && rt->grants && rt->grants[op_ord])
     return rt->grants[op_ord](rt, args);

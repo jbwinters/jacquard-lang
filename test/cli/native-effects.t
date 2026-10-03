@@ -19,6 +19,12 @@ passing them directly to each engine to retain defensive runtime coverage.
   >       if [ "$ri" != 1 ] || [ "$rn" != 1 ] || ! grep -q 'error\[E0801\]' refused-i.out || ! diff -q refused-i.out refused-n.out > /dev/null; then echo "STATIC REFUSAL FAILED: $n"; exit 1; fi
   >       ../effect_payload_runtime_probe.exe run "$f" > i.out 2>&1; ie=$?
   >       ../effect_payload_runtime_probe.exe build "$f" prog > /dev/null 2>&1 || { echo "PROBE REFUSED: $n"; continue; } ;;
+  >     e*-stale-*)
+  >       jacquard run "$f" > refused-i.out 2>&1; ri=$?
+  >       jacquard build "$f" -o rejected > refused-n.out 2>&1; rn=$?
+  >       if [ "$ri" != 1 ] || [ "$rn" != 1 ] || ! grep -q 'error\[E0832\]' refused-i.out || ! diff -q refused-i.out refused-n.out > /dev/null; then echo "STATIC REFUSAL FAILED: $n"; exit 1; fi
+  >       ../effect_payload_runtime_probe.exe run "$f" > i.out 2>&1; ie=$?
+  >       ../effect_payload_runtime_probe.exe build "$f" prog > /dev/null 2>&1 || { echo "PROBE REFUSED: $n"; continue; } ;;
   >     *)
   >       jacquard run "$f" > i.out 2>&1; ie=$?
   >       jacquard build "$f" -o prog > /dev/null 2>&1 || { echo "REFUSED: $n"; continue; } ;;
