@@ -692,6 +692,62 @@ let test_throw_emit () =
   code "an initializer given to Emit" "E0831"
     "(app (var emit.scoped) (lit 0) (lam ((pvar c)) (lit 1)))"
 
+(* separate artifact loading (TS.2 acceptance): a capability-taking function installed in an
+   on-disk store keeps its instance-polymorphic scheme when the store is reopened by a fresh
+   checker, and its label stays hidden in the displayed signature *)
+let test_separate_loading () =
+  let dir = Eval_support.fresh_dir () in
+  let open_checked () =
+    let store =
+      match Store.open_store dir with Ok s -> s | Error ds -> Eval_support.fail_diags "open" ds
+    in
+    (match Prelude.load ~dir:"../prelude" store with
+    | Ok _ -> ()
+    | Error ds -> Eval_support.fail_diags "prelude" ds);
+    let ctx =
+      match Check.make_ctx store with Ok c -> c | Error ds -> Eval_support.fail_diags "ctx" ds
+    in
+    (match Prelude.builtin_signatures store with
+    | Ok sigs -> Check.register_builtin_signatures ctx sigs
+    | Error ds -> Eval_support.fail_diags "sigs" ds);
+    (store, ctx)
+  in
+  let first = open_checked () in
+  ignore
+    (scheme_of first
+       "(defterm ((binding bump () (lam ((pvar c)) (app (var state.put-at) (var c) (app (var add) \
+        (app (var state.get-at) (var c)) (lit 1)))))))");
+  (* a second store handle over the same directory, with a fresh checker *)
+  let second = open_checked () in
+  Alcotest.(check string)
+    "the reloaded signature hides its label" "(StateRef Int) ->{StateInstance} ()"
+    (match Store.lookup_kind (fst second) "bump" Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> (
+        match Check.force_term (snd second) hash with
+        | Ok scheme -> Check.show_scheme (snd second) scheme
+        | Error ds -> Eval_support.fail_diags "force bump" ds)
+    | None -> Alcotest.fail "bump was not persisted");
+  ignore
+    (scheme_of second
+       (Printf.sprintf "(defterm ((binding two () (lam () %s))))"
+          (scoped ~var:"c" "(lit 0)"
+             (scoped ~var:"d" "(lit 1)"
+                "(let nonrec (pwild) (app (var bump) (var c)) (app (var bump) (var d)))"))));
+  Alcotest.(check string)
+    "the reloaded payload still binds" "E0801"
+    (code_of second (scoped "(lit \"x\")" "(app (var bump) (var c))"))
+
+(* quotation carries no instance typing (A1.2): quoting an instance operation inside a scope is
+   inert code; only its unchecked evaluation could misuse a capability, which the trap catches *)
+let test_quotation_boundary () =
+  let h = fixture () in
+  Alcotest.(check string)
+    "a quoted instance operation is code" "() ->{} Code"
+    (Test_check.sig_of h
+       (defterm "quoted"
+          (Printf.sprintf "(lam () %s)"
+             (scoped "(lit 0)" "(quote (app (var state.get-at) (var c)))"))))
+
 let test_unregistered_controls () =
   (* without a registration the fixture is ordinary: no labels, ordinary effects and handlers *)
   let h = Test_check.make_cctx ~instances:false () in
@@ -724,6 +780,8 @@ let suite =
       test_determinacy_and_consumers;
     Alcotest.test_case "the trusted scheme of state.scoped" `Quick test_trusted_scheme;
     Alcotest.test_case "Throw and Emit scoped instances" `Quick test_throw_emit;
+    Alcotest.test_case "instance schemes survive separate loading" `Quick test_separate_loading;
+    Alcotest.test_case "quotation carries no instance typing" `Quick test_quotation_boundary;
     Alcotest.test_case "without a registration the fixture is ordinary" `Quick
       test_unregistered_controls;
   ]
