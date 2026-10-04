@@ -354,6 +354,67 @@ let test_throw_emit () =
     (Printf.sprintf "(match %s (clause (ptuple (pvar d) (pwild)) %s))" (emit_scoped "(var c)")
        (emit_at "d" "(lit 1)"))
 
+(* host protocol v0 stays fixed and first-order (TS.2): a capability value and a capability-typed
+   target are both refused at the boundary (E1604) *)
+let test_host_boundary () =
+  let h = make () in
+  let budget () = Host_protocol_v0.create_boundary_budget Host_protocol_v0.hard_limits in
+  let code = function
+    | Error (diagnostic :: _) -> Diag.code_or_uncoded diagnostic
+    | Error [] -> "no diagnostic"
+    | Ok _ -> "accepted"
+  in
+  (match run_unchecked h (scoped "(lit 0)" "(var c)") with
+  | Ok capability ->
+      Alcotest.(check string)
+        "a capability value cannot cross v0" "E1604"
+        (code (Host_protocol_v0.encode_boundary_value ~budget:(budget ()) capability))
+  | Error error -> Alcotest.failf "leak: %s" (Runtime_err.to_string error));
+  define h
+    "(defterm ((binding cap.read ((tarrow ((tapp (tref state-ref) (tref int))) (row (eref \
+     state-instance)) (tref int))) (lam ((pvar c)) (app (var state.get-at) (var c))))))";
+  let target =
+    match Store.lookup_kind h.store "cap.read" Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.fail "cap.read was not installed"
+  in
+  let int_type =
+    match Store.lookup_kind h.store "int" Resolve.KType with
+    | Some { Resolve.hash; _ } -> Types.TCon (hash, [])
+    | None -> Alcotest.fail "int is missing"
+  in
+  let encode_type ty =
+    match Host_protocol_v0.encode_boundary_type ~budget:(budget ()) ty with
+    | Ok json -> json
+    | Error _ -> Alcotest.fail "int does not encode"
+  in
+  let invoke =
+    `Assoc
+      [
+        ("arguments", `List []);
+        ("capabilities", `Assoc [ ("effects", `List []); ("operations", `List []) ]);
+        ( "interface",
+          `Assoc
+            [
+              ("effects", `List []);
+              ("parameters", `List [ encode_type int_type ]);
+              ("result", encode_type int_type);
+            ] );
+        ("invocation_id", `String "0000000000000000");
+        ("kind", `String "invoke");
+        ("protocol", `String Host_protocol_v0.protocol);
+        ( "target",
+          `Assoc [ ("callable", `String (Hash.to_hex target)); ("kind", `String "store-term-v0") ]
+        );
+      ]
+  in
+  (* a capability parameter's label is quantified, so the target is refused as a polymorphic term
+     (E1603) before its boundary types are walked; either way it never crosses v0 *)
+  Alcotest.(check string)
+    "a capability-typed target is refused at preflight" "E1603"
+    (code
+       (Host_protocol_v0.parse_invoke ~limits:Host_protocol_v0.hard_limits ~checker:h.check invoke))
+
 let suite =
   [
     Alcotest.test_case "stores, same-typed and independent scopes" `Quick test_stores;
@@ -363,4 +424,5 @@ let suite =
     Alcotest.test_case "the stale-capability trap" `Quick test_stale_trap;
     Alcotest.test_case "a capability smuggled through eval is trapped" `Quick test_eval_smuggling;
     Alcotest.test_case "Throw and Emit scopes" `Quick test_throw_emit;
+    Alcotest.test_case "host v0 refuses capabilities" `Quick test_host_boundary;
   ]

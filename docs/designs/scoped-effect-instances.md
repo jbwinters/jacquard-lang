@@ -418,6 +418,10 @@ A1.9's choice and rank-1 cases).
   operation signature, except in the instance effect's own operations. A
   generic container instantiated with a capability (`Box a` with
   `a := StateRef<i> s`) keeps the label visible and stays under non-escape.
+- **Quotation carries no instance typing.** A quoted term is code: quoting an
+  instance operation, even inside a scope, adds no instance entry to the
+  enclosing row, and only evaluating the code could misuse a capability (pinned
+  by `test_quotation_boundary`).
 - **Unchecked evaluation is outside the static guarantee.** `eval` of quoted
   code is checked independently, and its result type is unconstrained and
   unrelated to its input. A program can therefore disguise one live capability

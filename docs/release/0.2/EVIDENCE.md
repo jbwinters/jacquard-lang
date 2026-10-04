@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1167`
+- Alcotest/QCheck cases: `1170`
 - Cram transcript files: `76`
 - Documentation examples: `36` named examples across `8` documents
 
@@ -736,3 +736,14 @@ Slice 4 of scoped effect instances documents the scoped forms in
 signatures, the checker's rules and their codes, and the migration. It adds one
 run doctest, `stdlib-scoped-instances` (the two-store example). The source
 inventory is now `1167 / 76 / 36`.
+
+The TS.2 combined review asked for three more pieces of evidence, now added as
+three cases:
+
+- a capability-taking function reloaded from an on-disk store by a fresh
+  checker keeps its instance-polymorphic scheme;
+- a quoted instance operation is inert code;
+- host protocol v0 refuses both a capability value (E1604) and a
+  capability-typed target (E1603).
+
+The source inventory is now `1170 / 76 / 36`.
