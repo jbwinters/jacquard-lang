@@ -118,13 +118,16 @@ let of_side ?source checker (side : Diff.side) =
         build ({ name; kind; hash; owner; signature; mode; arity; labels } :: acc) rest
   in
   (* exports are what the store binds publicly; a member the declarations own but the store does
-     not name (hidden, or a scheduler-private carrier) is recorded below as a hidden member *)
+     not name (hidden, or a scheduler-private carrier) is recorded below as a hidden member. The
+     public projection never exports a sealed constructor of an opaque type (TYPE.1): it is recorded
+     as a hidden member too. *)
   let bound =
     List.filter
       (fun ((name, kind), hash) ->
-        match Store.lookup_kind store name kind with
-        | Some { Resolve.hash = current; _ } -> Hash.equal current hash
-        | None -> false)
+        (match Store.lookup_kind store name kind with
+          | Some { Resolve.hash = current; _ } -> Hash.equal current hash
+          | None -> false)
+        && Option.is_none (Store.sealed_constructor store hash))
       side.Diff.bindings
   in
   let* exports = build [] bound in

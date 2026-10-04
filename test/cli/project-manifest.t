@@ -22,16 +22,25 @@ Discovery finds the manifest from a subdirectory, and --project names it:
 
   $ jacquard project check
   $TESTCASE_ROOT/app/project.jqd: project-v1 manifest valid (2 units, 2 exports, 0 deps, 2 entries)
+  warning[W1703]: A transparent type is exported without its constructors.
+    Cause: type `app-status` is exported without its constructors, which hides them by name only
+    Next step: Declare it `opaque type` so that only its own project can construct or rebuild its values.
   library: 2 declarations checked
   entry suite (test): checked, 0 tests; requires nothing
   entry demo (run): checked; requires console
   $ (cd src && jacquard project check)
   $TESTCASE_ROOT/app/project.jqd: project-v1 manifest valid (2 units, 2 exports, 0 deps, 2 entries)
+  warning[W1703]: A transparent type is exported without its constructors.
+    Cause: type `app-status` is exported without its constructors, which hides them by name only
+    Next step: Declare it `opaque type` so that only its own project can construct or rebuild its values.
   library: 2 declarations checked
   entry suite (test): checked, 0 tests; requires nothing
   entry demo (run): checked; requires console
   $ cd .. && jacquard project check --project app && cd app
   app/project.jqd: project-v1 manifest valid (2 units, 2 exports, 0 deps, 2 entries)
+  warning[W1703]: A transparent type is exported without its constructors.
+    Cause: type `app-status` is exported without its constructors, which hides them by name only
+    Next step: Declare it `opaque type` so that only its own project can construct or rebuild its values.
   library: 2 declarations checked
   entry suite (test): checked, 0 tests; requires nothing
   entry demo (run): checked; requires console

@@ -121,6 +121,19 @@ let test_parser_boundaries () =
     "pick(x) =\n  x\nopaque type Coin = | Heads | Tails\n";
   check "ends a constructor list" [ "type"; "opaque type" ]
     "type Side = | Left | Right\nopaque type Coin = | Heads | Tails\n";
+  (* Only `top_item_ahead` stops an empty constructor list at the marker. *)
+  let stopped =
+    Surface_parse.recover_string ~file:"opaque.jac" "type Side =\nopaque type Coin = | Heads\n"
+  in
+  Alcotest.(check (list string))
+    "an empty constructor list stops at the marker" [ "E1225" ]
+    (List.filter_map Diag.code stopped.diagnostics);
+  Alcotest.(check bool)
+    "and the opaque declaration after it survives" true
+    (List.exists
+       (fun (top : Surface_ast.top) ->
+         match top.it with Surface_ast.TypeDecl { opaque; _ } -> opaque | _ -> false)
+       stopped.items);
   let recovered =
     Surface_parse.recover_string ~file:"opaque.jac"
       "opaque type = | Heads\nopaque type Coin = | Heads | Tails\n"
@@ -177,6 +190,95 @@ let test_printing () =
   Alcotest.(check string) "formatting keeps the marker and comments" source (print_surface source);
   Alcotest.(check string) "formatting is idempotent" source (print_surface (print_surface source))
 
+(* --- S2a: single-file sealing, the public projection and setters --- *)
+
+let walk store ?(syntax = Frontend.Surface) source =
+  Frontend.walk ~syntax ~file:"opaque.jac" store source
+
+let codes = function Ok () -> [] | Error ds -> List.filter_map Diag.code ds
+
+let coin_source =
+  "opaque type Coin = | Heads | Tails\nflip(c) = match c { | Heads -> Tails | Tails -> Heads }\n"
+
+let test_single_file_seal () =
+  let store, _ctx = Eval_support.make_prelude_ctx () in
+  Alcotest.(check (list string))
+    "the declaring source constructs" []
+    (codes (walk store coin_source));
+  Alcotest.(check (list string))
+    "re-running the same source stays in scope" []
+    (codes (walk store coin_source));
+  Alcotest.(check (list string))
+    "another source is refused by name" [ "E0315" ]
+    (codes (walk store "forged = Heads\n"));
+  Alcotest.(check (list string))
+    "and in a pattern" [ "E0315" ]
+    (codes (walk store "peek(c) = match c { | Heads -> 1 | _ -> 0 }\n"));
+  let heads =
+    match Store.lookup_kind store "heads" Resolve.KCon with
+    | Some { Resolve.hash; _ } -> Hash.to_hex hash
+    | None -> Alcotest.fail "heads is not bound"
+  in
+  Alcotest.(check (list string))
+    "and by explicit identity" [ "E0315" ]
+    (codes
+       (walk store ~syntax:Frontend.Bootstrap
+          (Printf.sprintf "(defterm ((binding forged () (ref #%s con))))\n" heads)));
+  Alcotest.(check (list string))
+    "a labelled owner" []
+    (codes (walk store "opaque type Meter = Meter(reading: Int)\nmeter.make(n) = Meter(n)\n"));
+  Alcotest.(check (list string))
+    "and a `with` update outside it" [ "E0315" ]
+    (codes (walk store "bump(m) = Meter(m with reading: 1)\n"));
+  Alcotest.(check (list string))
+    "functions the owner provides stay usable" []
+    (codes (walk store "again(c) = flip(flip(c))\n"));
+  Alcotest.(check (list string))
+    "quoted data is not a use" []
+    (codes
+       (walk store ~syntax:Frontend.Bootstrap
+          (Printf.sprintf "(defterm ((binding code () (quote (ref #%s con)))))\n" heads)))
+
+let test_projection_and_setters () =
+  let tops = surface_tops "opaque type Box = Box(size: Int)\ntype Bag = Bag(size: Int)\n" in
+  let names =
+    List.concat_map
+      (function
+        | Kernel.Decl { Kernel.it = Kernel.DefTerm bindings; _ } ->
+            List.map (fun (b : Kernel.binding) -> b.bname) bindings
+        | _ -> [])
+      tops
+  in
+  Alcotest.(check (list string))
+    "an opaque type gets accessors but no setters"
+    [ "box.size"; "bag.size"; "bag.with-size" ]
+    names;
+  let root =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "jacquard-opaque-projection-%d" (Unix.getpid ()))
+  in
+  let interface =
+    Fun.protect
+      ~finally:(fun () -> ignore (Sys.command (Filename.quote_command "rm" [ "-rf"; root ])))
+      (fun () ->
+        match
+          Frontend.check ~prelude_dir:"../prelude" ~root ~syntax:Frontend.Auto ~file:"opaque.jac"
+            coin_source
+        with
+        | Ok (Frontend.Checked artifact) -> Frontend.Checked.interface artifact
+        | Ok (Frontend.Recovered _) -> Alcotest.fail "a strict source produced a recovery report"
+        | Error diagnostics -> fail_diags "check" diagnostics)
+  in
+  let exported kind name =
+    List.exists
+      (fun (e : Interface.export) -> e.Interface.name = name && e.kind = kind)
+      interface.Interface.exports
+  in
+  Alcotest.(check bool) "the type is public" true (exported Resolve.KType "coin");
+  Alcotest.(check bool) "its functions are public" true (exported Resolve.KTerm "flip");
+  Alcotest.(check bool) "its constructors are not" false (exported Resolve.KCon "heads");
+  Alcotest.(check int) "they are hidden members" 2 (List.length interface.Interface.hidden)
+
 let suite =
   [
     Alcotest.test_case "kernel marker" `Quick test_kernel_marker;
@@ -184,4 +286,6 @@ let suite =
     Alcotest.test_case "surface syntax" `Quick test_surface_syntax;
     Alcotest.test_case "parser boundaries" `Quick test_parser_boundaries;
     Alcotest.test_case "printing and formatting" `Quick test_printing;
+    Alcotest.test_case "single-file sealing" `Quick test_single_file_seal;
+    Alcotest.test_case "public projection and setters" `Quick test_projection_and_setters;
   ]

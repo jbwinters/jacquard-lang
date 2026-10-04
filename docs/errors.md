@@ -96,6 +96,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0312 | named call does not fill the exact arity | `choose(left: 1)` when both `left` and `right` are required |
 | E0313 | declaration has an invalid explicit named-call ABI | `bad(label: (x, y)) = x` or repeated parameter labels |
 | E0314 | constructor named-call schema is ambiguous or malformed | using labels on a constructor with duplicate labels or an unlabeled field after a labeled field |
+| E0315 | a single source uses a constructor of an opaque type that it does not itself declare, by name or by explicit identity | `Heads` in a file run against a store where an earlier file declared `opaque type Coin = \| Heads \| Tails` |
 
 ### Resolution warnings (W03xx)
 
@@ -597,9 +598,12 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1733 | a manifest or unit read while pinning changed before the pin was written; nothing is written | editing a dependency during `project pin` |
 | E1734 | two unit entries in one composition resolve to the same file | `"src/types.jac"` and `"./src/types.jac"` |
 | E1735 | no `project.jqd` was found, or it cannot be read | `jacquard project check` outside any project |
+| E1736 | a manifest exports a constructor of an opaque type with `(con C)`; opaque constructors stay sealed to their project | `(exports (type prob-value) (con prob-value))` |
+| E1737 | a root without a namespace, or an entry unit, declares a type or effect inside another graph project's namespace | `type LibaBox = ...` in an application that depends on `liba` |
 | W1700 | declared grants differ from checked authority (a warning unless `--strict-grants`) | a run entry printing without `(grants console)` |
 | W1701 | a file under the project's `.jacquard/` (caches, builds, pin records) is tracked by git | `git add -f .jacquard` |
 | W1702 | beside a checker error, the definition's signature is in another unit, so the report names both files | a signature in `sig.jac`, its definition in `def.jac` |
+| W1703 | the root exports a transparent type without its constructors, or that type's generated setter; the constructors are hidden by name only | `(exports (type liba-box))` for `type LibaBox = LibaBox(n: Int)` |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

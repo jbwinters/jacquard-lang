@@ -1312,10 +1312,13 @@ let lower_tops ?explicit_terms tops =
         match top with
         (* D36: only a surface type declaration generates accessors, since only it is validated
            here; a raw bootstrap declaration keeps the bootstrap carrier's meaning *)
-        | Kernel.Decl { it = DefType { tname; cons; _ }; _ }
+        | Kernel.Decl { it = DefType { tname; opaque; cons; _ }; _ }
           when match source.Surface_ast.it with Surface_ast.TypeDecl _ -> true | _ -> false ->
             let* accessors = generated_accessors ~explicit_terms ~type_name:tname cons in
-            let* setters = generated_setters ~explicit_terms ~type_name:tname cons in
+            (* an opaque type gets no setters: rebuilding a value would bypass its invariant *)
+            let* setters =
+              if opaque then Ok [] else generated_setters ~explicit_terms ~type_name:tname cons
+            in
             loop (List.rev_append setters (List.rev_append accessors (top :: acc))) [] rest
         | _ -> loop (top :: acc) [] rest)
   in

@@ -2642,7 +2642,7 @@ let field_update_hint ctx ~site_meta scrutinee_ty (arms : Kernel.clause list) =
     match repr scrutinee_ty with
     | TCon (hash, _) -> (
         match locate ctx hash with
-        | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; cons; _ }; _ }; _ } -> (
+        | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; opaque; cons; _ }; _ }; _ } -> (
             let total label =
               List.for_all
                 (fun (constructor : Kernel.conspec) ->
@@ -2652,7 +2652,9 @@ let field_update_hint ctx ~site_meta scrutinee_ty (arms : Kernel.clause list) =
                 cons
             in
             let setters =
-              List.filter total labels |> List.map (Printf.sprintf "`%s.with-%s`" tname)
+              (* an opaque type has no generated setters (TYPE.1) *)
+              if opaque then []
+              else List.filter total labels |> List.map (Printf.sprintf "`%s.with-%s`" tname)
             in
             match setters with
             | [] ->
