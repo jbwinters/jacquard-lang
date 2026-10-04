@@ -21,7 +21,7 @@ let diag code cause =
     ~contrast:None ()
 
 let error code fmt = Printf.ksprintf (fun cause -> Error [ diag code cause ]) fmt
-let version = "bundle-v1"
+let version = Project_bundle_reader.version
 let reachable = Project_bundle_reader.reachable
 let eval_identities = Project_bundle_reader.eval_identities
 
@@ -82,6 +82,9 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
   let project = Project_frontend.project session in
   let manifest = project.Project_frontend.manifest in
   let store = Project_frontend.store session in
+  let* () =
+    match Project_frontend.namespace_conflicts session with [] -> Ok () | ds -> Error ds
+  in
   let* out = check_output session ~what:"bundle" out in
   let* () = if Sys.file_exists out then error "E1725" "bundle %s already exists" out else Ok () in
   let entries =
@@ -105,7 +108,16 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
         | Project_frontend.Roots roots -> List.map (fun (_, _, h) -> h) roots)
       bundled
   in
-  let roots = entry_roots @ List.map snd (Project_frontend.root_exports session) in
+  (* every context's exports are roots: each recorded interface must verify against the objects
+     the bundle carries, even where the root never calls them *)
+  let roots =
+    entry_roots
+    @ List.map snd (Project_frontend.root_exports session)
+    @ List.concat_map
+        (fun (_, _, (interface : Interface.t), _) ->
+          List.map (fun (e : Interface.export) -> e.hash) interface.exports)
+        (Project_frontend.graph_contexts session)
+  in
   let closure = reachable store roots in
   (* E1721: dynamic evaluation reachable from any root, through the prelude too *)
   let evals = eval_identities store in
@@ -170,6 +182,15 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
         Form.F (Form.form "context" [ Form.Hash (Project_frontend.context_identity session) ]);
         Form.F (Form.form "prelude" prelude);
         Form.F (Form.form "core" [ Form.Text Version.version ]);
+        (* TYPE.1: the namespace of every context the bundle carries *)
+        Form.F
+          (Form.form "namespaces"
+             (List.filter_map
+                (fun (id, _, _, ns) ->
+                  Option.map
+                    (fun ns -> Form.F (Form.form "namespace" [ Form.Hash id; Form.Sym ns ]))
+                    ns)
+                (Project_frontend.graph_contexts session)));
         Form.F (Form.form "entries" (List.map entry_form bundled));
         Form.F (Form.form "objects" [ Form.Int (List.length objects) ]);
         Form.F (Form.form "companions" [ Form.Int (List.length companions) ]);
@@ -195,7 +216,7 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
       (fun d -> Unix.mkdir (Filename.concat temp d) 0o755)
       [ "objects"; "interfaces"; "contexts" ];
     let file name contents = write_file (Filename.concat temp name) contents in
-    file "bundle-v1.jqd" (Printer.print record ^ "\n");
+    file (version ^ ".jqd") (Printer.print record ^ "\n");
     file "project.jqd" (Project_manifest.print manifest);
     file "provenance.jqd" (Printer.print provenance ^ "\n");
     file "companions.jqd"
@@ -207,7 +228,7 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
                 :: List.map (fun slot -> Form.F (Store.call_abi_slot_form slot)) slots))
             companions));
     List.iter
-      (fun (context_identity, context, interface) ->
+      (fun (context_identity, context, interface, _) ->
         let name = Hash.to_hex context_identity ^ ".jqd" in
         file (Filename.concat "contexts" name) (Printer.print context ^ "\n");
         file (Filename.concat "interfaces" name) (Interface.serialize interface))

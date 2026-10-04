@@ -37,6 +37,7 @@ let summary = function
   | "E1736" -> "A manifest exports a sealed constructor."
   | "E1737" -> "A project declares a type or effect inside another project's namespace."
   | "W1703" -> "A transparent type is exported without its constructors."
+  | "E1739" -> "Recorded namespaces conflict with the contexts they name."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown project code " ^ code))
 
 let next_step = function
@@ -78,6 +79,7 @@ let next_step = function
   | "E1737" -> "Rename the declaration so that it does not begin with another project's namespace."
   | "W1703" ->
       "Declare it `opaque type` so that only its own project can construct or rebuild its values."
+  | "E1739" -> "Rebuild the bundles from unedited sources so that each project keeps one namespace."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown project code " ^ code))
 
 let diag ?span code cause =
@@ -483,9 +485,8 @@ let load_graph ?(pinning = false) ~snapshot manifest_file =
                           add ds;
                           None
                       | dir, Ok manifest ->
-                          Option.iter
-                            (record_file snapshot (Filename.concat dir "bundle-v1.jqd"))
-                            (read_bytes (Filename.concat dir "bundle-v1.jqd"));
+                          let record, _ = Project_bundle_reader.snapshot_file dir in
+                          Option.iter (record_file snapshot record) (read_bytes record);
                           if manifest.Project_manifest.namespace = None then
                             add
                               [
@@ -530,9 +531,20 @@ let load_graph ?(pinning = false) ~snapshot manifest_file =
   (* the namespaces of distinct projects must not be boundary-prefixes of one another (E1707); one
      namespace at two projects is judged by context identity after composition (E1714) *)
   let nodes = Hashtbl.fold (fun _ node acc -> node :: acc) loaded [] in
+  (* bundle nodes live only in their consumers' edges *)
+  let bundles =
+    List.concat_map
+      (fun n -> List.filter_map (fun (_, d) -> if d.from_bundle then Some d else None) n.deps)
+      nodes
+  in
+  (* TYPE.1: with every namespace a bundle records for the contexts it carries *)
   let namespaces =
     List.sort_uniq compare
-      (List.filter_map (fun n -> n.project.manifest.Project_manifest.namespace) nodes)
+      (List.filter_map (fun n -> n.project.manifest.Project_manifest.namespace) (nodes @ bundles)
+      @ List.concat_map
+          (fun n ->
+            Result.value ~default:[] (Project_bundle_reader.recorded_namespaces n.project.dir))
+          bundles)
   in
   List.iter
     (fun a ->
@@ -627,6 +639,13 @@ type session = {
   mutable root : composed option;
   snapshot : snapshot;
   prelude_objects : (Hash.t, unit) Hashtbl.t;  (** declarations the prelude installed *)
+  carried : (string, Hash.t * string) Hashtbl.t;
+      (** TYPE.1: namespace -> (context identity, bundle directory) of each dependency context a
+          bundle carries *)
+  carried_ids : (Hash.t, string) Hashtbl.t;
+      (** TYPE.1: context identity -> the namespace a bundle records for it, roots included *)
+  carried_contexts : (Hash.t, Form.t * Interface.t) Hashtbl.t;
+      (** the verified records of contexts that bundles carry, so a consumer can rebundle them *)
 }
 
 let store s = s.store
@@ -894,20 +913,113 @@ let register session composed =
         | _ -> acc)
       session.composed None
   in
-  match clash with
-  | Some c ->
+  let carried_clash =
+    match project.manifest.namespace with
+    | Some ns -> (
+        match Hashtbl.find_opt session.carried ns with
+        | Some (id, dir) when not (Hash.equal id composed.identity) -> Some (id, dir)
+        | _ -> None)
+    | None -> None
+  in
+  (* a context a bundle records under another namespace (E1739). Two source projects that share an
+     identity (no exports, the same dependencies) are refused only when bundled, where one
+     namespace must be recorded per identity ({!namespace_conflicts}). *)
+  let relabelled =
+    match Hashtbl.find_opt session.carried_ids composed.identity with
+    | Some ns when Some ns <> project.manifest.namespace -> Some ns
+    | _ -> None
+  in
+  match (clash, carried_clash) with
+  | _ when Option.is_some relabelled ->
+      error "E1739" "context %s (%s) is recorded by a bundle under namespace `%s`"
+        (Hash.to_hex composed.identity) project.dir (Option.get relabelled)
+  | Some c, _ ->
       error "E1714" "namespace `%s` appears at two context identities: %s (%s) and %s (%s)"
         (project_label project) c.node.project.dir (Hash.to_hex c.identity) project.dir
         (Hash.to_hex composed.identity)
-  | None ->
+  | None, Some (id, dir) ->
+      error "E1714"
+        "namespace `%s` appears at two context identities: carried by bundle %s (%s) and %s (%s)"
+        (project_label project) dir (Hash.to_hex id) project.dir (Hash.to_hex composed.identity)
+  | None, None ->
       Hashtbl.replace session.composed project.dir composed;
       Ok composed
 
 (* A bundle dependency: verified into the session's store, then seen through its recorded export
    projection. Every object it carries, its own dependencies' included, belongs to it. *)
 let import_bundle session (node : node) =
+  (* a bundle refused by any check here leaves none of its objects behind. The session's carried
+     tables are not rolled back: a refused import aborts the whole session (design §2.3), so no
+     caller may continue with it *)
+  Store.transaction session.store @@ fun () ->
   let* verified =
-    Project_bundle_reader.verify ~store:session.store ~checker:session.checker node.project.dir
+    Project_bundle_reader.verify
+      ~prelude:(fun h ->
+        match Store.locate session.store h with
+        | Ok { Store.decl_hash; _ } -> Hashtbl.mem session.prelude_objects decl_hash
+        | Error _ -> false)
+      ~store:session.store ~checker:session.checker node.project.dir
+  in
+  (* TYPE.1: one context identity under one namespace across the graph (E1739) *)
+  let* () =
+    List.fold_left
+      (fun acc (id, ns) ->
+        Result.bind acc (fun () ->
+            let composed_label =
+              Hashtbl.fold
+                (fun _ c acc ->
+                  if Hash.equal c.identity id && c.node.project.manifest.namespace <> Some ns then
+                    Some c.node.project.dir
+                  else acc)
+                session.composed None
+            in
+            match (composed_label, Hashtbl.find_opt session.carried_ids id) with
+            | Some dir, _ ->
+                error "E1739" "context %s is %s in the graph but `%s` in bundle %s" (Hash.to_hex id)
+                  dir ns node.project.dir
+            | None, Some other when other <> ns ->
+                error "E1739" "context %s is recorded under `%s` and `%s` by two bundles"
+                  (Hash.to_hex id) other ns
+            | None, _ ->
+                Hashtbl.replace session.carried_ids id ns;
+                Ok ()))
+      (Ok ()) verified.Project_bundle_reader.namespaces
+  in
+  List.iter
+    (fun (id, form, interface) ->
+      if not (Hash.equal id verified.context) then
+        Hashtbl.replace session.carried_contexts id (form, interface))
+    verified.contexts;
+  (* TYPE.1 (E1714): a carried context's namespace at another identity than the graph's *)
+  let* () =
+    List.fold_left
+      (fun acc (id, ns) ->
+        Result.bind acc (fun () ->
+            if Hash.equal id verified.Project_bundle_reader.context then Ok ()
+            else
+              let composed_clash =
+                Hashtbl.fold
+                  (fun _ c acc ->
+                    match c.node.project.manifest.Project_manifest.namespace with
+                    | Some n when String.equal n ns && not (Hash.equal c.identity id) -> Some c
+                    | _ -> acc)
+                  session.composed None
+              in
+              match (composed_clash, Hashtbl.find_opt session.carried ns) with
+              | Some c, _ ->
+                  error "E1714"
+                    "namespace `%s` appears at two context identities: %s (%s) and carried by \
+                     bundle %s (%s)"
+                    ns c.node.project.dir (Hash.to_hex c.identity) node.project.dir (Hash.to_hex id)
+              | None, Some (other, dir) when not (Hash.equal other id) ->
+                  error "E1714"
+                    "namespace `%s` appears at two context identities: carried by bundles %s (%s) \
+                     and %s (%s)"
+                    ns dir (Hash.to_hex other) node.project.dir (Hash.to_hex id)
+              | None, _ ->
+                  Hashtbl.replace session.carried ns (id, node.project.dir);
+                  Ok ()))
+      (Ok ()) verified.namespaces
   in
   let context, interface =
     match
@@ -980,9 +1092,13 @@ let redeclarations session (node : node) tops =
     Hashtbl.fold
       (fun _ (c : composed) acc ->
         match c.node.project.manifest.Project_manifest.namespace with
-        | Some ns when c.node.project.dir <> node.project.dir -> (ns, c) :: acc
+        | Some ns when c.node.project.dir <> node.project.dir ->
+            (ns, Printf.sprintf "project `%s` owns" (project_label c.node.project)) :: acc
         | _ -> acc)
       session.composed []
+    @ Hashtbl.fold
+        (fun ns (_, dir) acc -> (ns, Printf.sprintf "a context in bundle %s owns" dir) :: acc)
+        session.carried []
   in
   List.concat_map
     (fun top ->
@@ -991,12 +1107,11 @@ let redeclarations session (node : node) tops =
           if b.kind <> Resolve.KType && b.kind <> Resolve.KEffect then None
           else
             match List.find_opt (fun (ns, _) -> has_prefix ns "-" b.name) others with
-            | Some (ns, c) ->
+            | Some (ns, owner) ->
                 Some
                   (diag ?span:(Meta.span b.meta) "E1737"
-                     (Printf.sprintf
-                        "%s `%s` (%s) is inside namespace `%s`, which project `%s` owns"
-                        (kind_word b.kind) b.name (where b.file) ns (project_label c.node.project)))
+                     (Printf.sprintf "%s `%s` (%s) is inside namespace `%s`, which %s"
+                        (kind_word b.kind) b.name (where b.file) ns owner))
             | None -> None)
         (binders top))
     tops
@@ -1126,8 +1241,8 @@ let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session 
       Error (if is_root then entry_boundary project ~names ds else ds)
   | Ok () ->
       let exports, missing = export_projection session.store project local in
-      if is_root then List.iter on_warning (abstraction_warnings session.store tops exports);
       let* () = if missing = [] then Ok () else Error missing in
+      if is_root then List.iter on_warning (abstraction_warnings session.store tops exports);
       (* derived now, while this project's own bindings are the store's current ones *)
       let* interface =
         Interface.of_side session.checker { Diff.store = session.store; bindings = exports }
@@ -1258,6 +1373,9 @@ let open_graph ?(on_lint = ignore) ?(on_warning = ignore) ?(pinning = false) ~pr
         (let table = Hashtbl.create 1024 in
          List.iter (fun h -> Hashtbl.replace table h ()) (Store.all_decl_hashes store);
          table);
+      carried = Hashtbl.create 8;
+      carried_ids = Hashtbl.create 8;
+      carried_contexts = Hashtbl.create 8;
     }
   in
   let rec compose_all = function
@@ -1553,10 +1671,41 @@ let project s = s.project
 let is_prelude_object s hash = Hashtbl.mem s.prelude_objects hash
 let root_exports s = (root_composed s).exports
 
+(* one identity under two namespaces cannot be recorded in a bundle (E1739) *)
+let namespace_conflicts s =
+  let seen = Hashtbl.create 16 in
+  Hashtbl.fold
+    (fun _ c acc ->
+      let ns = c.node.project.manifest.Project_manifest.namespace in
+      match Hashtbl.find_opt seen c.identity with
+      | Some (other, dir) when other <> ns ->
+          diag "E1739"
+            (Printf.sprintf
+               "projects %s and %s share context identity %s under different namespaces; a bundle \
+                records one namespace per context"
+               dir c.node.project.dir (Hash.to_hex c.identity))
+          :: acc
+      | _ ->
+          Hashtbl.replace seen c.identity (ns, c.node.project.dir);
+          acc)
+    s.composed []
+
+(* every context in the graph, once per identity: the composed ones, and the ones bundles carry *)
 let graph_contexts s =
+  let table = Hashtbl.create 16 in
+  Hashtbl.iter
+    (fun _ c ->
+      Hashtbl.replace table c.identity
+        (c.context, c.interface, c.node.project.manifest.Project_manifest.namespace))
+    s.composed;
+  Hashtbl.iter
+    (fun id (form, interface) ->
+      if not (Hashtbl.mem table id) then
+        Hashtbl.replace table id (form, interface, Hashtbl.find_opt s.carried_ids id))
+    s.carried_contexts;
   List.sort
-    (fun (a, _, _) (b, _, _) -> Hash.compare a b)
-    (Hashtbl.fold (fun _ c acc -> (c.identity, c.context, c.interface) :: acc) s.composed [])
+    (fun (a, _, _, _) (b, _, _, _) -> Hash.compare a b)
+    (Hashtbl.fold (fun id (form, interface, ns) acc -> (id, form, interface, ns) :: acc) table [])
 
 let graph_dirs s = Hashtbl.fold (fun dir _ acc -> dir :: acc) s.composed []
 

@@ -39,6 +39,15 @@ A consumer builds values only through the owner's functions:
     Cause: `prob-score` is private to project `prob`
   $ echo 'app.go(x) = prob-score.value(prob.make(x))' > lib.jac
 
+An explicit identity is refused like a name (E1709):
+
+  $ H=$(cd ../prob && jacquard project interface | tr '\n' ' ' | grep -o 'hidden *#[0-9a-f]*' | head -1 | cut -d'#' -f2)
+  $ printf '(defterm ((binding app.forged () (ref #%s con))))\n' "$H" > forge.jqd
+  $ sed -i 's/(units "lib.jac")/(units "lib.jac" "forge.jqd")/' project.jqd
+  $ jacquard project check 2>&1 | grep -o 'error\[E1709\].*'
+  error[E1709]: An explicit identity is not visible in this project.
+  $ sed -i 's/ "forge.jqd"//' project.jqd && rm forge.jqd
+
 An opaque type exported without its constructors is sealed, not hidden by name,
 so it draws no W1703; a manifest cannot export a sealed constructor (E1736):
 
@@ -61,6 +70,9 @@ namespace, and neither can an entry unit (E1737):
   $ jacquard project check 2>&1 | grep -A1 'error'
   $TESTCASE_ROOT/work/app/lib.jac:2:1-41: error[E1737]: A project declares a type or effect inside another project's namespace.
     Cause: type `prob-score` ($TESTCASE_ROOT/work/app/lib.jac) is inside namespace `prob`, which project `prob` owns
+  $ echo 'opaque type ProbScore = | ProbScore(value: Int)' > lib.jac
+  $ jacquard project check 2>&1 | grep -o 'error\[E1737\].*'
+  error[E1737]: A project declares a type or effect inside another project's namespace.
   $ echo 'app.go(x) = prob-score.value(prob.make(x))' > lib.jac
   $ sed -i 's/(name "app")/(name "app") (namespace app)/' project.jqd
   $ printf 'type ProbFake = | ProbFake\napp.go(-5)\n' > demo.jac

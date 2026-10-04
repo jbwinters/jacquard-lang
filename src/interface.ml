@@ -65,7 +65,40 @@ let render_signature scheme =
   let name_of hash = "#" ^ Hash.to_hex hash in
   Types.show_scheme ~name_of ~effect_name_of:name_of scheme
 
-let of_side ?source checker (side : Diff.side) =
+(* a recorded binding names a declaration of its own kind; only a term's name is free, since a
+   type's, effect's, constructor's or operation's name is part of its hashed declaration *)
+let kind_matches store name kind hash =
+  match (kind, Store.locate store hash) with
+  | Resolve.KTerm, Ok { Store.decl = { Kernel.it = Kernel.DefTerm _; _ }; role = Store.Member _; _ }
+    ->
+      true
+  | ( Resolve.KType,
+      Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; _ }; _ }; role = Store.Whole; _ } ) ->
+      String.equal name tname
+  | ( Resolve.KCon,
+      Ok
+        {
+          Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ };
+          role = Store.Constructor i;
+          _;
+        } ) -> (
+      match List.nth_opt cons i with
+      | Some { Kernel.con_name; _ } -> String.equal name con_name
+      | None -> false)
+  | ( Resolve.KEffect,
+      Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ename; _ }; _ }; role = Store.Whole; _ } )
+    ->
+      String.equal name ename
+  | ( Resolve.KOp,
+      Ok
+        { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; role = Store.Operation i; _ }
+    ) -> (
+      match List.nth_opt ops i with
+      | Some { Kernel.op_name; _ } -> String.equal name op_name
+      | None -> false)
+  | _ -> false
+
+let of_side ?source ?(recorded = false) checker (side : Diff.side) =
   let store = side.Diff.store in
   let rec build acc = function
     | [] -> Ok (List.sort compare_export acc)
@@ -124,9 +157,11 @@ let of_side ?source checker (side : Diff.side) =
   let bound =
     List.filter
       (fun ((name, kind), hash) ->
-        (match Store.lookup_kind store name kind with
-          | Some { Resolve.hash = current; _ } -> Hash.equal current hash
-          | None -> false)
+        (if recorded then kind_matches store name kind hash
+         else
+           match Store.lookup_kind store name kind with
+           | Some { Resolve.hash = current; _ } -> Hash.equal current hash
+           | None -> false)
         && Option.is_none (Store.sealed_constructor store hash))
       side.Diff.bindings
   in
