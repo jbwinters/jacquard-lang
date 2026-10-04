@@ -3,7 +3,7 @@
 Status: candidate is ready for RC1 only after the exact candidate reproduction
 and required GitHub checks are green.
 
-Test count: `1177`
+Test count: `1183`
 
 Cram count: `77`
 

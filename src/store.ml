@@ -869,6 +869,78 @@ let decl_refs (d : Kernel.decl) : Hash.t list =
         (fun o -> List.concat_map ty_refs o.Kernel.op_params @ ty_refs o.Kernel.op_result)
         ops
 
+(** [split_refs d] partitions [decl_refs d] by position (TYPE.1): [live] are the references an
+    expression or pattern makes (a call, a constructor, an operation, a splice), and [typed] the
+    ones only an annotation, field type or effect row makes. Naming a type grants no construction,
+    so a bundle's region rules (E1738, E1739) judge only [live] references. *)
+let split_refs (d : Kernel.decl) =
+  let live = ref [] and typed = ref [] in
+  let add_typed t = typed := ty_refs t @ !typed in
+  let rec ex (e : Kernel.expr) =
+    match e.Kernel.it with
+    | Kernel.Lit _ | Kernel.Var _ | Kernel.GroupRef _ -> ()
+    | Kernel.Ref (h, _) -> live := h :: !live
+    | Kernel.Lam (ps, body) ->
+        List.iter pat ps;
+        ex body
+    | Kernel.App (fn, args) ->
+        ex fn;
+        List.iter ex args
+    | Kernel.Let { binder; value; body; _ } ->
+        pat binder;
+        ex value;
+        ex body
+    | Kernel.Match (s, cs) ->
+        ex s;
+        List.iter
+          (fun c ->
+            pat c.Kernel.cpat;
+            ex c.Kernel.cbody)
+          cs
+    | Kernel.Tuple items -> List.iter ex items
+    | Kernel.Handle { body; ret; ops } ->
+        ex body;
+        pat ret.Kernel.rbinder;
+        ex ret.Kernel.rbody;
+        List.iter
+          (fun o ->
+            (match o.Kernel.op with Kernel.Hashed h -> live := h :: !live | Kernel.Named _ -> ());
+            List.iter pat o.Kernel.params;
+            ex o.Kernel.obody)
+          ops
+    | Kernel.Quote payload -> quoted 0 payload
+    | Kernel.Unquote s -> ex s
+    | Kernel.Ann (s, ty) ->
+        ex s;
+        add_typed ty
+  and quoted level (f : Form.t) =
+    if f.Form.head = "unquote" && level = 0 then
+      match f.Form.args with
+      | [ Form.F splice ] -> ( match Kernel.expr_of_form splice with Ok e -> ex e | Error _ -> ())
+      | _ -> ()
+    else
+      let level =
+        match f.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+      in
+      List.iter (function Form.F g -> quoted level g | _ -> ()) f.Form.args
+  and pat p = live := pat_refs p @ !live in
+  (match d.Kernel.it with
+  | Kernel.DefTerm bs ->
+      List.iter
+        (fun b ->
+          Option.iter add_typed b.Kernel.annot;
+          ex b.Kernel.value)
+        bs
+  | Kernel.DefType { cons; _ } ->
+      List.iter (fun c -> List.iter (fun f -> add_typed f.Kernel.fty) c.Kernel.fields) cons
+  | Kernel.DefEffect { ops; _ } ->
+      List.iter
+        (fun o ->
+          List.iter add_typed o.Kernel.op_params;
+          add_typed o.Kernel.op_result)
+        ops);
+  (List.sort_uniq Hash.compare !live, List.sort_uniq Hash.compare !typed)
+
 (** [top_refs top] is every identity [top] references live: quoted data is excluded, splices are
     not. *)
 let top_refs = function Kernel.Decl d -> decl_refs d | Kernel.Expr e -> expr_refs e

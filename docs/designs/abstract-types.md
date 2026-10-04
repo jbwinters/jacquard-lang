@@ -157,6 +157,15 @@ be read from its content.
   signature avoids opaque types but which builds a sealed value internally.
   The host process has the root's trust; E1604 protects only the opaque types
   that cross the boundary.
+- **Owners and entry types.** The owner of a sealed type is the context whose
+  namespace prefixes its name; an unprefixed type belongs to the bundle's own
+  root, since a namespaced library cannot declare one (E1706) but entry units
+  may.
+- **Namespaces in regions.** What a context's exports reach must carry its
+  namespace (E1739), except through type positions. The whole region, entries
+  included, must not reach a type or effect inside another context's namespace
+  through a live reference (E1739), so a forged entry cannot use a dependency's
+  unexported declarations.
 - **Every constructing term needs a region.** A carried term that references a
   sealed constructor but lies in no region is refused (E1738). Today the
   exact-closure check refuses any unreachable object first (E1728), so E1738

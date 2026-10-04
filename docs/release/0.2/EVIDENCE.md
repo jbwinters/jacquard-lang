@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1177`
+- Alcotest/QCheck cases: `1183`
 - Cram transcript files: `77`
 - Documentation examples: `36` named examples across `8` documents
 
@@ -779,3 +779,21 @@ dependency bundles carry. So a dependency export the root never calls still
 verifies, and a consumer of a bundle can itself be bundled.
 
 `project-bundle.t` and `opaque-types.t` cover it.
+
+TYPE.1 slice 2b2 checks bundled terms by region (E1738). Each context's region
+is the closure of its own roots, stopping at what other contexts export and at
+the prelude. A term in a context's region may construct or match a sealed type
+only if that context owns the type. A region may reach a type or effect outside
+its namespace only through type positions (E1739). The `bundle-regions` suite
+forges bundles, recomputing their records, to show the refusals:
+- a consumer that re-exports a library's private constructing helper, or
+  re-exports its constructing export, is refused (E1738);
+- a consumer whose region constructs a dependency's unexported type is refused
+  (E1739);
+- annotation-only use of such a type is accepted.
+
+Entry units may declare their own types outside the namespace; an unprefixed type belongs to the bundle's root, and E1739 judges only what exports reach. A recorded export of the wrong kind gets a direct E1729.
+
+No region, entries included, may reach a type or effect inside another context's namespace through a live reference (E1739).
+
+The source inventory is now `1183 / 77 / 36`.

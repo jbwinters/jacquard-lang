@@ -71,6 +71,7 @@ let verify_summary = function
   | "E1729" -> "A derived interface or context does not match the bundle record."
   | "E1735" -> "The bundle cannot be read."
   | "E1736" -> "A bundle exports a sealed constructor."
+  | "E1738" -> "A bundled term constructs a sealed type outside its owner."
   | "E1707" -> "Two projects' namespaces overlap."
   | "E1714" -> "One namespace appears at two context identities."
   | "E1739" -> "Recorded namespaces conflict with the contexts they name."
@@ -78,7 +79,7 @@ let verify_summary = function
 
 let verify_next = function
   | "E1720" -> "Run the bundle with the Core and prelude that built it, or rebuild it."
-  | "E1726" | "E1727" | "E1728" | "E1729" | "E1736" | "E1739" | "E1707" | "E1714" ->
+  | "E1726" | "E1727" | "E1728" | "E1729" | "E1736" | "E1738" | "E1739" | "E1707" | "E1714" ->
       "Rebuild the bundle with jacquard project bundle; do not edit its files."
   | "E1721" -> "Bundles refuse dynamic evaluation in v1; rebuild without eval-code."
   | "E1735" -> "Check the bundle path; a bundle is a directory written by jacquard project bundle."
@@ -438,6 +439,18 @@ let verify_unguarded ?prelude ~store ~checker path =
                             (Hash.to_hex id) e.name
                       | None -> Ok ()
                     in
+                    (* each recorded export names a declaration of its kind under its own name *)
+                    let* () =
+                      match
+                        List.find_opt
+                          (fun (e : Interface.export) ->
+                            not (Interface.kind_matches store e.name e.kind e.hash))
+                          recorded.exports
+                      with
+                      | Some e ->
+                          refuse "E1729" "export %s does not name a declaration of its kind" e.name
+                      | None -> Ok ()
+                    in
                     let* derived =
                       Result.map_error
                         (fun _ -> [])
@@ -703,6 +716,158 @@ let verify_unguarded ?prelude ~store ~checker path =
     | Some h ->
         refuse "E1721" "declaration %s, reachable from a bundle root, refers to eval-code or Eval"
           (Hash.to_hex h)
+    | None -> Ok ()
+  in
+  (* TYPE.1 (design §2.3): each context's region is the closure of its own roots, its exports
+     and, for the bundle's own context, its entry roots, stopping at the exact identities other
+     contexts export and at the prelude. A term in a region that constructs or matches a sealed
+     constructor must belong to the type's owning context (E1738); a type or effect a region reaches
+     through a live reference must carry that context's namespace (E1739). *)
+  let* () =
+    let live_contexts = List.filter (fun (id, _, _, _) -> List.mem id verified) pending in
+    let exports_of id =
+      List.concat_map
+        (fun (id', _, _, (i : Interface.t)) ->
+          if Hash.equal id id' then List.map (fun (e : Interface.export) -> e.hash) i.exports
+          else [])
+        live_contexts
+    in
+    let exported_by = Hashtbl.create 64 in
+    List.iter
+      (fun (id, _, _, _) -> List.iter (fun h -> Hashtbl.add exported_by h id) (exports_of id))
+      live_contexts;
+    (* an unprefixed type is the root's: its entry units may declare one, and a namespaced library
+       cannot (E1706) *)
+    let owner_of_type tname =
+      match List.find_opt (fun (_, ns) -> has_prefix ns "-" tname) namespaces with
+      | Some (id, _) -> id
+      | None -> context
+    in
+    let region ~entries id =
+      let own_roots = exports_of id @ if entries && Hash.equal id context then roots else [] in
+      let own = Hashtbl.create 64 in
+      List.iter (fun h -> Hashtbl.replace own h ()) own_roots;
+      let live = Hashtbl.create 64 and typed = Hashtbl.create 64 in
+      let stops h =
+        (not (Hashtbl.mem own h))
+        && (is_prelude h
+           || List.exists (fun other -> not (Hash.equal other id)) (Hashtbl.find_all exported_by h)
+           )
+      in
+      let rec go ~is_live h =
+        if not (stops h) then
+          match Store.locate store h with
+          | Error _ -> ()
+          | Ok { Store.decl; decl_hash; _ } ->
+              let seen = if is_live then live else typed in
+              if not (Hashtbl.mem seen decl_hash || Hashtbl.mem live decl_hash) then begin
+                Hashtbl.replace seen decl_hash decl;
+                let live_refs, typed_refs = Store.split_refs decl in
+                List.iter (go ~is_live) live_refs;
+                List.iter (go ~is_live:false) typed_refs
+              end
+      in
+      List.iter (go ~is_live:true) own_roots;
+      (live, typed)
+    in
+    let regions = List.map (fun (id, _, _, _) -> (id, region ~entries:true id)) live_contexts in
+    (* E1739 judges what a context's exports reach: its entries are author-trusted and may declare
+       types outside the namespace, which nothing exported can reach (E1732) *)
+    let export_regions =
+      List.map (fun (id, _, _, _) -> (id, region ~entries:false id)) live_contexts
+    in
+    let constructing decl =
+      List.filter_map
+        (fun r -> Option.map (fun s -> (r, s)) (Store.sealed_constructor store r))
+        (fst (Store.split_refs decl))
+    in
+    let* () =
+      List.fold_left
+        (fun acc (id, (live, _)) ->
+          Result.bind acc (fun () ->
+              Hashtbl.fold
+                (fun decl_hash decl acc ->
+                  Result.bind acc (fun () ->
+                      match
+                        List.find_opt
+                          (fun (_, (tname, _, _)) -> not (Hash.equal (owner_of_type tname) id))
+                          (constructing decl)
+                      with
+                      | Some (_, (tname, con_name, _)) ->
+                          refuse "E1738"
+                            "declaration %s in the region of context %s uses constructor `%s` of \
+                             the opaque type `%s`, which another context owns"
+                            (Hash.to_hex decl_hash) (Hash.to_hex id) con_name tname
+                      | None -> Ok ()))
+                live (Ok ())))
+        (Ok ()) regions
+    in
+    let* () =
+      List.fold_left
+        (fun acc (id, (live, _)) ->
+          Result.bind acc (fun () ->
+              match List.assoc_opt id namespaces with
+              | None -> Ok ()
+              | Some ns ->
+                  Hashtbl.fold
+                    (fun _ (decl : Kernel.decl) acc ->
+                      Result.bind acc (fun () ->
+                          match decl.Kernel.it with
+                          | Kernel.DefType { tname = name; _ }
+                          | Kernel.DefEffect { ename = name; _ }
+                            when not (has_prefix ns "-" name) ->
+                              refuse "E1739"
+                                "context %s reaches `%s`, which is outside its namespace `%s`"
+                                (Hash.to_hex id) name ns
+                          | _ -> Ok ()))
+                    live (Ok ())))
+        (Ok ()) export_regions
+    in
+    (* the whole region, entries included and a root without a namespace too, reaches no type or
+       effect inside another context's namespace through a live reference: the bundle form of
+       E1737, which keeps a forged entry from using a dependency's unexported declarations *)
+    let* () =
+      List.fold_left
+        (fun acc (id, (live, _)) ->
+          Result.bind acc (fun () ->
+              Hashtbl.fold
+                (fun _ (decl : Kernel.decl) acc ->
+                  Result.bind acc (fun () ->
+                      let name =
+                        match decl.Kernel.it with
+                        | Kernel.DefType { tname; _ } -> Some tname
+                        | Kernel.DefEffect { ename; _ } -> Some ename
+                        | Kernel.DefTerm _ -> None
+                      in
+                      match name with
+                      | None -> Ok ()
+                      | Some name -> (
+                          match
+                            List.find_opt
+                              (fun (other, ns) ->
+                                (not (Hash.equal other id)) && has_prefix ns "-" name)
+                              namespaces
+                          with
+                          | Some (_, ns) ->
+                              refuse "E1739"
+                                "context %s reaches `%s`, which is inside namespace `%s` of \
+                                 another context"
+                                (Hash.to_hex id) name ns
+                          | None -> Ok ())))
+                live (Ok ())))
+        (Ok ()) regions
+    in
+    (* every constructing term lies in some region (defence in depth behind E1728) *)
+    match
+      List.find_opt
+        (fun (decl, (h : Canon.decl_hashes)) ->
+          constructing decl <> []
+          && not (List.exists (fun (_, (live, _)) -> Hashtbl.mem live h.decl_hash) regions))
+        objects
+    with
+    | Some (_, h) ->
+        refuse "E1738" "declaration %s constructs a sealed type but lies in no context's region"
+          (Hash.to_hex h.Canon.decl_hash)
     | None -> Ok ()
   in
   let count name =
