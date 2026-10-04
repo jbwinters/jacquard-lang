@@ -459,7 +459,7 @@ built in a sibling temporary directory, then renamed into place.
 
 ```text
 app.bundle/
-  bundle-v1.jqd       -- the root record
+  bundle-v2.jqd       -- the root record (bundle-v1.jqd before TYPE.1)
   project.jqd         -- the manifest, canonical spelling
   interfaces/         -- interface-v1 manifests: the project's and each dependency's
   contexts/           -- the canonical project-context-v1 record of the project and every transitive dependency
@@ -484,17 +484,24 @@ app.bundle/
   holding its kind (`test`, `world-test` or `warp-decl`), display name and
   identity, which is what Warp needs for discovery and reporting.
 
-**`bundle-v1` grammar** (canonical `.jqd`, sorted where marked):
+**`bundle-v2` grammar** (canonical `.jqd`, sorted where marked):
 
 ```text
-(bundle-v1
+(bundle-v2
   (manifest #<semantic-projection digest>)
   (context #<project-context identity>)
   (prelude <identity form>) (core "<version>")
+  (namespaces (namespace #<context identity> <namespace>)…)   -- every carried context, by identity
   (entries (run <name> (steps #<thunk>…) (grants …))…    -- entries sorted by (kind, name); steps in source order
            (test <name> (root <kind> "<display>" #<hash>)… (grants …))…)
   (objects <count>) (companions <count>))
 ```
+
+`bundle-v2` (TYPE.1, `docs/designs/abstract-types.md` §2.4) adds the
+`(namespaces …)` record. Every carried dependency context must have an entry;
+only a root without a namespace may lack one. A `bundle-v1` record has no
+`(namespaces …)`, so it is read only when it carries no dependency context and
+no opaque declaration (E1735).
 
 The **bundle identity** is `HASH_V0` of this record's canonical bytes; the
 head is the domain tag. It contains the **semantic** manifest projection only.
@@ -517,7 +524,18 @@ checks, in order:
    before its consumers, checking each record's interface and companions
    against what was derived and its dependency edges against its providers'
    verified contexts. The last check is the project's own context against
-   `bundle-v1`. Any mismatch in steps 5–6 is E1729
+   the record. Any mismatch in steps 5–6 is E1729. TYPE.1 adds these
+   checks:
+   - no recorded export is a sealed constructor (E1736);
+   - every recorded namespace prefixes its context's exports, kind by kind,
+     and the root's namespace matches `project.jqd` (E1739);
+   - within the bundle, no namespace is recorded at two identities (E1714)
+     and none is a boundary-prefix of another (E1707);
+   - every carried context is a dependency of the bundle's own context
+     (E1729);
+   - closure completeness (step 3) resolves only to the bundle's own objects
+     and the prelude, never to an earlier import, and so does every recorded
+     export and its owner (E1728, checked before steps 5–6).
 7. prelude and Core match the running tool (E1720)
 
 Only then are the objects trusted for identity traversal.
@@ -530,7 +548,8 @@ an entry.
 
 **Dynamic code in v1.** A bundle is refused (E1721) if dynamic evaluation is
 **executably reachable** from any root: any run step, test root, or exported
-callable. Checking the root's outer authority is not enough. A function can
+callable. Since TYPE.1 a bundle carries every graph context's exports, so a
+dependency's export is a root even when the project never calls it. Checking the root's outer authority is not enough. A function can
 return a closure whose own arrow carries `Eval`
 (`() ->{} () ->{Eval} a`), and exported data can contain such functions.
 

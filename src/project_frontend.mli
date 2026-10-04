@@ -179,8 +179,13 @@ val is_prelude_object : session -> Hash.t -> bool
 val root_exports : session -> ((string * Resolve.nkind) * Hash.t) list
 (** The root library's export projection. *)
 
-val graph_contexts : session -> (Hash.t * Form.t * Interface.t) list
-(** Every composed project's context identity, record, and interface, sorted by identity. *)
+val namespace_conflicts : session -> Diag.t list
+(** E1739 for two composed projects that share a context identity under different namespaces, which
+    a bundle cannot record. *)
+
+val graph_contexts : session -> (Hash.t * Form.t * Interface.t * string option) list
+(** Every composed project's context identity, record, interface and namespace, sorted by identity.
+*)
 
 val graph_dirs : session -> string list
 (** The canonical directory of every project in the graph, the root included. *)

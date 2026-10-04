@@ -762,3 +762,20 @@ opaque types get no setters; abstract exports of transparent types warn
 (W1703). Two `opaque-types` cases and the `opaque-types.t` transcript cover it,
 and `project-manifest.t` now shows W1703 for its abstract export. The source
 inventory is now `1177 / 77 / 36`.
+
+TYPE.1 slice 2b1 moves bundles to `bundle-v2`. The record names the namespace
+of every context a bundle carries, and verification refuses:
+- a recorded sealed-constructor export (E1736);
+- a missing, relabelled or root-mismatched namespace (E1739);
+- a `bundle-v1` bundle that carries dependency contexts or an opaque
+  declaration (E1735).
+
+Carried namespaces join the graph for E1707, E1714 and E1737. Completeness
+resolves only to the bundle's own objects and the prelude, and verification
+and import run in a store transaction.
+
+A bundle now carries every graph context's exports and the contexts its
+dependency bundles carry. So a dependency export the root never calls still
+verifies, and a consumer of a bundle can itself be bundled.
+
+`project-bundle.t` and `opaque-types.t` cover it.

@@ -1,7 +1,11 @@
 (* PKG.1: reading and verifying bundles; contracts in project_bundle_reader.mli. *)
 
 let ( let* ) = Result.bind
-let version = "bundle-v1"
+let version = "bundle-v2"
+
+(* TYPE.1: bundle-v2 records each carried context's namespace; a bundle-v1 bundle is still read
+   when it carries no dependency context and no opaque declaration. *)
+let legacy_version = "bundle-v1"
 
 (* --- the closure --- *)
 
@@ -52,6 +56,7 @@ type verified = {
   context : Hash.t;
   entries : entry list;
   contexts : (Hash.t * Form.t * Interface.t) list;
+  namespaces : (Hash.t * string) list;
   objects : (Kernel.decl * Canon.decl_hashes) list;
 }
 
@@ -65,11 +70,15 @@ let verify_summary = function
   | "E1721" -> "A bundle root can reach dynamic evaluation."
   | "E1729" -> "A derived interface or context does not match the bundle record."
   | "E1735" -> "The bundle cannot be read."
+  | "E1736" -> "A bundle exports a sealed constructor."
+  | "E1707" -> "Two projects' namespaces overlap."
+  | "E1714" -> "One namespace appears at two context identities."
+  | "E1739" -> "Recorded namespaces conflict with the contexts they name."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown bundle code " ^ code))
 
 let verify_next = function
   | "E1720" -> "Run the bundle with the Core and prelude that built it, or rebuild it."
-  | "E1726" | "E1727" | "E1728" | "E1729" ->
+  | "E1726" | "E1727" | "E1728" | "E1729" | "E1736" | "E1739" | "E1707" | "E1714" ->
       "Rebuild the bundle with jacquard project bundle; do not edit its files."
   | "E1721" -> "Bundles refuse dynamic evaluation in v1; rebuild without eval-code."
   | "E1735" -> "Check the bundle path; a bundle is a directory written by jacquard project bundle."
@@ -130,7 +139,7 @@ let parse_entries (record : Form.t) =
     | None -> []
   in
   match field "entries" record with
-  | None -> refuse "E1735" "bundle-v1.jqd has no (entries ...)"
+  | None -> refuse "E1735" "the bundle record has no (entries ...)"
   | Some entries ->
       Ok
         (List.filter_map
@@ -175,7 +184,71 @@ let parse_companions forms =
       | _ -> None)
     forms
 
-let verify ~store ~checker path =
+(* [snapshot_file dir] is the record file a bundle directory holds, and its format version. *)
+let snapshot_file dir =
+  let v2 = Filename.concat dir (version ^ ".jqd") in
+  if Sys.file_exists v2 then (v2, version)
+  else (Filename.concat dir (legacy_version ^ ".jqd"), legacy_version)
+
+let parse_namespaces (record : Form.t) =
+  match field "namespaces" record with
+  | None -> refuse "E1735" "the bundle record has no (namespaces ...)"
+  | Some f ->
+      List.fold_left
+        (fun acc arg ->
+          Result.bind acc (fun pairs ->
+              match arg with
+              | Form.F { Form.head = "namespace"; args = [ Form.Hash id; Form.Sym ns ]; _ } ->
+                  if List.mem_assoc id pairs then
+                    refuse "E1739" "context %s records two namespaces" (Hash.to_hex id)
+                  else Ok ((id, ns) :: pairs)
+              | _ -> refuse "E1735" "malformed (namespaces ...) entry"))
+        (Ok []) f.Form.args
+      |> Result.map List.rev
+
+(* [recorded_namespaces dir] reads a bundle's recorded namespaces, unverified, for graph-wide
+   refusals (E1707) before the bundle is imported; a bundle-v1 bundle records none. *)
+let recorded_namespaces dir =
+  let file, v = snapshot_file dir in
+  if v <> version then Ok []
+  else
+    let* bytes = read_bounded file in
+    let* record = parse_one ~file bytes in
+    Result.map (List.map snd) (parse_namespaces record)
+
+let has_prefix ns sep name =
+  let p = ns ^ sep in
+  String.length name > String.length p && String.starts_with ~prefix:p name
+
+(* E1739: kind-aware, as the source namespace rules are. A constructor is judged by its owning
+   type's name; an operation carries the `ns.` prefix and so does its owning effect's name (`ns-`);
+   a term named after a type, `ns-type.label`, lies inside the namespace. *)
+let namespace_refusal store ns (e : Interface.export) =
+  let owner_name () =
+    match Store.locate store e.owner with
+    | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; _ }; _ }; _ } -> Some tname
+    | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ename; _ }; _ }; _ } -> Some ename
+    | _ -> None
+  in
+  let ok =
+    match e.kind with
+    | Resolve.KType | Resolve.KEffect -> has_prefix ns "-" e.name
+    | Resolve.KTerm -> (
+        has_prefix ns "." e.name
+        ||
+        (* a term named after a type, `ns-type.label` (an accessor, a setter, or any term the source
+           rule admits), lies inside the namespace too; the type itself need not be carried *)
+        match String.index_opt e.name '.' with
+        | Some i -> has_prefix ns "-" (String.sub e.name 0 i)
+        | None -> false)
+    | Resolve.KOp -> (
+        has_prefix ns "." e.name
+        && match owner_name () with Some ename -> has_prefix ns "-" ename | None -> false)
+    | Resolve.KCon -> ( match owner_name () with Some t -> has_prefix ns "-" t | None -> false)
+  in
+  if ok then None else Some e.name
+
+let verify_unguarded ?prelude ~store ~checker path =
   total := 0;
   let file name = Filename.concat path name in
   let* () =
@@ -197,12 +270,14 @@ let verify ~store ~checker path =
       (Ok ())
       [ "objects"; "contexts"; "interfaces" ]
   in
-  let* record_bytes = read_bounded (file "bundle-v1.jqd") in
-  let* record = parse_one ~file:(file "bundle-v1.jqd") record_bytes in
+  let record_file, format = snapshot_file path in
+  let* record_bytes = read_bounded record_file in
+  let* record = parse_one ~file:record_file record_bytes in
   let* () =
-    if record.Form.head = version then Ok ()
-    else refuse "E1735" "bundle-v1.jqd has head %s, not %s" record.Form.head version
+    if record.Form.head = format then Ok ()
+    else refuse "E1735" "%s has head %s, not %s" record_file record.Form.head format
   in
+  let* recorded_namespaces = if format = version then parse_namespaces record else Ok [] in
   let identity = Hash.of_string (Printer.print record) in
   let* manifest_bytes = read_bounded (file "project.jqd") in
   let* manifest = Project_manifest.parse ~file:(file "project.jqd") manifest_bytes in
@@ -220,7 +295,7 @@ let verify ~store ~checker path =
         refuse "E1720" "%s was built against another prelude" path
     | _, Some { Form.args = [ Form.Text core ]; _ } when not (String.equal core Version.version) ->
         refuse "E1720" "%s was built by Core %s; this is Core %s" path core Version.version
-    | None, _ | _, None -> refuse "E1735" "bundle-v1.jqd lacks (prelude ...) or (core ...)"
+    | None, _ | _, None -> refuse "E1735" "%s lacks (prelude ...) or (core ...)" record_file
     | Some _, Some _ -> Ok ()
   in
   (* 1-2: budgets and object hashes *)
@@ -243,14 +318,32 @@ let verify ~store ~checker path =
             else refuse "E1726" "object %s hashes to %s" name (Hash.to_hex hashes.Canon.decl_hash))
   in
   let* objects = objects [] names in
+  (* what the store held before this bundle: the prelude, unless the caller says otherwise *)
+  let is_prelude =
+    match prelude with
+    | Some is_prelude -> is_prelude
+    | None ->
+        let before = Hashtbl.create 1024 in
+        List.iter (fun (h, _) -> Hashtbl.replace before h ()) store.Store.index;
+        Hashtbl.mem before
+  in
   let* () =
     List.fold_left
       (fun acc (decl, _) ->
         Result.bind acc (fun () -> Result.map ignore (Store.put_decl store decl)))
       (Ok ()) objects
   in
-  (* 3: closure completeness from every object and every root *)
-  let present hash = Result.is_ok (Store.locate store hash) in
+  (* 3: closure completeness from every object and every root. A bundle is self-contained: a
+     reference resolves to its own objects or to the prelude, never to objects an earlier import
+     left in the session store (TYPE.1). *)
+  let own = Hashtbl.create 64 in
+  List.iter
+    (fun (_, (h : Canon.decl_hashes)) ->
+      List.iter (fun x -> Hashtbl.replace own x ()) (h.decl_hash :: List.map snd h.named))
+    objects;
+  let present hash =
+    Hashtbl.mem own hash || (Result.is_ok (Store.locate store hash) && is_prelude hash)
+  in
   let roots =
     List.concat_map
       (function
@@ -305,6 +398,20 @@ let verify ~store ~checker path =
                         (fun (e : Interface.export) -> ((e.name, e.kind), e.hash))
                         recorded.exports
                     in
+                    (* each recorded (name, kind) names one identity *)
+                    let* () =
+                      match
+                        List.find_opt
+                          (fun ((key, _) as binding) ->
+                            List.exists
+                              (fun ((other, _) as b) -> other = key && b != binding)
+                              exports)
+                          exports
+                      with
+                      | Some ((name, _), _) ->
+                          refuse "E1729" "interface %s records `%s` twice" (Hash.to_hex id) name
+                      | None -> Ok ()
+                    in
                     let* () =
                       match
                         List.find_opt
@@ -318,10 +425,24 @@ let verify ~store ~checker path =
                           refuse "E1727" "export %s is not owned by %s" e.name (Hash.to_hex e.owner)
                       | None -> Ok ()
                     in
+                    let* () =
+                      match
+                        List.find_opt
+                          (fun (e : Interface.export) ->
+                            e.kind = Resolve.KCon
+                            && Option.is_some (Store.sealed_constructor store e.hash))
+                          recorded.exports
+                      with
+                      | Some e ->
+                          refuse "E1736" "context %s exports (con %s), a sealed constructor"
+                            (Hash.to_hex id) e.name
+                      | None -> Ok ()
+                    in
                     let* derived =
                       Result.map_error
                         (fun _ -> [])
-                        (Interface.of_side checker { Diff.store; bindings = exports })
+                        (Interface.of_side ~recorded:true checker
+                           { Diff.store; bindings = exports })
                       |> function
                       | Ok d -> Ok d
                       | Error _ -> refuse "E1729" "interface %s cannot be derived" (Hash.to_hex id)
@@ -372,7 +493,48 @@ let verify ~store ~checker path =
         read_contexts ((id, deps, form, interface) :: acc) rest
   in
   let* pending = read_contexts [] context_names in
+  (* every recorded export is itself one of the bundle's objects or the prelude's, so no export, and
+     nothing it reaches, is borrowed from an earlier import (TYPE.1) *)
+  let* () =
+    match
+      List.find_map
+        (fun (_, _, _, (i : Interface.t)) ->
+          List.find_opt
+            (fun (e : Interface.export) -> not (present e.hash && present e.owner))
+            i.exports)
+        pending
+    with
+    | Some e ->
+        refuse "E1728" "export %s (%s) is not in the bundle or the prelude" e.name
+          (Hash.to_hex e.hash)
+    | None -> Ok ()
+  in
   let* verified = contexts [] pending in
+  (* every carried context is a dependency, direct or transitive, of the bundle's own: an orphan's
+     exports would otherwise be admitted as roots (E1729) *)
+  let* () =
+    match
+      Option.bind (field "context" record) (fun f ->
+          match f.Form.args with [ Form.Hash h ] -> Some h | _ -> None)
+    with
+    | None -> Ok ()
+    | Some own -> (
+        let reached = Hashtbl.create 8 in
+        let rec visit id =
+          if not (Hashtbl.mem reached id) then begin
+            Hashtbl.replace reached id ();
+            match List.find_opt (fun (id', _, _, _) -> Hash.equal id id') pending with
+            | Some (_, deps, _, _) -> List.iter (fun (_, d) -> visit d) deps
+            | None -> ()
+          end
+        in
+        visit own;
+        match List.find_opt (fun id -> not (Hashtbl.mem reached id)) verified with
+        | Some id ->
+            refuse "E1729" "context %s is not a dependency of the bundle's own context"
+              (Hash.to_hex id)
+        | None -> Ok ())
+  in
   let* context =
     match
       Option.bind (field "context" record) (fun f ->
@@ -380,6 +542,94 @@ let verify ~store ~checker path =
     with
     | Some c when List.mem c verified -> Ok c
     | _ -> refuse "E1729" "the bundle's own context is not among its verified contexts"
+  in
+  (* TYPE.1: every carried dependency context records its namespace (E1739); the bundle's own root
+     records its manifest's namespace, or none. A bundle-v1 bundle has no record, so it is read only
+     when it carries no dependency context and no opaque declaration. *)
+  let* namespaces =
+    if format = version then
+      let own_ns = manifest.Project_manifest.namespace in
+      let* () =
+        match List.find_opt (fun (id, _) -> not (List.mem id verified)) recorded_namespaces with
+        | Some (id, _) ->
+            refuse "E1739" "a namespace is recorded for unknown context %s" (Hash.to_hex id)
+        | None -> Ok ()
+      in
+      let* () =
+        match
+          List.find_opt
+            (fun id -> (not (Hash.equal id context)) && not (List.mem_assoc id recorded_namespaces))
+            verified
+        with
+        | Some id -> refuse "E1739" "carried context %s records no namespace" (Hash.to_hex id)
+        | None -> Ok ()
+      in
+      let* () =
+        if List.assoc_opt context recorded_namespaces = own_ns then Ok ()
+        else refuse "E1739" "the root context's recorded namespace differs from project.jqd"
+      in
+      Ok recorded_namespaces
+    else
+      let* () =
+        if List.length verified = 1 then Ok ()
+        else
+          refuse "E1735"
+            "a %s bundle carries dependency contexts but records no namespaces; rebuild it as %s"
+            legacy_version version
+      in
+      let* () =
+        if
+          List.exists
+            (fun (decl, _) ->
+              match decl.Kernel.it with Kernel.DefType { opaque; _ } -> opaque | _ -> false)
+            objects
+        then refuse "E1735" "a %s bundle cannot carry an opaque declaration" legacy_version
+        else Ok ()
+      in
+      Ok
+        (match manifest.Project_manifest.namespace with Some ns -> [ (context, ns) ] | None -> [])
+  in
+  (* within one bundle: no namespace at two identities (E1714), none a boundary-prefix of another
+     (E1707) *)
+  let* () =
+    match
+      List.find_opt
+        (fun (id, ns) ->
+          List.exists (fun (id', ns') -> ns = ns' && not (Hash.equal id id')) namespaces)
+        namespaces
+    with
+    | Some (_, ns) -> refuse "E1714" "namespace `%s` is recorded at two context identities" ns
+    | None -> Ok ()
+  in
+  let* () =
+    let names = List.sort_uniq compare (List.map snd namespaces) in
+    match
+      List.find_map
+        (fun a ->
+          List.find_map
+            (fun b ->
+              if a <> b && (has_prefix a "-" b || has_prefix a "." b) then Some (a, b) else None)
+            names)
+        names
+    with
+    | Some (a, b) ->
+        refuse "E1707" "namespace `%s` is a boundary-prefix of namespace `%s` in one bundle" a b
+    | None -> Ok ()
+  in
+  let* () =
+    List.fold_left
+      (fun acc (id, _, _, (i : Interface.t)) ->
+        Result.bind acc (fun () ->
+            match List.assoc_opt id namespaces with
+            | None -> Ok ()
+            | Some ns -> (
+                match List.find_map (namespace_refusal store ns) i.exports with
+                | Some name ->
+                    refuse "E1739" "context %s exports `%s`, which is outside its namespace `%s`"
+                      (Hash.to_hex id) name ns
+                | None -> Ok ())))
+      (Ok ())
+      (List.filter (fun (id, _, _, _) -> List.mem id verified) pending)
   in
   let* () =
     match field "manifest" record with
@@ -419,15 +669,16 @@ let verify ~store ~checker path =
                 | None -> Ok ())))
       (Ok ()) entries
   in
-  (* the objects are exactly the closure of the roots: steps, test roots, and the exports *)
-  let own_exports =
+  (* the objects are exactly the closure of the roots: steps, test roots, and every verified
+     context's exports *)
+  let exports =
     List.concat_map
       (fun (id, _, _, (i : Interface.t)) ->
-        if Hash.equal id context then List.map (fun (e : Interface.export) -> e.hash) i.exports
+        if List.mem id verified then List.map (fun (e : Interface.export) -> e.hash) i.exports
         else [])
       pending
   in
-  let closure = reachable store (roots @ own_exports) in
+  let closure = reachable store (roots @ exports) in
   let* () =
     match
       List.find_opt
@@ -469,9 +720,17 @@ let verify ~store ~checker path =
       (fun (id, _, form, interface) -> (id, form, interface))
       (List.filter (fun (id, _, _, _) -> List.mem id verified) pending)
   in
-  Ok { path; identity; manifest; context; entries; contexts; objects }
+  Ok { path; identity; manifest; context; entries; contexts; namespaces; objects }
 
+(* a refused bundle leaves none of its objects behind (TYPE.1) *)
+let verify ?prelude ~store ~checker path =
+  Store.transaction store (fun () -> verify_unguarded ?prelude ~store ~checker path)
+
+(* [load] verifies against a fresh session, whose store holds exactly the prelude: that is what
+   [verify]'s default prelude membership assumes *)
 let load ~prelude_dir ~root path =
+  if Sys.file_exists root && Sys.is_directory root && Sys.readdir root <> [||] then
+    invalid_arg "Project_bundle_reader.load: root must be absent or empty";
   let* store, ctx = Frontend.open_session ~prelude_dir ~root in
   let* checker = Frontend.make_checker store in
   let* bundle = verify ~store ~checker path in

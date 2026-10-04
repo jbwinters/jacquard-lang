@@ -53,13 +53,17 @@ val member_visibility : t -> Hash.t -> visibility option
 
 (** {1 Producing} *)
 
-val of_side : ?source:Hash.t -> Check.ctx -> Diff.side -> (t, Diag.t list) result
+val of_side : ?source:Hash.t -> ?recorded:bool -> Check.ctx -> Diff.side -> (t, Diag.t list) result
 (** [of_side checker side] describes every binding [side] exposes that [side.store] publicly binds
-    to the same identity, reading signatures through [checker] (which must be a checker over
-    [side.store]) and labels from the store's companions and constructor schemas. Hidden members are
-    the derived identities of exported declarations that the store does not bind: a member hidden
-    after installation, or one the store never publishes. Checker failures on an exported identity
-    are returned. *)
+    to the same identity. With [~recorded:true] it describes every binding [side] exposes whose
+    identity is a declaration of its kind and, except for a term, whose name is the declaration's
+    own: a verified bundle's recorded export names, which two contexts may give one shared term
+    identity. Recorded names are then not checked against the store's bindings, so only bundle
+    verification passes it, and it enforces name uniqueness and the namespace rules itself. It reads
+    signatures through [checker] (which must be a checker over [side.store]) and labels from the
+    store's companions and constructor schemas. Hidden members are the derived identities of
+    exported declarations that the store does not bind: a member hidden after installation, or one
+    the store never publishes. Checker failures on an exported identity are returned. *)
 
 (** {1 Serialization and identity} *)
 

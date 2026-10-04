@@ -569,21 +569,21 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1704 | the running Core does not satisfy `(requires (core "MAJOR.MINOR"))` | `(requires (core "9.0"))` |
 | E1705 | a name another project keeps private: not exported by a direct dependency, or bound by a project that is not a direct dependency (also inside `eval-code` payloads) | `liba.helper` when `liba` exports only `liba.shout` |
 | E1706 | a library name does not carry the namespace: `NS.` for terms and operations, `NS-` for types and effects; constructors are exempt and generated accessors and setters follow their type | `helper` in a `(namespace shop)` library |
-| E1707 | two projects in one graph have namespaces where one is a boundary-prefix of the other | namespaces `x` and `x-y` |
+| E1707 | two projects in one graph, counting the namespaces bundles record for the contexts they carry, or two contexts in one bundle, have namespaces where one is a boundary-prefix of the other | namespaces `x` and `x-y` |
 | E1708 | a project that others depend on declares no namespace | `(deps (dep (as y) (path "../y") ...))` where `y` has no `(namespace ...)` |
 | E1709 | an explicit identity (`#hash:term`, a `.jqd` `ref`, or one inside an `eval-code` payload) that another project keeps private | the hash of a dependency's private helper |
 | E1710 | a direct dependency's pin differs from its context identity; the report names the changed components (interface, companions, prelude, core, deps) and the interface diff when the previous interface was recorded | a private body edit reachable from an export |
 | E1711 | a dependency is unpinned (only `project pin` accepts the root's unpinned edges), or `--dep` names no dependency | `(dep (as a) (path "../liba"))` |
 | E1712 | a transitive pin, declared in a dependency's own manifest, does not match; reported with its alias chain | `app -> c -> a` after `liba` changes |
 | E1713 | the dependency graph has a cycle | `x -> y -> x` |
-| E1714 | one namespace appears at two context identities in one graph | two copies of `liba` with different bodies |
+| E1714 | one namespace appears at two context identities in one graph (bundle-carried contexts included) or in one bundle | two copies of `liba` with different bodies |
 | E1715 | a library unit, or a test entry's unit, contains a top-level expression | `shop.total([])` in a library unit |
 | E1716 | a name is defined in two different units (generated accessors count), including an entry unit redefining a library name | `shop.even` defined in two library units |
 | E1717 | an export selector names nothing the project's own units define | `(exports (term libb.nothing))` |
 | E1718 | the manifest declares no entry of that name, or it is the other kind | `jacquard project run suite` for a test entry |
 | E1719 | a call-ABI companion conflicts with one already composed into the graph | two projects labelling one identical callable differently |
 | E1720 | a bundle's prelude or Core differs from the running tool | a bundle built by another Core release |
-| E1721 | `eval-code` or the `Eval` effect is reachable from a bundle root: a run step, a test root, or an exported callable, including through a returned closure (quoted data is not code; live splices are) | exporting `app.make() = fn () -> eval-code(...)` |
+| E1721 | `eval-code` or the `Eval` effect is reachable from a bundle root: a run step, a test root, or an exported callable of any context in the graph (a dependency's export the root never calls included), including through a returned closure (quoted data is not code; live splices are) | exporting `app.make() = fn () -> eval-code(...)` |
 | E1722 | a unit resolves, after symlinks, outside the project directory | `(units "../outside/far.jac")` |
 | E1723 | a unit is missing or not a regular file | a directory named `missing.jac` |
 | E1724 | two units in one composition differ only by letter case | `"src/types.jac"` and `"src/Types.jac"` |
@@ -591,15 +591,16 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1726 | a bundle object does not hash to its file name | an edited `objects/*.jqd` |
 | E1727 | a recorded interface export is not owned by its recorded declaration | an edited `(owner #...)` |
 | E1728 | an object or root refers to an identity that is neither in the bundle nor in the prelude | a deleted object |
-| E1729 | an interface does not re-derive from the checked objects, a context record does not recompute, or the manifest does not match the record's digest | an edited `interfaces/` or `contexts/` file |
+| E1729 | an interface does not re-derive from the checked objects, a context record does not recompute, a carried context is not a dependency of the bundle's own context, or the manifest does not match the record's digest | an edited `interfaces/` or `contexts/` file |
 | E1730 | declared grants differ from checked authority, under `--strict-grants` | `(grants fs)` on an entry that never uses `fs` |
 | E1731 | a library or entry constructor has the name of a visible constructor of another type | `type ShopMaybe = \| Some(value: Int)` beside the prelude's `Option` |
 | E1732 | the library refers to a name only an entry defines; the library is checked before, and without, any entry | a library term calling a helper defined in `demo.jac` |
 | E1733 | a manifest or unit read while pinning changed before the pin was written; nothing is written | editing a dependency during `project pin` |
 | E1734 | two unit entries in one composition resolve to the same file | `"src/types.jac"` and `"./src/types.jac"` |
-| E1735 | no `project.jqd` was found, or it cannot be read | `jacquard project check` outside any project |
-| E1736 | a manifest exports a constructor of an opaque type with `(con C)`; opaque constructors stay sealed to their project | `(exports (type prob-value) (con prob-value))` |
-| E1737 | a root without a namespace, or an entry unit, declares a type or effect inside another graph project's namespace | `type LibaBox = ...` in an application that depends on `liba` |
+| E1735 | no `project.jqd` was found, or it cannot be read; or a bundle cannot be read, including a `bundle-v1` bundle that carries dependency contexts or an opaque declaration | `jacquard project check` outside any project |
+| E1736 | a manifest exports a constructor of an opaque type with `(con C)`, or a bundle records such an export; opaque constructors stay sealed to their project | `(exports (type prob-value) (con prob-value))` |
+| E1737 | a root without a namespace, or an entry unit, declares a type or effect inside another graph project's namespace, including one a bundle records for a context it carries | `type LibaBox = ...` in an application that depends on `liba` |
+| E1739 | a bundle's recorded namespaces do not match what it carries: a carried dependency context records none, a namespace is recorded for a context it does not carry, a recorded namespace does not prefix its context's exports, the root's differs from `project.jqd`, or one context identity appears under two namespaces: recorded so by a bundle, or two source projects sharing one identity when they are bundled | a `bundle-v2.jqd` whose `(namespace #… liba)` was relabelled `libz` |
 | W1700 | declared grants differ from checked authority (a warning unless `--strict-grants`) | a run entry printing without `(grants console)` |
 | W1701 | a file under the project's `.jacquard/` (caches, builds, pin records) is tracked by git | `git add -f .jacquard` |
 | W1702 | beside a checker error, the definition's signature is in another unit, so the report names both files | a signature in `sig.jac`, its definition in `def.jac` |

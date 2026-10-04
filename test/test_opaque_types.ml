@@ -237,7 +237,12 @@ let test_single_file_seal () =
     "quoted data is not a use" []
     (codes
        (walk store ~syntax:Frontend.Bootstrap
-          (Printf.sprintf "(defterm ((binding code () (quote (ref #%s con)))))\n" heads)))
+          (Printf.sprintf "(defterm ((binding code () (quote (ref #%s con)))))\n" heads)));
+  Alcotest.(check (list string))
+    "but a live splice is" [ "E0315" ]
+    (codes
+       (walk store ~syntax:Frontend.Bootstrap
+          (Printf.sprintf "(defterm ((binding code () (quote (unquote (ref #%s con))))))\n" heads)))
 
 let test_projection_and_setters () =
   let tops = surface_tops "opaque type Box = Box(size: Int)\ntype Bag = Bag(size: Int)\n" in
