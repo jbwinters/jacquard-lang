@@ -33,10 +33,10 @@ let eval_identities store =
     [
       Option.map
         (fun (e : Resolve.entry) -> e.hash)
-        (Store.lookup_kind store "eval-code" Resolve.KOp);
+        (Prelude_identity.lookup_kind store "eval-code" Resolve.KOp);
       Option.map
         (fun (e : Resolve.entry) -> e.hash)
-        (Store.lookup_kind store "eval" Resolve.KEffect);
+        (Prelude_identity.lookup_kind store "eval" Resolve.KEffect);
     ]
 
 (* --- reading and verifying (design §9, "Import and run") --- *)
@@ -898,5 +898,20 @@ let load ~prelude_dir ~root path =
     invalid_arg "Project_bundle_reader.load: root must be absent or empty";
   let* store, ctx = Frontend.open_session ~prelude_dir ~root in
   let* checker = Frontend.make_checker store in
+  let prelude_objects = Hashtbl.create 1024 in
+  List.iter (fun h -> Hashtbl.replace prelude_objects h ()) (Store.all_decl_hashes store);
   let* bundle = verify ~store ~checker path in
+  (* TYPE.1: a builtin runs a term from a runtime hash only if the prelude or one of the bundle's
+     contexts exports it (E1709) *)
+  let exported = Hashtbl.create 64 in
+  List.iter
+    (fun (_, _, (interface : Interface.t)) ->
+      List.iter (fun (e : Interface.export) -> Hashtbl.replace exported e.hash ()) interface.exports)
+    bundle.contexts;
+  Eval.set_term_guard ctx (fun h ->
+      Hashtbl.mem exported h
+      ||
+      match Store.locate store h with
+      | Ok { Store.decl_hash; _ } -> Hashtbl.mem prelude_objects decl_hash
+      | Error _ -> false);
   Ok { bundle; store; ctx; checker }

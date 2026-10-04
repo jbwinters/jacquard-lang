@@ -220,6 +220,130 @@ let test_entry_reaching_dependency_internals () =
   forge_test_root bundle ~helper:"libp.raw";
   Alcotest.(check (list string)) "nor the dependency's sealed type" [ "E1738" ] (codes bundle)
 
+(* TYPE.1 S2c: a builtin runs a term from a runtime hash (a posterior model) only if the prelude or a
+   context in the run exports it *)
+let test_model_guard () =
+  let bundle = build_bundle () in
+  let loaded =
+    expect "load" (Project_bundle_reader.load ~prelude_dir ~root:(fresh_dir "guard") bundle)
+  in
+  let ctx = loaded.Project_bundle_reader.ctx and store = loaded.store in
+  let hash name =
+    match Store.lookup_kind store name Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.failf "%s is not bound" name
+  in
+  let admitted name = Result.is_ok (Posterior_risk.admit_model ctx (hash name)) in
+  Alcotest.(check bool) "an exported term" true (admitted "libp.make");
+  Alcotest.(check bool) "a prelude term" true (admitted "int.add");
+  Alcotest.(check bool) "a private helper" false (admitted "libp.raw");
+  (match Posterior_risk.admit_model ctx (hash "libp.raw") with
+  | Error message -> Alcotest.(check string) "refused as E1709" "E1709" (String.sub message 0 5)
+  | Ok () -> Alcotest.fail "a private helper was admitted");
+  (* both posterior builtins refuse it before reading anything else *)
+  let model_ref h =
+    match Prelude_identity.lookup_kind store "posterior-risk-model-ref-v1" Resolve.KCon with
+    | Some { Resolve.hash = con; _ } ->
+        Value.VCon { con; name = "posterior-risk-model-ref-v1"; args = [ Value.VHash h ] }
+    | None -> Alcotest.fail "no model reference constructor"
+  in
+  let filler = Value.VTuple [] in
+  let refused label builtin =
+    match
+      builtin ctx ~builtin_signatures:[] [ model_ref (hash "libp.raw"); filler; filler; filler ]
+    with
+    | Ok (Value.VCon { name = "err"; args = [ Value.VText message ]; _ }) ->
+        Alcotest.(check string) label "E1709" (String.sub message 0 5)
+    | Ok v -> Alcotest.failf "%s: unexpected %s" label (Value.show v)
+    | Error e -> Alcotest.failf "%s: %s" label (Runtime_err.to_string e)
+  in
+  refused "run-exact refuses a private model" Posterior_risk.run_exact_builtin;
+  refused "sample-evidence refuses a private model" Posterior_risk.sample_evidence_builtin
+
+(* a project run installs the guard too, through its entries; the root's own unexported model is
+   refused like a dependency's (design §2.3: only prelude terms and graph exports run by hash) *)
+let test_project_model_guard () =
+  let work = fresh_dir "project" in
+  Unix.mkdir work 0o755;
+  Unix.mkdir (Filename.concat work ".git") 0o755;
+  write
+    (Filename.concat work "project.jqd")
+    "(project-v1 (name \"own\") (requires (core \"0.2\")) (namespace own) (units \"o.jac\") \
+     (exports (term own.public)) (entries (run demo (units \"demo.jac\"))))";
+  write (Filename.concat work "o.jac") "own.public(n) = n\nown.private(n) = int.add(n, 1)\n";
+  write (Filename.concat work "demo.jac") "own.public(1)\n";
+  let session, _ =
+    expect "open"
+      (Project_frontend.open_graph ~prelude_dir ~root:(fresh_dir "store")
+         (Filename.concat work "project.jqd"))
+  in
+  let entry =
+    List.find
+      (fun (e : Project_manifest.entry) -> e.ename = "demo")
+      (Project_frontend.project session).Project_frontend.manifest.Project_manifest.entries
+  in
+  ignore (expect "check entry" (Project_frontend.check_entry session entry));
+  let ctx = Project_frontend.eval_ctx session and store = Project_frontend.store session in
+  let hash name =
+    match Store.lookup_kind store name Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.failf "%s is not bound" name
+  in
+  Alcotest.(check bool)
+    "the root's export" true
+    (Result.is_ok (Posterior_risk.admit_model ctx (hash "own.public")));
+  Alcotest.(check bool)
+    "the root's unexported term" false
+    (Result.is_ok (Posterior_risk.admit_model ctx (hash "own.private")))
+
+(* design §2.3: every place a term reference is built from a runtime hash, to be run. A new one must
+   be reviewed against the construction boundary before it joins this inventory. *)
+let test_runtime_executor_inventory () =
+  let executors =
+    [
+      (* the model reference, guarded by [Posterior_risk.admit_model] (E1709), and [call_term],
+         which calls frozen prelude identities only *)
+      ("posterior_risk.ml", 2);
+      (* the host worker runs the callable a trusted host names (design: host invocation is
+         trusted) *)
+      ("host_worker.ml", 1);
+      (* Warp runs the tests its discovery found, from the CLI, not from a builtin *)
+      ("warp.ml", 1);
+      (* a bundle run executes the run steps the verified bundle record names (author-trusted) *)
+      ("main.ml", 1);
+    ]
+  in
+  (* a record field [it = Ref (_, Term)] builds a reference; [with it = ...] only rebuilds one *)
+  let builds = Str.regexp {|\bit = \(Kernel\.\)?Ref (.*\(Kernel\.\)?Term)|} in
+  let count path =
+    In_channel.with_open_bin path In_channel.input_all
+    |> String.split_on_char '\n'
+    |> List.filter (fun line ->
+        (not (String.starts_with ~prefix:"|" (String.trim line)))
+        && (try
+              ignore (Str.search_forward builds line 0);
+              true
+            with Not_found -> false)
+        && not
+             (try
+                ignore (Str.search_forward (Str.regexp_string " with ") line 0);
+                true
+              with Not_found -> false))
+    |> List.length
+  in
+  let found =
+    List.concat_map
+      (fun dir ->
+        Sys.readdir dir |> Array.to_list
+        |> List.filter (fun f -> Filename.check_suffix f ".ml")
+        |> List.filter_map (fun f ->
+            match count (Filename.concat dir f) with 0 -> None | n -> Some (f, n)))
+      [ "../src"; "../src/native"; "../bin" ]
+  in
+  Alcotest.(check (list (pair string int)))
+    "runtime term executors are exactly the reviewed ones" (List.sort compare executors)
+    (List.sort compare found)
+
 let suite =
   [
     Alcotest.test_case "owner region" `Quick test_owner_region;
@@ -230,4 +354,7 @@ let suite =
     Alcotest.test_case "export of the wrong kind" `Quick test_export_of_wrong_kind;
     Alcotest.test_case "entry reaching dependency internals" `Quick
       test_entry_reaching_dependency_internals;
+    Alcotest.test_case "model guard" `Quick test_model_guard;
+    Alcotest.test_case "project model guard" `Quick test_project_model_guard;
+    Alcotest.test_case "runtime executor inventory" `Quick test_runtime_executor_inventory;
   ]

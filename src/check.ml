@@ -442,7 +442,7 @@ let surface_form_is meta forms =
   match Meta.surface_form meta with Some form -> List.mem form forms | None -> false
 
 let is_bool_ty ctx t =
-  match (Types.repr t, Store.lookup_kind ctx.store "bool" Resolve.KType) with
+  match (Types.repr t, Prelude_identity.lookup_kind ctx.store "bool" Resolve.KType) with
   | TCon (identity, []), Some { Resolve.hash; _ } -> Hash.equal identity hash
   | _ -> false
 
@@ -1248,10 +1248,10 @@ let is_frozen_vary_world ctx constructor =
     && List.for_all2 (fun check field -> check field) field_checks con.fields
   in
   match
-    ( Store.lookup_kind ctx.store "variation" Resolve.KType,
-      Store.lookup_kind ctx.store "vary-world" Resolve.KCon,
-      Store.lookup_kind ctx.store "int" Resolve.KType,
-      Store.lookup_kind ctx.store "distribution" Resolve.KType,
+    ( Prelude_identity.lookup_kind ctx.store "variation" Resolve.KType,
+      Prelude_identity.lookup_kind ctx.store "vary-world" Resolve.KCon,
+      Prelude_identity.lookup_kind ctx.store "int" Resolve.KType,
+      Prelude_identity.lookup_kind ctx.store "distribution" Resolve.KType,
       Store.locate ctx.store constructor )
   with
   | ( Some { Resolve.hash = type_hash; _ },
@@ -2899,7 +2899,7 @@ let production_registrations store =
 (** Build a checker context over a prelude-loaded store; resolves the primitive type hashes. *)
 let make_ctx ?(instances = true) (store : Store.t) : (ctx, Diag.t list) result =
   let lookup name =
-    match Store.lookup_kind store name Resolve.KType with
+    match Prelude_identity.lookup_kind store name Resolve.KType with
     | Some { Resolve.hash; _ } -> Ok hash
     | None ->
         Error

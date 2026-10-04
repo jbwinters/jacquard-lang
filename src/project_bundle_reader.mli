@@ -68,8 +68,11 @@ val verify :
       boundary-prefix of another (E1707).
     - Each context's region, the closure of its own roots stopping at the exact identities other
       contexts export and at the prelude, constructs or matches only the sealed types its own
-      context owns (E1738), and reaches through live references only types and effects in its
-      namespace (E1739). A constructing term in no region is refused (E1738).
+      context owns (E1738). A constructing term in no region is refused (E1738).
+    - E1739 has two region rules. What a context's exports reach through live references must be in
+      its namespace; its entries are exempt, since they may declare their own types. And no region,
+      entries included, may reach a type or effect inside another context's namespace through a live
+      reference.
 
     Verification runs in a store transaction, so a refused bundle leaves none of its objects in
     [store]. *)

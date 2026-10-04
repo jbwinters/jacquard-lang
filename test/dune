@@ -260,6 +260,7 @@
   ../prelude/operation-modes.manifest
   ../prelude/rings.manifest
   (glob_files ../src/*.ml)
+  (glob_files ../src/native/*.ml)
   (glob_files ../bin/*.ml)
   ../README.md
   ../docs/errors.md

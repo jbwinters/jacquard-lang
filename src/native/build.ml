@@ -292,15 +292,15 @@ let compile_program (store : Store.t) (d : discovery)
     members;
   List.iter (fun (_, _, _, cs, _) -> List.iter note_con cs) tops;
   (* true/false always exist: intrinsics return them *)
-  (match Store.lookup_kind store "true" Resolve.KCon with
+  (match Prelude_identity.lookup_kind store "true" Resolve.KCon with
   | Some e -> note_con e.Resolve.hash
   | None -> ());
-  (match Store.lookup_kind store "false" Resolve.KCon with
+  (match Prelude_identity.lookup_kind store "false" Resolve.KCon with
   | Some e -> note_con e.Resolve.hash
   | None -> ());
   List.iter
     (fun n ->
-      match Store.lookup_kind store n Resolve.KCon with
+      match Prelude_identity.lookup_kind store n Resolve.KCon with
       | Some e -> note_con e.Resolve.hash
       | None -> ())
     [ "less"; "equal"; "greater"; "nil"; "cons"; "mk-pair"; "some"; "none"; "ok"; "err" ];
@@ -603,48 +603,49 @@ let build ~(store : Store.t) ~(tops : (Kernel.expr * string list * (Hash.t * str
                (Printf.sprintf "runtime sources not found at %s (set JACQUARD_RUNTIME)" runtime_dir))
         else
           let v_true =
-            match Store.lookup_kind store "true" Resolve.KCon with
+            match Prelude_identity.lookup_kind store "true" Resolve.KCon with
             | Some e -> e.Resolve.hash
             | None -> Hash.of_string "true"
           in
           let v_false =
-            match Store.lookup_kind store "false" Resolve.KCon with
+            match Prelude_identity.lookup_kind store "false" Resolve.KCon with
             | Some e -> e.Resolve.hash
             | None -> Hash.of_string "false"
           in
           let orderings =
             match
-              ( Store.lookup_kind store "less" Resolve.KCon,
-                Store.lookup_kind store "equal" Resolve.KCon,
-                Store.lookup_kind store "greater" Resolve.KCon )
+              ( Prelude_identity.lookup_kind store "less" Resolve.KCon,
+                Prelude_identity.lookup_kind store "equal" Resolve.KCon,
+                Prelude_identity.lookup_kind store "greater" Resolve.KCon )
             with
             | Some l, Some e, Some g -> Some (l.Resolve.hash, e.Resolve.hash, g.Resolve.hash)
             | _ -> None
           in
           let listcons =
             match
-              ( Store.lookup_kind store "nil" Resolve.KCon,
-                Store.lookup_kind store "cons" Resolve.KCon )
+              ( Prelude_identity.lookup_kind store "nil" Resolve.KCon,
+                Prelude_identity.lookup_kind store "cons" Resolve.KCon )
             with
             | Some n, Some c -> Some (n.Resolve.hash, c.Resolve.hash)
             | _ -> None
           in
           let pair =
-            match Store.lookup_kind store "mk-pair" Resolve.KCon with
+            match Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon with
             | Some p -> Some p.Resolve.hash
             | None -> None
           in
           let option_cons =
             match
-              ( Store.lookup_kind store "some" Resolve.KCon,
-                Store.lookup_kind store "none" Resolve.KCon )
+              ( Prelude_identity.lookup_kind store "some" Resolve.KCon,
+                Prelude_identity.lookup_kind store "none" Resolve.KCon )
             with
             | Some so, Some no -> Some (so.Resolve.hash, no.Resolve.hash)
             | _ -> None
           in
           let result_cons =
             match
-              (Store.lookup_kind store "ok" Resolve.KCon, Store.lookup_kind store "err" Resolve.KCon)
+              ( Prelude_identity.lookup_kind store "ok" Resolve.KCon,
+                Prelude_identity.lookup_kind store "err" Resolve.KCon )
             with
             | Some ok, Some err -> Some (ok.Resolve.hash, err.Resolve.hash)
             | _ -> None

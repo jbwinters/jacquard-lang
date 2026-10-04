@@ -13,3 +13,11 @@
   Instance_token
   Schedule_control)
  (libraries digestif unix yojson))
+
+(rule
+ (target prelude_pins.ml)
+ (deps ../corpus/golden/prelude-bindings.golden)
+ (action
+  (with-stdout-to
+   %{target}
+   (run pins_gen/gen.exe %{deps}))))

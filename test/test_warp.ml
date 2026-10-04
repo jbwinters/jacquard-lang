@@ -410,6 +410,72 @@ let test_coverage_and_schedule_identity () =
   test_coverage_memo_trap ();
   test_schedule_seed_splitting_and_cache_identity ()
 
+(* TYPE.1: Warp drives the prelude's sample and check by identity, so a user effect's same-named
+   operations reach the root as unhandled, in both lanes *)
+let test_user_ops_are_not_prelude_ops () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  ignore
+    (Eval_support.put_src store (Store.names_view store)
+       "(defeffect mine () (op sample ((tref int)) (tref int)) (op check ((tref bool) (tref text)) \
+        (ttuple)))");
+  let thunk body =
+    match Eval_support.eval_with ctx store (Printf.sprintf "(lam () %s)" body) with
+    | Ok v -> v
+    | Error e -> Alcotest.failf "thunk: %s" (Runtime_err.to_string e)
+  in
+  let unhandled label = function
+    | Error message ->
+        Alcotest.(check bool)
+          label true
+          (let needle = "unhandled op" in
+           let n = String.length needle and m = String.length message in
+           let rec go i = i + n <= m && (String.sub message i n = needle || go (i + 1)) in
+           go 0)
+    | Ok _ -> Alcotest.failf "%s: the user operation was driven as the prelude's" label
+  in
+  List.iter
+    (fun body ->
+      unhandled ("sampling " ^ body) (Warp.run_prop_sampling ctx ~seed:1 ~samples:1 (thunk body));
+      unhandled ("exhaustive " ^ body)
+        (Result.map_error Diag.to_string (Warp.run_prop_exhaustive ctx ~budget:10 (thunk body))))
+    [ "(app (var sample) (lit 1))"; "(app (var check) (var true) (lit \"x\"))" ];
+  (* the names resolve to the user's operations, not the prelude's *)
+  List.iter
+    (fun name ->
+      match
+        ( Store.lookup_kind store name Resolve.KOp,
+          Prelude_identity.lookup_kind store name Resolve.KOp )
+      with
+      | Some { Resolve.hash = user; _ }, Some { Resolve.hash = prelude; _ } ->
+          Alcotest.(check bool) (name ^ " is the user's") false (Hash.equal user prelude)
+      | _ -> Alcotest.failf "%s is unbound" name)
+    [ "sample"; "check" ]
+
+(* the fail and observe guards: a user effect's same-named operations are unhandled too *)
+let test_user_fail_and_observe () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  ignore
+    (Eval_support.put_src store (Store.names_view store)
+       "(defeffect mine2 () (op fail ((tref text)) (ttuple)) (op observe ((tref int) (tref int)) \
+        (ttuple)))");
+  let thunk body =
+    match Eval_support.eval_with ctx store (Printf.sprintf "(lam () %s)" body) with
+    | Ok v -> v
+    | Error e -> Alcotest.failf "thunk: %s" (Runtime_err.to_string e)
+  in
+  List.iter
+    (fun body ->
+      match Warp.run_prop_sampling ctx ~seed:1 ~samples:1 (thunk body) with
+      | Error message ->
+          Alcotest.(check bool)
+            body true
+            (let needle = "unhandled op" in
+             let n = String.length needle and m = String.length message in
+             let rec go i = i + n <= m && (String.sub message i n = needle || go (i + 1)) in
+             go 0)
+      | Ok _ -> Alcotest.failf "%s: driven as the prelude's" body)
+    [ "(app (var fail) (lit \"boom\"))"; "(app (var observe) (lit 1) (lit 2))" ]
+
 let suite =
   [
     Alcotest.test_case "report: all pass, in order" `Quick test_report_all_pass;
@@ -424,4 +490,7 @@ let suite =
     Alcotest.test_case "cache entry and SC.17 invalidation" `Quick test_cache_evidence;
     Alcotest.test_case "relational cache identity" `Quick test_relational_cache_identity;
     Alcotest.test_case "coverage counts memo hits" `Quick test_coverage_and_schedule_identity;
+    Alcotest.test_case "user operations are not prelude operations" `Quick
+      test_user_ops_are_not_prelude_ops;
+    Alcotest.test_case "user fail and observe" `Quick test_user_fail_and_observe;
   ]

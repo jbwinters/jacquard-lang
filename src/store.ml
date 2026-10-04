@@ -30,6 +30,9 @@ type t = {
   mutable call_abis : (Hash.t * Resolve.call_abi) list;
       (* sorted, versioned surface-call ABI companions bound to derived hashes *)
   mutable index : (Hash.t * (Hash.t * role)) list; (* any hash -> owning decl hash + role *)
+  visible : (Hash.t, unit) Hashtbl.t;
+      (* hashes {!visible} has confirmed publicly locatable; cleared whenever an object can become
+         hidden or removed (TYPE.1) *)
 }
 
 let objects_dir t = Filename.concat t.root "objects"
@@ -254,7 +257,9 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
     from the object files. A persisted name exposing a scheduler-private hash is rejected with E0907
     before the index becomes observable. *)
 let open_store root : (t, Diag.t list) result =
-  let t = { root; names = []; hidden = []; call_abis = []; index = [] } in
+  let t =
+    { root; names = []; hidden = []; call_abis = []; index = []; visible = Hashtbl.create 64 }
+  in
   if not (Sys.file_exists root) then Sys.mkdir root 0o755;
   if not (Sys.file_exists (objects_dir t)) then Sys.mkdir (objects_dir t) 0o755;
   let names_res =
@@ -266,6 +271,7 @@ let open_store root : (t, Diag.t list) result =
   | Error ds -> Error ds
   | Ok (names, hidden, call_abis) -> (
       t.names <- names;
+      Hashtbl.reset t.visible;
       t.hidden <- hidden;
       t.call_abis <- call_abis;
       let rec scan acc = function
@@ -583,6 +589,18 @@ let locate t (h : Hash.t) : (located, Diag.t list) result =
   if List.exists (Hash.equal h) t.hidden then err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
   else locate_internal t h
 
+(** [visible t h] holds when [h] is publicly locatable ({!locate} succeeds), confirmed once and
+    remembered until the store hides or removes an object. Builtins check prelude pins this way on
+    every operation, which a {!locate} (a disk read) per call would make slow. *)
+let visible t h =
+  Hashtbl.mem t.visible h
+  ||
+  if Result.is_ok (locate t h) then begin
+    Hashtbl.replace t.visible h ();
+    true
+  end
+  else false
+
 (** [sealed_constructor t h] is [Some (type_name, constructor_name, decl_hash)] when [h] is a
     constructor of an opaque type (TYPE.1): such a constructor is sealed to the type's defining
     scope. *)
@@ -657,6 +675,7 @@ let names t = t.names
 let hide_derived t hash =
   match List.find_opt (fun (candidate, _) -> Hash.equal candidate hash) t.index with
   | Some (_, (_, (Member _ | Constructor _ | Operation _))) ->
+      Hashtbl.reset t.visible;
       t.hidden <- List.sort_uniq Hash.compare (hash :: t.hidden);
       t.names <-
         List.filter
@@ -998,6 +1017,7 @@ let snapshot t =
     removed). Sidecars rewritten in place for objects that already existed are not restored. *)
 let restore t s =
   t.names <- s.snapshot_names;
+  Hashtbl.reset t.visible;
   t.hidden <- s.snapshot_hidden;
   t.call_abis <- s.snapshot_call_abis;
   t.index <- s.snapshot_index;

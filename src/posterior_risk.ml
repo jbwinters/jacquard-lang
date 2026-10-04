@@ -42,7 +42,7 @@ let type_error name args =
           (String.concat ", " (List.map Value.show args))))
 
 let lookup store kind name =
-  match Store.lookup_kind store name kind with
+  match Prelude_identity.lookup_kind store name kind with
   | Some entry -> Ok entry.Resolve.hash
   | None -> Error (Runtime_err.Unresolved ("posterior-risk prelude name " ^ name))
 
@@ -249,6 +249,17 @@ let check_model_signature store builtin_signatures model_id =
       | _ -> Error "E1543: the complete Governance/Dist prelude is unavailable")
   | Ok _ -> Error "E1543: model hash does not select a term"
 
+(* TYPE.1 (E1709): in a project or bundle run, a model reference names a prelude term or a term some
+   context in the run's graph exports, never a private helper reached by hash *)
+let admit_model ctx model_id =
+  match Eval.term_guard ctx with
+  | Some admits when not (admits model_id) ->
+      Error
+        (Printf.sprintf
+           "E1709: model %s is not exported by any project in this run, nor by the prelude"
+           (Hash.to_hex model_id))
+  | _ -> Ok ()
+
 let model_function ctx model_id =
   let expression = Kernel.{ it = Ref (model_id, Term); meta = Meta.empty } in
   match Eval.run_expr ctx expression with
@@ -322,6 +333,8 @@ let run_exact ctx ~builtin_signatures model_ref config source_evidence call =
   let store = Eval.store ctx in
   let ( let* ) = Result.bind in
   let* model_id = parse_model_ref store model_ref in
+  (* admitted before anything else is read or run *)
+  let* () = admit_model ctx model_id in
   let* max_branches = parse_exact_config store config in
   let* evidence =
     match source_evidence with
@@ -792,6 +805,8 @@ let sample_evidence ctx ~builtin_signatures model_ref config source_evidence cal
   let store = Eval.store ctx in
   let ( let* ) = Result.bind in
   let* model_id = parse_model_ref store model_ref in
+  (* admitted before anything else is read or run *)
+  let* () = admit_model ctx model_id in
   let* samples, seed = parse_approximate_config store config in
   let* evidence =
     match source_evidence with
