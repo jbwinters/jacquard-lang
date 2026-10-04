@@ -34,6 +34,9 @@ let summary = function
   | "E1733" -> "A source or manifest file changed during pinning."
   | "E1734" -> "Two unit entries name the same file."
   | "E1735" -> "No project manifest was found or it could not be read."
+  | "E1736" -> "A manifest exports a sealed constructor."
+  | "E1737" -> "A project declares a type or effect inside another project's namespace."
+  | "W1703" -> "A transparent type is exported without its constructors."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown project code " ^ code))
 
 let next_step = function
@@ -70,6 +73,11 @@ let next_step = function
   | "E1732" ->
       "Move the definition into a library unit; the library is checked before, and without, any \
        entry."
+  | "E1736" ->
+      "Remove the (con ...) export and export functions that build the value through its invariant."
+  | "E1737" -> "Rename the declaration so that it does not begin with another project's namespace."
+  | "W1703" ->
+      "Declare it `opaque type` so that only its own project can construct or rebuild its values."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown project code " ^ code))
 
 let diag ?span code cause =
@@ -660,7 +668,7 @@ let visible_hash session (node : node) hash =
                (direct_deps session node))
         owners
 
-let top_refs = function Kernel.Decl d -> Store.decl_refs d | Kernel.Expr e -> Store.expr_refs e
+let top_refs = Store.top_refs
 let meta_of = function Kernel.Decl d -> d.Kernel.meta | Kernel.Expr e -> e.Kernel.meta
 
 let owner_label session hash =
@@ -841,7 +849,7 @@ let entry_boundary project ~names ds =
       | _ -> d)
     ds
 
-let export_projection project local =
+let export_projection store project local =
   List.partition_map
     (fun (s : Project_manifest.selector) ->
       let kind =
@@ -857,6 +865,13 @@ let export_projection project local =
           (fun (e : Resolve.entry) -> e.kind = kind)
           (Option.value ~default:[] (Hashtbl.find_opt local s.name))
       with
+      | Some e when kind = Resolve.KCon && Option.is_some (Store.sealed_constructor store e.hash) ->
+          Right
+            (diag "E1736"
+               (Printf.sprintf
+                  "project `%s` exports (con %s), a constructor of an opaque type, which stays \
+                   sealed to its own project"
+                  (project_label project) s.name))
       | Some e -> Left ((s.name, kind), e.hash)
       | None ->
           Right
@@ -957,6 +972,101 @@ let signature_notes = function
         bindings
   | _ -> []
 
+(* TYPE.1 (E1737): a type or effect named inside another graph project's namespace would claim that
+   project's sealed types. Only a root without a namespace, or an entry unit, can attempt it, since
+   E1706 binds a namespaced library to its own prefix. *)
+let redeclarations session (node : node) tops =
+  let others =
+    Hashtbl.fold
+      (fun _ (c : composed) acc ->
+        match c.node.project.manifest.Project_manifest.namespace with
+        | Some ns when c.node.project.dir <> node.project.dir -> (ns, c) :: acc
+        | _ -> acc)
+      session.composed []
+  in
+  List.concat_map
+    (fun top ->
+      List.filter_map
+        (fun b ->
+          if b.kind <> Resolve.KType && b.kind <> Resolve.KEffect then None
+          else
+            match List.find_opt (fun (ns, _) -> has_prefix ns "-" b.name) others with
+            | Some (ns, c) ->
+                Some
+                  (diag ?span:(Meta.span b.meta) "E1737"
+                     (Printf.sprintf
+                        "%s `%s` (%s) is inside namespace `%s`, which project `%s` owns"
+                        (kind_word b.kind) b.name (where b.file) ns (project_label c.node.project)))
+            | None -> None)
+        (binders top))
+    tops
+
+(* E1737 is judged on the resolved declaration, so that a repeated prelude declaration, which no
+   project owns, stays allowed whatever its name. *)
+let redeclaration_refusals session (node : node) top =
+  match top with
+  | Kernel.Decl ({ Kernel.it = Kernel.DefType _ | Kernel.DefEffect _; _ } as d) -> (
+      match Canon.hash_decl d with
+      | Ok { Canon.decl_hash; _ } when Hashtbl.mem session.prelude_objects decl_hash -> []
+      | _ -> redeclarations session node [ top ])
+  | _ -> []
+
+(* W1703: a transparent type exported without its constructors hides them by name only; its
+   generated setters can still rebuild a value. Opaque types are sealed instead. *)
+let abstraction_warnings store tops exports =
+  let exported hash = List.exists (fun (_, h) -> Hash.equal h hash) exports in
+  let abstract =
+    List.filter_map
+      (fun ((name, kind), hash) ->
+        if kind <> Resolve.KType then None
+        else
+          match Store.locate store hash with
+          | Ok { Store.decl = { Kernel.it = Kernel.DefType { opaque = false; _ }; _ } as decl; _ }
+            -> (
+              match Canon.hash_top (Kernel.Decl decl) with
+              | Ok { Canon.named; _ } ->
+                  let constructors =
+                    List.filter (fun (_, h) -> not (Hash.equal h hash)) named |> List.map snd
+                  in
+                  if constructors <> [] && not (List.exists exported constructors) then Some name
+                  else None
+              | Error _ -> None)
+          | _ -> None)
+      exports
+  in
+  let setters =
+    List.concat_map
+      (function
+        | Kernel.Decl ({ Kernel.it = Kernel.DefTerm bindings; _ } as d)
+          when Meta.surface_generated d.meta = Some Surface_lower.setter_marker ->
+            List.filter_map
+              (fun (b : Kernel.binding) ->
+                match
+                  List.find_opt
+                    (fun t -> String.starts_with ~prefix:(t ^ ".with-") b.bname)
+                    abstract
+                with
+                | Some t
+                  when List.exists (fun ((n, k), _) -> n = b.bname && k = Resolve.KTerm) exports ->
+                    Some
+                      (warn "W1703"
+                         (Printf.sprintf
+                            "the exported setter `%s` rebuilds a value of `%s`, whose constructors \
+                             are not exported"
+                            b.bname t))
+                | _ -> None)
+              bindings
+        | _ -> [])
+      tops
+  in
+  List.map
+    (fun t ->
+      warn "W1703"
+        (Printf.sprintf
+           "type `%s` is exported without its constructors, which hides them by name only" t))
+    abstract
+  @ setters
+
 let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session (node : node) =
   let project = node.project in
   let local = Hashtbl.create 64 in
@@ -977,6 +1087,12 @@ let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session 
       ~on_resolved:(fun top warnings ->
         List.iter on_warning warnings;
         let* () = match hash_refusals session node top with [] -> Ok () | ds -> Error ds in
+        let* () =
+          match project.manifest.namespace with
+          | Some _ -> Ok ()
+          | None -> (
+              match redeclaration_refusals session node top with [] -> Ok () | ds -> Error ds)
+        in
         let* { Check.warnings; _ } =
           Result.map_error
             (fun ds -> ds @ signature_notes top)
@@ -1009,7 +1125,8 @@ let compose_library ?(on_lint = ignore) ?(on_warning = ignore) ~is_root session 
       in
       Error (if is_root then entry_boundary project ~names ds else ds)
   | Ok () ->
-      let exports, missing = export_projection project local in
+      let exports, missing = export_projection session.store project local in
+      if is_root then List.iter on_warning (abstraction_warnings session.store tops exports);
       let* () = if missing = [] then Ok () else Error missing in
       (* derived now, while this project's own bindings are the store's current ones *)
       let* interface =
@@ -1216,6 +1333,9 @@ let walk_entry ?(on_resolved = fun _ _ -> Ok ()) ?(on_installed = fun _ _ -> Ok 
     (Frontend.walk_tops session.store tops ~names
        ~on_resolved:(fun top warnings ->
          let* () = match hash_refusals session root.node top with [] -> Ok () | ds -> Error ds in
+         let* () =
+           match redeclaration_refusals session root.node top with [] -> Ok () | ds -> Error ds
+         in
          on_resolved top warnings)
        ~on_installed:(fun decl hashes ->
          List.iter (add_binding layer) (bindings_of session.store decl hashes);

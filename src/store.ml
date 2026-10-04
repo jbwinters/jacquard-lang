@@ -583,6 +583,22 @@ let locate t (h : Hash.t) : (located, Diag.t list) result =
   if List.exists (Hash.equal h) t.hidden then err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
   else locate_internal t h
 
+(** [sealed_constructor t h] is [Some (type_name, constructor_name, decl_hash)] when [h] is a
+    constructor of an opaque type (TYPE.1): such a constructor is sealed to the type's defining
+    scope. *)
+let sealed_constructor t h =
+  match locate_internal t h with
+  | Ok
+      {
+        decl = { Kernel.it = Kernel.DefType { tname; opaque = true; cons; _ }; _ };
+        decl_hash;
+        role = Constructor index;
+      } -> (
+      match List.nth_opt cons index with
+      | Some { Kernel.con_name; _ } -> Some (tname, con_name, decl_hash)
+      | None -> None)
+  | _ -> None
+
 (** [get t h] is [locate]'s declaration. *)
 let get t h = Result.map (fun l -> l.decl) (locate t h)
 
@@ -852,6 +868,10 @@ let decl_refs (d : Kernel.decl) : Hash.t list =
       List.concat_map
         (fun o -> List.concat_map ty_refs o.Kernel.op_params @ ty_refs o.Kernel.op_result)
         ops
+
+(** [top_refs top] is every identity [top] references live: quoted data is excluded, splices are
+    not. *)
+let top_refs = function Kernel.Decl d -> decl_refs d | Kernel.Expr e -> expr_refs e
 
 (** [deps t h] is the deduplicated, sorted list of hashes the declaration owning [h] references. *)
 let deps t h : (Hash.t list, Diag.t list) result =

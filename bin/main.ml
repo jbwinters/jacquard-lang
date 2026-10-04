@@ -2736,8 +2736,9 @@ let tiers_cmd files prelude =
           (* decls are checked at load (after installation), so type errors carry source
              positions and fail the command outright — an error is an error, never a partial
              table *)
+          (* each file is one source: its own defining scope for opaque types *)
           let load_forms tops =
-            Frontend.walk_tops store tops
+            Frontend.walk_tops ~sealed:true store tops
               ~on_resolved:(fun top _warnings ->
                 match top with
                 | Kernel.Expr e -> Result.map ignore (Check.check_top cctx (Kernel.Expr e))

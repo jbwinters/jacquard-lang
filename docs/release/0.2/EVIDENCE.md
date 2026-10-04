@@ -32,8 +32,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1175`
-- Cram transcript files: `76`
+- Alcotest/QCheck cases: `1177`
+- Cram transcript files: `77`
 - Documentation examples: `36` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -753,3 +753,12 @@ canonical tag `0x47`, surface syntax, printing and formatting) with five cases
 in the `opaque-types` suite, including a golden for the opaque encoding.
 Transparent declarations keep their bytes, so the corpus and prelude hash
 goldens are unchanged. The source inventory is now `1175 / 76 / 36`.
+
+TYPE.1 slice 2a seals opaque constructors: single sources refuse a constructor
+of an opaque type they do not declare (E0315); manifests cannot export one
+(E1736); a root without a namespace or an entry unit cannot declare inside
+another project's namespace (E1737); interfaces omit sealed constructors;
+opaque types get no setters; abstract exports of transparent types warn
+(W1703). Two `opaque-types` cases and the `opaque-types.t` transcript cover it,
+and `project-manifest.t` now shows W1703 for its abstract export. The source
+inventory is now `1177 / 77 / 36`.

@@ -53,11 +53,55 @@ type installation = Install | Install_best_effort
 
 let no_hook _ = Ok ()
 
+(* TYPE.1: a source walk's defining scope is the type declarations it installs. A sealed constructor
+   of any other opaque type is refused where source uses it, by name or by explicit identity. *)
+type seal = (Hash.t, unit) Hashtbl.t
+
+let new_seal () : seal = Hashtbl.create 8
+
+let sealed_refusals (seal : seal) store top =
+  let meta = match top with Kernel.Decl d -> d.Kernel.meta | Kernel.Expr e -> e.Kernel.meta in
+  List.filter_map
+    (fun hash ->
+      match Store.sealed_constructor store hash with
+      | Some (type_name, con_name, decl_hash) when not (Hashtbl.mem seal decl_hash) ->
+          Some
+            (Diag.error ?span:(Meta.span meta) ~domain:Resolution ~code:"E0315"
+               ~summary:"A sealed constructor is used outside its defining scope."
+               ~cause:
+                 (Printf.sprintf
+                    "constructor `%s` (%s) belongs to the opaque type `%s`, which this source does \
+                     not declare"
+                    con_name (Hash.to_hex hash) type_name)
+               ~next_step:"Build the value through the functions the type's owner provides."
+               ~contrast:None ())
+      | _ -> None)
+    (List.sort_uniq Hash.compare (Store.top_refs top))
+
 (* One loop for every command: validate, pre-resolution hook, resolve against the store's current
    names, post-resolution hook, then install a declaration so later tops see it. *)
-let walk_items ?origin ?(install = Install) ?names ?(before_resolve = no_hook)
+let walk_items ?origin ?(install = Install) ?names ?seal ?(before_resolve = no_hook)
     ?(on_resolved = fun _ _ -> Ok ()) ?(on_installed = fun _ _ -> Ok ()) store validate items =
   let names = match names with Some names -> names | None -> Store.names_view store in
+  let on_resolved =
+    match seal with
+    | None -> on_resolved
+    | Some seal -> (
+        fun top warnings ->
+          match sealed_refusals seal store top with
+          | [] -> on_resolved top warnings
+          | ds -> Error ds)
+  in
+  let on_installed =
+    match seal with
+    | None -> on_installed
+    | Some seal ->
+        fun declaration (hashes : Canon.decl_hashes) ->
+          (match declaration.Kernel.it with
+          | Kernel.DefType _ -> Hashtbl.replace seal hashes.decl_hash ()
+          | _ -> ());
+          on_installed declaration hashes
+  in
   let rec go = function
     | [] -> Ok ()
     | item :: rest -> (
@@ -77,15 +121,20 @@ let walk_items ?origin ?(install = Install) ?names ?(before_resolve = no_hook)
   in
   go items
 
+(* A single-file source walk is sealed: its defining scope is the source itself. Project
+   composition walks tops instead and applies its own ownership rules. *)
 let walk ?origin ?install ?(on_parsed = ignore) ?before_resolve ?on_resolved ?on_installed ~syntax
     ~file store source =
   let* parsed, warnings = parse_tops ~syntax ~names:(Store.names_view store) ~file source in
   on_parsed warnings;
-  walk_items ?origin ?install ?before_resolve ?on_resolved ?on_installed store validate_parsed_top
-    parsed
+  walk_items ?origin ?install ~seal:(new_seal ()) ?before_resolve ?on_resolved ?on_installed store
+    validate_parsed_top parsed
 
-let walk_tops ?origin ?install ?names ?before_resolve ?on_resolved ?on_installed store tops =
-  walk_items ?origin ?install ?names ?before_resolve ?on_resolved ?on_installed store Result.ok tops
+let walk_tops ?origin ?install ?names ?(sealed = false) ?before_resolve ?on_resolved ?on_installed
+    store tops =
+  let seal = if sealed then Some (new_seal ()) else None in
+  walk_items ?origin ?install ?names ?seal ?before_resolve ?on_resolved ?on_installed store
+    Result.ok tops
 
 let resolve_source_tops ~syntax store ~file source =
   let surface_warnings = ref [] and resolved = ref [] and resolver_warnings = ref [] in

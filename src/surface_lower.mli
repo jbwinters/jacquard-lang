@@ -56,6 +56,9 @@ val accessor_names : Surface_ast.top -> string list
     declaration would generate, computed from its surface labels so that recovery can poison them
     when the declaration fails. *)
 
+val setter_marker : string
+(** [setter_marker] is the [surface-generated] provenance of a generated setter declaration. *)
+
 val is_generated_accessor : Kernel.top -> bool
 (** [is_generated_accessor top] holds for a declaration {!lower_tops} generated from a field label:
     a D36 accessor or an SX.28 setter. Signature listings omit these, as the printer does, so

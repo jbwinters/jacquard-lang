@@ -73,27 +73,31 @@ val walk :
   Store.t ->
   string ->
   (unit, Diag.t list) result
-(** [walk ~syntax ~file store source] parses [source] ({!parse_tops}, passing the lint warnings to
-    [on_parsed]) and then, top by top and in source order: validates it, calls [before_resolve] with
-    the unresolved top, resolves it against the current names of [store], calls [on_resolved] with
-    the resolved top and the resolver warnings, and installs a declaration in [store] (stamped with
-    [origin]) before calling [on_installed] with its identities. Later tops therefore see exactly
-    the declarations installed before them. The first failure stops the walk; declarations installed
-    before it stay installed (see {!install_declarations}). *)
+(** [walk ~syntax ~file store source] is sealed (TYPE.1): a constructor of an opaque type that
+    [source] does not itself declare is refused where [source] uses it (E0315). It parses [source]
+    ({!parse_tops}, passing the lint warnings to [on_parsed]) and then, top by top and in source
+    order: validates it, calls [before_resolve] with the unresolved top, resolves it against the
+    current names of [store], calls [on_resolved] with the resolved top and the resolver warnings,
+    and installs a declaration in [store] (stamped with [origin]) before calling [on_installed] with
+    its identities. Later tops therefore see exactly the declarations installed before them. The
+    first failure stops the walk; declarations installed before it stay installed (see
+    {!install_declarations}). *)
 
 val walk_tops :
   ?origin:string ->
   ?install:installation ->
   ?names:Resolve.names ->
+  ?sealed:bool ->
   ?before_resolve:(Kernel.top -> (unit, Diag.t list) result) ->
   ?on_resolved:(Kernel.top -> Diag.t list -> (unit, Diag.t list) result) ->
   ?on_installed:(Kernel.decl -> Canon.decl_hashes -> (unit, Diag.t list) result) ->
   Store.t ->
   Kernel.top list ->
   (unit, Diag.t list) result
-(** [walk_tops store tops] is {!walk} over already validated tops. With [names], every top resolves
-    against that view instead of the store's current public names; the view must read the store live
-    if later tops are to see earlier installations. *)
+(** [walk_tops store tops] is {!walk} over already validated tops, sealed only with [~sealed:true]
+    (one source's tops); project composition applies its own ownership rules instead. With [names],
+    every top resolves against that view instead of the store's current public names; the view must
+    read the store live if later tops are to see earlier installations. *)
 
 val resolve_source_tops :
   syntax:syntax ->
