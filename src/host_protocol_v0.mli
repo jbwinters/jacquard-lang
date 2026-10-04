@@ -64,9 +64,16 @@ val decode_boundary_value :
     variants E1604. *)
 
 val encode_boundary_value : budget:boundary_budget -> Value.t -> (Yojson.Safe.t, Diag.t list) result
+
 (** [encode_boundary_value ~budget value] emits the deterministic lossless descriptor for a
     boundary-safe Core value. Constructor display names never cross the wire. Opaque, callable, or
     run-owned values return E1604; malformed UTF-8 and exceeded limits retain E1601/E1602. *)
+
+val validate_argument_value :
+  Check.ctx -> expected:Types.ty -> Value.t -> (unit, Diag.t list) result
+(** [validate_argument_value checker ~expected value] checks a boundary value against its expected
+    type: every invoke argument, operation argument and response, and result passes through it. A
+    constructor of an opaque type is refused wherever it appears (E1604, TYPE.1). *)
 
 type operation_binding = {
   effect_identity : Hash.t;

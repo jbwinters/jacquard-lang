@@ -66,6 +66,12 @@ type fixture = {
   polymorphic_target : Hash.t;
   open_row_target : Hash.t;
   higher_order_target : Hash.t;
+  opaque_type : Hash.t;
+  opaque_constructor : Hash.t;
+  wrapper_type : Hash.t;
+  takes_opaque_target : Hash.t;
+  returns_wrapper_target : Hash.t;
+  returns_callback_target : Hash.t;
 }
 
 let make_fixture () =
@@ -119,6 +125,38 @@ let make_fixture () =
       "(defterm ((binding boundary.higher ((tarrow ((tarrow ((tref int)) (row) (tref int))) (row) \
        (tref int))) (lam ((pvar function)) (app (var function) (lit 1))))))"
   in
+  (* TYPE.1: an opaque type, a transparent wrapper around it, and targets that cross with each *)
+  let opaque =
+    put_src store
+      "(deftype boundary-score () (opaque) (con make-boundary-score (field (tref int))))"
+  in
+  let wrapper =
+    put_src store
+      "(deftype boundary-wrap () (con make-boundary-wrap (field (tref boundary-score))))"
+  in
+  let takes_opaque =
+    put_src store
+      "(defterm ((binding boundary.takes-opaque ((tarrow ((tref boundary-score)) (row) (tref \
+       int))) (lam ((pvar score)) (lit 1)))))"
+  in
+  let returns_wrapper =
+    put_src store
+      "(defterm ((binding boundary.returns-wrapper ((tarrow ((tref int)) (row) (tref \
+       boundary-wrap))) (lam ((pvar n)) (app (var make-boundary-wrap) (app (var \
+       make-boundary-score) (var n)))))))"
+  in
+  (* a transparent type whose function field's effect returns the opaque type *)
+  ignore
+    (put_src store "(defeffect boundary-gen () (op boundary.gen once () (tref boundary-score)))");
+  ignore
+    (put_src store
+       "(deftype boundary-cb () (con boundary-cb-none) (con boundary-cb-some (field (tarrow () \
+        (row (eref boundary-gen)) (tref int)))))");
+  let returns_callback =
+    put_src store
+      "(defterm ((binding boundary.returns-cb ((tarrow ((tref int)) (row) (tref boundary-cb))) \
+       (lam ((pvar n)) (var boundary-cb-none)))))"
+  in
   let checker = expect_ok "create fixture checker" (Check.make_ctx store) in
   {
     store;
@@ -142,6 +180,12 @@ let make_fixture () =
     polymorphic_target = named "boundary.identity" polymorphic;
     open_row_target = named "boundary.forward" open_row;
     higher_order_target = named "boundary.higher" higher_order;
+    opaque_type = named "boundary-score" opaque;
+    opaque_constructor = named "make-boundary-score" opaque;
+    wrapper_type = named "boundary-wrap" wrapper;
+    takes_opaque_target = named "boundary.takes-opaque" takes_opaque;
+    returns_wrapper_target = named "boundary.returns-wrapper" returns_wrapper;
+    returns_callback_target = named "boundary.returns-cb" returns_callback;
   }
 
 let fixture = lazy (make_fixture ())
@@ -305,6 +349,57 @@ let test_target_role_callable_and_boundary_shape_fail_closed () =
     ]
   in
   List.iter (fun (label, json, code) -> expect_code label code (parse fixture json)) cases
+
+(* TYPE.1: v0 refuses opaque types in both directions, through transparent wrappers, and refuses an
+   opaque value even where the parameter type is transparent (E1604) *)
+let test_opaque_types_do_not_cross () =
+  let fixture = Lazy.force fixture in
+  let score_value =
+    Value.VCon { con = fixture.opaque_constructor; name = "x"; args = [ Value.VInt 1 ] }
+  in
+  expect_code "an opaque parameter" "E1604"
+    (parse fixture
+       (invoke_json ~target:fixture.takes_opaque_target
+          ~parameters:[ nominal fixture.opaque_type [] ]
+          ~effects:[] ~result:(int_type fixture) ~arguments:[ score_value ] ~operations:[]));
+  expect_code "an opaque type inside a transparent result" "E1604"
+    (parse fixture
+       (invoke_json ~target:fixture.returns_wrapper_target
+          ~parameters:[ int_type fixture ]
+          ~effects:[] ~result:(nominal fixture.wrapper_type []) ~arguments:[ Value.VInt 1 ]
+          ~operations:[]));
+  expect_code "an opaque type reached through a field's effect" "E1604"
+    (parse fixture
+       (invoke_json ~target:fixture.returns_callback_target
+          ~parameters:[ int_type fixture ]
+          ~effects:[]
+          ~result:(nominal (required_hash fixture.store "boundary-cb" Resolve.KType) [])
+          ~arguments:[ Value.VInt 1 ] ~operations:[]));
+  (* the value guard itself, as outgoing operation arguments and results meet it *)
+  expect_code "the value guard refuses a nested opaque constructor" "E1604"
+    (Host.validate_argument_value fixture.checker ~expected:(packet_int fixture)
+       (Value.VCon
+          {
+            con = fixture.packet_constructor;
+            name = "packet";
+            args = [ score_value; Value.VText "payload" ];
+          }));
+  expect_code "an opaque value for a transparent parameter" "E1604"
+    (parse fixture
+       (invoke_json ~target:fixture.pure_target
+          ~parameters:[ packet_int fixture; metadata_type fixture ]
+          ~effects:[] ~result:(text_type fixture)
+          ~arguments:
+            [
+              Value.VCon
+                {
+                  con = fixture.packet_constructor;
+                  name = "packet";
+                  args = [ score_value; Value.VText "payload" ];
+                };
+              Value.VTuple [ Value.VText "metadata"; Value.VHash (Hash.of_string "metadata") ];
+            ]
+          ~operations:[]))
 
 let missing_closure_case () =
   let store = expect_ok "open incomplete store" (Store.open_store (fresh_dir "closure")) in
@@ -586,4 +681,5 @@ let suite =
       test_generic_operation_signature_is_not_a_boundary_contract;
     Alcotest.test_case "fail-fast precedence rejects untrusted later material" `Quick
       test_fail_fast_precedence_does_not_trust_later_material;
+    Alcotest.test_case "opaque types do not cross" `Quick test_opaque_types_do_not_cross;
   ]

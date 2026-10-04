@@ -152,9 +152,16 @@ unit. The same depth, node, and collection limits as values apply.
 
 Type variables, open rows, arrows nested in data, `Resume`, variadic arrows,
 checker-internal exact thunks, and unresolved identities are not boundary-safe
-in v0. Core derives the callable's actual type and requires structural equality
-with the supplied interface before evaluation. Display names and
-`call-abi-v1` labels are not part of this positional interface.
+in v0. Neither is an opaque type (`docs/designs/abstract-types.md`), nor any
+nominal type whose reachable declared field types include one. Core walks the
+field types of every reachable declaration, and the operation types of every
+effect in a field's arrow row, each once, so a transparent wrapper around an
+opaque type fails with E1604 too. The walk is by declaration, so a type is
+refused even when the value at hand uses an alternative that does not carry the
+opaque type. Manifest-abstract types, which are not opaque, are unaffected. Core
+derives the callable's actual type and requires structural equality with the
+supplied interface before evaluation. Display names and `call-abi-v1` labels are
+not part of this positional interface.
 
 ### 5.2 Value descriptions
 
@@ -184,7 +191,9 @@ exact constructor identity, checks arity and field types, and ignores no
 display name because none crosses the boundary.
 
 `Code`, `Secret`, `Task`, `ChannelHandle`, `Resume`, closures, builtins,
-operation values, and unapplied constructors have no v0 encoding. They fail
+operation values, unapplied constructors, and values of an opaque type have no
+v0 encoding. A constructor of an opaque type is refused wherever it appears in
+a value, in either direction. They fail
 with E1604 rather than being rendered to text, assigned a remote handle, or
 silently redacted into a different value. Later versions may add a value only
 with an exact ownership, lifetime, type, and conformance contract.

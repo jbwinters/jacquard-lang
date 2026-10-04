@@ -536,7 +536,7 @@ fabricated Core result.
 | E1601 | malformed frame or envelope | duplicate JSON keys, invalid UTF-8, or an unknown field |
 | E1602 | host protocol limit exceeded | a 1,048,577-byte frame or a nonpositive selected limit |
 | E1603 | target or pinned interface is invalid | an unresolved callable hash or mismatched parameter type |
-| E1604 | type or value is unsupported at the v0 boundary | trying to transport a Secret, Task, closure, or open type |
+| E1604 | type or value is unsupported at the v0 boundary, including an opaque type, a type whose fields reach one, or a value built from an opaque type's constructor | trying to transport a Secret, Task, closure, open type, or opaque type |
 | E1605 | capability envelope is invalid | an extra effect, duplicate operation, or `multi` registry entry |
 | E1606 | root operation is not configured | evaluation reaches an operation absent from the closed host registry |
 | E1607 | host refused authority before action | the adapter rejects a requested resource without starting I/O |

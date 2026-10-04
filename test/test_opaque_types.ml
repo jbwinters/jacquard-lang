@@ -410,6 +410,39 @@ let test_confirmed_pins_follow_the_store () =
   Store.hide_derived store hash;
   Alcotest.(check bool) "a hidden pin is not returned" true (Option.is_none (pinned_true store))
 
+(* TYPE.1 S3a: dynamic code constructs or matches no opaque type, the owner's included *)
+let test_eval_code_refuses_sealed () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  (match Prelude.install_eval ctx with Ok () -> () | Error ds -> fail_diags "install eval" ds);
+  Alcotest.(check (list string)) "the owner declares the type" [] (codes (walk store coin_source));
+  let run payload =
+    Eval_support.eval_with ctx store (Printf.sprintf "(app (var eval-code) (quote %s))" payload)
+  in
+  let refused label payload =
+    match run payload with
+    | Error (Runtime_err.Eval_error message) ->
+        Alcotest.(check bool)
+          label true
+          (let needle = "dynamic code may not construct or match" in
+           let n = String.length needle and m = String.length message in
+           let rec go i = i + n <= m && (String.sub message i n = needle || go (i + 1)) in
+           go 0)
+    | Error e -> Alcotest.failf "%s: unexpected %s" label (Runtime_err.to_string e)
+    | Ok v -> Alcotest.failf "%s: ran to %s" label (Value.show v)
+  in
+  refused "constructing" "(var heads)";
+  Alcotest.(check (list string))
+    "an owner helper supplies a coin" []
+    (codes (walk store (coin_source ^ "start() = Heads\n")));
+  (* the pattern is the payload's only reference to a sealed constructor *)
+  refused "matching"
+    "(match (app (var start)) (clause (pcon heads) (lit 1)) (clause (pwild) (lit 0)))";
+  refused "a live splice" "(app (lam ((pvar x)) (var x)) (quote (unquote (var heads))))";
+  match run "(quote (var heads))" with
+  | Ok (Value.VCode _) -> ()
+  | Ok v -> Alcotest.failf "quoted data: unexpected %s" (Value.show v)
+  | Error e -> Alcotest.failf "quoted data is not a use: %s" (Runtime_err.to_string e)
+
 let suite =
   [
     Alcotest.test_case "kernel marker" `Quick test_kernel_marker;
@@ -422,4 +455,5 @@ let suite =
     Alcotest.test_case "frozen builtin identities" `Quick test_frozen_builtin_identities;
     Alcotest.test_case "frozen identities in projects" `Quick test_frozen_identities_in_projects;
     Alcotest.test_case "confirmed pins follow the store" `Quick test_confirmed_pins_follow_the_store;
+    Alcotest.test_case "eval-code refuses sealed constructors" `Quick test_eval_code_refuses_sealed;
   ]

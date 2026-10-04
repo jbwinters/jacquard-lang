@@ -1317,6 +1317,15 @@ let install_secret_environment ?(getenv = Sys.getenv_opt) (ctx : Eval.ctx) =
    hook before any client can call [install_eval]. *)
 let eval_builtin_signatures = ref (fun (_ : Store.t) -> Ok [])
 
+(* the first live reference in [e] to a sealed constructor, as (type, constructor) *)
+let sealed_reference store e =
+  List.find_map
+    (fun hash ->
+      Option.map
+        (fun (type_name, con_name, _) -> (type_name, con_name))
+        (Store.sealed_constructor store hash))
+    (Store.top_refs (Kernel.Expr e))
+
 (** [install_eval ctx] grants the [eval] effect: [eval-code] takes a [VCode] payload, validates,
     resolves, and typechecks it against the store's current names before running it in [ctx].
     Failures at that boundary are [Eval_error] (the M0 dynamic check).
@@ -1344,15 +1353,26 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
                   match resolved with
                   | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
                   | Ok e -> (
-                      match Check.make_ctx (Eval.store ctx) with
-                      | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
-                      | Ok cctx -> (
-                          (match !eval_builtin_signatures (Eval.store ctx) with
-                          | Ok signatures -> Check.register_builtin_signatures cctx signatures
-                          | Error _ -> ());
-                          match Check.check_top cctx (Kernel.Expr e) with
+                      (* TYPE.1: dynamic code constructs or matches no opaque type, in any mode
+                         and whoever performs it; quoted data is not a use *)
+                      match sealed_reference (Eval.store ctx) e with
+                      | Some (type_name, con_name) ->
+                          Error
+                            (Runtime_err.Eval_error
+                               (Printf.sprintf
+                                  "the payload uses constructor `%s` of the opaque type `%s`, \
+                                   which dynamic code may not construct or match"
+                                  con_name type_name))
+                      | None -> (
+                          match Check.make_ctx (Eval.store ctx) with
                           | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
-                          | Ok _ -> Round_robin.run_expr ctx e))))
+                          | Ok cctx -> (
+                              (match !eval_builtin_signatures (Eval.store ctx) with
+                              | Ok signatures -> Check.register_builtin_signatures cctx signatures
+                              | Error _ -> ());
+                              match Check.check_top cctx (Kernel.Expr e) with
+                              | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
+                              | Ok _ -> Round_robin.run_expr ctx e)))))
           | args ->
               Error
                 (Runtime_err.Eval_error
