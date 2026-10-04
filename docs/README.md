@@ -148,6 +148,10 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   shared library/CLI classification, and migration from the released drivers.
 - `release/named-call-arguments/EVIDENCE.md`: parser/resolver/store/hash/native
   evidence and the current test inventory for named calls.
+- `designs/abstract-types.md`: TYPE.0 design for opaque types: an `opaque
+  type` marker whose constructors are sealed to the owning project, namespace
+  ownership, verified bundle regions, `<opaque name>` display, and the TYPE.1
+  slices.
 - `designs/behavioral-change-review.md`: DES.1 design proposal (not a
   contract) for reviewing two compatible checked versions over declared inputs
   and worlds: observation policy, status taxonomy, condition grouping,
