@@ -609,9 +609,9 @@ let hash_decl (d : Kernel.decl) : (decl_hashes, Diag.t list) result =
                 (fun (source : int) -> (members.(source).Kernel.bname, member_hash subst.(source)))
                 (List.init n Fun.id);
           }
-    | Kernel.DefType { tname; tvars; cons } ->
+    | Kernel.DefType { tname; tvars; opaque; cons } ->
         let buf = Buffer.create 512 in
-        tag buf 0x41;
+        tag buf (if opaque then 0x47 else 0x41);
         text buf tname;
         varint buf (List.length tvars);
         let env = { empty_env with tyvars = List.rev tvars; tyself = Some tname } in

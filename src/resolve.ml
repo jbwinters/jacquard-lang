@@ -1231,11 +1231,12 @@ let resolve_decl_in st (d : Kernel.decl) : Kernel.decl =
             else Hashtbl.add seen b.Kernel.bname ())
           bindings;
         Kernel.DefTerm (List.map (resolve_binding st ~group) bindings)
-    | Kernel.DefType { tname; tvars; cons } ->
+    | Kernel.DefType { tname; tvars; opaque; cons } ->
         Kernel.DefType
           {
             tname;
             tvars;
+            opaque;
             cons =
               List.map
                 (fun c ->

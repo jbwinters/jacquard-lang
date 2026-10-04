@@ -110,7 +110,7 @@ type decl = decl_node node
 
 and decl_node =
   | DefTerm of binding list
-  | DefType of { tname : string; tvars : string list; cons : conspec list }
+  | DefType of { tname : string; tvars : string list; opaque : bool; cons : conspec list }
   | DefEffect of { ename : string; evars : string list; ops : opspec list }
 
 (** A corpus file is a sequence of declarations and bare expressions. *)
@@ -651,12 +651,20 @@ let decl_of depth (f : Form.t) : decl =
           ~element_what:"the type parameters" ~variable_what:"the type variable" f
           (List.nth f.Form.args 1)
       in
-      let cons =
-        List.map
-          (fun a -> conspec_of child_depth (the_form ~what:"a constructor spec" f a))
-          (List.filteri (fun i _ -> i >= 2) f.Form.args)
+      let specs = List.filteri (fun i _ -> i >= 2) f.Form.args in
+      let opaque, specs =
+        match specs with
+        | Form.F { Form.head = "opaque"; args = []; _ } :: rest -> (true, rest)
+        | Form.F ({ Form.head = "opaque"; _ } as g) :: _ ->
+            err ~meta:g.Form.meta ~code:"E0202" "the `opaque` marker takes no arguments"
+        | _ -> (false, specs)
       in
-      node (DefType { tname; tvars; cons })
+      if specs = [] then
+        err ~meta:f.Form.meta ~code:"E0202" "`deftype` needs at least one constructor spec";
+      let cons =
+        List.map (fun a -> conspec_of child_depth (the_form ~what:"a constructor spec" f a)) specs
+      in
+      node (DefType { tname; tvars; opaque; cons })
   | "defeffect" ->
       expect_min_arity f 3;
       let ename = the_sym ~what:"the effect name" f (List.nth f.Form.args 0) in
@@ -812,24 +820,25 @@ let decl_to_form (d : decl) : Form.t =
   let meta = d.meta in
   match d.it with
   | DefTerm bindings -> form ~meta "defterm" [ group (List.map binding_to_form bindings) ]
-  | DefType { tname; tvars; cons } ->
+  | DefType { tname; tvars; opaque; cons } ->
       form ~meta "deftype"
         (Form.Sym tname
-        :: group (List.map (fun v -> form "tvar" [ Form.Sym v ]) tvars)
-        :: List.map
-             (fun { con_name; fields; kmeta } ->
-               Form.F
-                 (form ~meta:kmeta "con"
-                    (Form.Sym con_name
-                    :: List.map
-                         (fun { label; fty; fmeta } ->
-                           Form.F
-                             (form ~meta:fmeta "field"
-                                (match label with
-                                | Some l -> [ Form.Sym l; Form.F (ty_to_form fty) ]
-                                | None -> [ Form.F (ty_to_form fty) ])))
-                         fields)))
-             cons)
+         :: group (List.map (fun v -> form "tvar" [ Form.Sym v ]) tvars)
+         :: (if opaque then [ Form.F (form "opaque" []) ] else [])
+        @ List.map
+            (fun { con_name; fields; kmeta } ->
+              Form.F
+                (form ~meta:kmeta "con"
+                   (Form.Sym con_name
+                   :: List.map
+                        (fun { label; fty; fmeta } ->
+                          Form.F
+                            (form ~meta:fmeta "field"
+                               (match label with
+                               | Some l -> [ Form.Sym l; Form.F (ty_to_form fty) ]
+                               | None -> [ Form.F (ty_to_form fty) ])))
+                        fields)))
+            cons)
   | DefEffect { ename; evars; ops } ->
       form ~meta "defeffect"
         (Form.Sym ename

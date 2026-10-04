@@ -97,7 +97,8 @@ that were already representable as quoted forms.
 Declarations: 0x40 defterm (+ varint n + members in canonical order; member = 0x43 +
 annotation option (0x00/0x01+type) + value), 0x41 deftype (+ name + varint tyvarc + varint
 conc + conspecs; conspec = 0x44 + name + varint fieldc + fields; field = 0x45 + label option
-+ type), 0x42 defeffect (+ name + varint tyvarc + varint opc + opspecs; opspec = 0x46 + name
++ type), 0x47 opaque deftype (the 0x41 payload, unchanged, for a type declared `opaque`;
+a transparent deftype keeps 0x41 and its exact bytes, so no existing hash changes), 0x42 defeffect (+ name + varint tyvarc + varint opc + opspecs; opspec = 0x46 + name
 + varint paramc + param types + result type + optional mode discriminator). The legacy `Multi`
 mode is encoded by complete absence and therefore contributes no byte. `Once` appends `0x01`
 after the result type. This compatibility extension leaves every pre-EL.1 defeffect byte string

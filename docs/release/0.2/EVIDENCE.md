@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1170`
+- Alcotest/QCheck cases: `1175`
 - Cram transcript files: `76`
 - Documentation examples: `36` named examples across `8` documents
 
@@ -747,3 +747,9 @@ three cases:
   capability-typed target (E1603).
 
 The source inventory is now `1170 / 76 / 36`.
+
+TYPE.1 slice 1 adds the `opaque type` marker to type declarations (kernel form,
+canonical tag `0x47`, surface syntax, printing and formatting) with five cases
+in the `opaque-types` suite, including a golden for the opaque encoding.
+Transparent declarations keep their bytes, so the corpus and prelude hash
+goldens are unchanged. The source inventory is now `1175 / 76 / 36`.

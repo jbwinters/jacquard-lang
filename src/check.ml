@@ -1024,7 +1024,7 @@ let rec con_scheme ctx ?meta (h : Hash.t) : scheme =
   match locate ctx h with
   | Ok
       {
-        Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ };
+        Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons; _ }; _ };
         decl_hash;
         role = Store.Constructor i;
       } ->
@@ -1260,7 +1260,7 @@ let is_frozen_vary_world ctx constructor =
       Some { Resolve.hash = distribution_hash; _ },
       Ok
         {
-          Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ };
+          Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons; _ }; _ };
           decl_hash;
           role = Store.Constructor 1;
         } ) -> (
@@ -2307,7 +2307,7 @@ and infer_scoped ctx env ~ambient ~required ~meta ~callee (registration : instan
 and check_type_decl ctx (d : Kernel.decl) : unit =
   let meta = d.Kernel.meta in
   match d.Kernel.it with
-  | Kernel.DefType { tname; tvars; cons } ->
+  | Kernel.DefType { tname; tvars; cons; _ } ->
       let dup = List.find_opt (fun v -> List.length (List.filter (( = ) v) tvars) > 1) tvars in
       (match dup with
       | Some v -> err ~meta ~code:"E0810" "duplicate type parameter `%s` in %s" v tname
@@ -2507,7 +2507,7 @@ let constructors_of ctx ?meta (h : Hash.t) (args : ty list) :
   then None
   else
     match locate ctx h with
-    | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons }; _ }; decl_hash; _ }
+    | Ok { Store.decl = { Kernel.it = Kernel.DefType { tname; tvars; cons; _ }; _ }; decl_hash; _ }
       when List.length tvars = List.length args ->
         let cenv = { mode = Flexible; tvs = List.combine tvars args; rvs = [] } in
         let self = (tname, TCon (decl_hash, args)) in

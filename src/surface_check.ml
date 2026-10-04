@@ -472,8 +472,9 @@ let lint_top names constructors (top : Surface_ast.top) =
       List.concat_map (lint_pat names constructors) params @ lint_expr names constructors value
   | Surface_ast.TopExpr expression -> lint_expr names constructors expression
   | Surface_ast.Signature (_, annotation) -> long_quantifier_prefix_warnings annotation
-  | Surface_ast.TypeDecl { name; vars; constructors } ->
-      long_declaration_header_warning top Surface_name.Type name (type_header_length name vars)
+  | Surface_ast.TypeDecl { name; vars; opaque; constructors } ->
+      long_declaration_header_warning top Surface_name.Type name
+        (type_header_length name vars + if opaque then String.length "opaque " else 0)
       @ List.concat_map long_quantifier_prefix_warnings
           (List.concat_map
              (fun (constructor : Surface_ast.constructor) ->
