@@ -535,8 +535,10 @@ checks, in order:
      (E1729);
    - each context's region (the closure of its roots, stopping at what other
      contexts export and at the prelude) constructs or matches only sealed
-     types its own context owns (E1738), and reaches, other than through types
-     alone, only types and effects in its namespace (E1739);
+     types its own context owns (E1738). What its exports reach, other than
+     through types alone, is in its namespace, and no part of its region,
+     entries included, reaches a type or effect in another context's namespace
+     through a live reference (E1739);
    - closure completeness (step 3) resolves only to the bundle's own objects
      and the prelude, never to an earlier import, and so does every recorded
      export and its owner (E1728, checked before steps 5–6).

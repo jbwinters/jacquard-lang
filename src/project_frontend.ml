@@ -1446,6 +1446,22 @@ let walk_entry ?(on_resolved = fun _ _ -> Ok ()) ?(on_installed = fun _ _ -> Ok 
         Result.map_error (map_name_refusals session root.node) (Resolve.resolve_expr names e)
       in
       match hash_refusals session root.node (Kernel.Expr e) with [] -> Ok e | ds -> Error ds);
+  (* TYPE.1: a builtin runs a term from a runtime hash only if the prelude or some context in the
+     graph exports it (E1709), never a private helper *)
+  let exported = Hashtbl.create 64 in
+  Hashtbl.iter
+    (fun _ (c : composed) -> List.iter (fun (_, h) -> Hashtbl.replace exported h ()) c.exports)
+    session.composed;
+  Hashtbl.iter
+    (fun _ (_, (interface : Interface.t)) ->
+      List.iter (fun (e : Interface.export) -> Hashtbl.replace exported e.hash ()) interface.exports)
+    session.carried_contexts;
+  Eval.set_term_guard session.ctx (fun h ->
+      Hashtbl.mem exported h
+      ||
+      match Store.locate session.store h with
+      | Ok { Store.decl_hash; _ } -> Hashtbl.mem session.prelude_objects decl_hash
+      | Error _ -> false);
   Result.map_error
     (map_name_refusals session root.node)
     (Frontend.walk_tops session.store tops ~names

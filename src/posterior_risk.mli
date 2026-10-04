@@ -34,6 +34,11 @@ val replay_exact :
     exact carrier identity, and projects one independently produced baseline assessment. Expected
     validation and replay failures are returned as stable explanatory strings. *)
 
+val admit_model : Eval.ctx -> Hash.t -> (unit, string) result
+(** [admit_model ctx model] refuses (E1709) a model reference that [ctx]'s term guard does not
+    admit: in a project or bundle run, a model must be a prelude term or a term some context in the
+    graph exports (TYPE.1). Both posterior paths check it before running a model. *)
+
 val run_exact_builtin :
   Eval.ctx ->
   builtin_signatures:(Hash.t * Types.scheme) list ->

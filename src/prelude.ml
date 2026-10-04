@@ -196,7 +196,7 @@ let load ~dir store : ((string * Canon.decl_hashes list) list, Diag.t list) resu
     | `Load -> go [] files
 
 let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
-  match Store.lookup_kind store name kind with
+  match Prelude_identity.lookup_kind store name kind with
   | Some { Resolve.hash; _ } -> Ok hash
   | None -> (
       match Store.lookup_name store name with
@@ -828,9 +828,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                         ~contrast:None ()))
             | Ok p -> (
                 match
-                  ( Store.lookup_kind store "mk-pair" Resolve.KCon,
-                    Store.lookup_kind store "cons" Resolve.KCon,
-                    Store.lookup_kind store "nil" Resolve.KCon )
+                  ( Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon,
+                    Prelude_identity.lookup_kind store "cons" Resolve.KCon,
+                    Prelude_identity.lookup_kind store "nil" Resolve.KCon )
                 with
                 | ( Some { Resolve.hash = ph; _ },
                     Some { Resolve.hash = ch; _ },
@@ -874,9 +874,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                 Error (Runtime_err.Arithmetic "the inference driver failed without a cause")
             | Ok runs -> (
                 match
-                  ( Store.lookup_kind store "mk-pair" Resolve.KCon,
-                    Store.lookup_kind store "cons" Resolve.KCon,
-                    Store.lookup_kind store "nil" Resolve.KCon )
+                  ( Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon,
+                    Prelude_identity.lookup_kind store "cons" Resolve.KCon,
+                    Prelude_identity.lookup_kind store "nil" Resolve.KCon )
                 with
                 | ( Some { Resolve.hash = ph; _ },
                     Some { Resolve.hash = ch; _ },
@@ -909,9 +909,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->
               Result.bind (Infer_dist.support ctx d) (fun entries ->
                   match
-                    ( Store.lookup_kind store "mk-pair" Resolve.KCon,
-                      Store.lookup_kind store "cons" Resolve.KCon,
-                      Store.lookup_kind store "nil" Resolve.KCon )
+                    ( Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon,
+                      Prelude_identity.lookup_kind store "cons" Resolve.KCon,
+                      Prelude_identity.lookup_kind store "nil" Resolve.KCon )
                   with
                   | ( Some { Resolve.hash = ph; _ },
                       Some { Resolve.hash = ch; _ },
@@ -1086,8 +1086,8 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
                (Printf.sprintf "write expects a path and a text, got %s"
                   (String.concat ", " (List.map Value.show args)))));
   match
-    ( Store.lookup_kind (Eval.store ctx) "nil" Resolve.KCon,
-      Store.lookup_kind (Eval.store ctx) "cons" Resolve.KCon )
+    ( Prelude_identity.lookup_kind (Eval.store ctx) "nil" Resolve.KCon,
+      Prelude_identity.lookup_kind (Eval.store ctx) "cons" Resolve.KCon )
   with
   | Some { Resolve.hash = nil_h; _ }, Some { Resolve.hash = cons_h; _ } ->
       Eval.register_root_handler ctx lsdir_op (fun args ->
@@ -1501,7 +1501,7 @@ and instance_signatures store =
   match
     ( Store.lookup_internal_kind store "instance.fresh-v0" Resolve.KTerm,
       Store.lookup_internal_kind store "instance.same-v0" Resolve.KTerm,
-      Store.lookup_kind store "bool" Resolve.KType )
+      Prelude_identity.lookup_kind store "bool" Resolve.KType )
   with
   | ( Some { Resolve.hash = fresh; _ },
       Some { Resolve.hash = same; _ },

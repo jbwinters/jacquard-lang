@@ -107,9 +107,11 @@ let test_two_coins_branch_count () =
   | Error [ diagnostic ] ->
       Alcotest.(check string)
         "driver reports runtime capture failure" "E0902" (Diag.code_or_uncoded diagnostic);
+      (* TYPE.1: inference drives the prelude's [sample] by identity, so a user effect's
+         operation of the same name is never driven, let alone resumed twice *)
       Alcotest.(check bool)
-        "enumeration cannot duplicate a declared Once sample" true
-        (String.starts_with ~prefix:"a once continuation may be resumed" (Diag.cause diagnostic))
+        "enumeration does not drive a user effect's same-named sample" true
+        (String.ends_with ~suffix:"unexpected op sample/1" (Diag.cause diagnostic))
   | Error diagnostics ->
       Alcotest.failf "declared Once sample returned unexpected diagnostics: %s"
         (String.concat "; " (List.map Diag.to_string diagnostics))

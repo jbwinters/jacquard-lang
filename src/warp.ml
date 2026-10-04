@@ -18,6 +18,19 @@
     definition-level, from the hash discipline alone; cache entries record their coverage so a
     fully-cached run reports the same complement as a cold one. *)
 
+(* TYPE.1: a captured operation is the prelude's [sample], [observe] or [check] by its frozen
+   identity, never by a name a user effect may also use *)
+(* a check's verdict is the prelude's [true] by identity *)
+let prelude_true ctx con =
+  match Prelude_identity.lookup_kind (Eval.store ctx) "true" Resolve.KCon with
+  | Some { Resolve.hash; _ } -> Hash.equal hash con
+  | None -> false
+
+let prelude_op ctx op name =
+  match Prelude_identity.lookup_kind (Eval.store ctx) name Resolve.KOp with
+  | Some { Resolve.hash; _ } -> Hash.equal hash op
+  | None -> false
+
 let version = "warp-v2"
 
 type verdict = Pass of int | Fail of { soft : string list; hard : string option } | NoChecks
@@ -51,7 +64,7 @@ type schedule_plan =
 
 let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
   let ty_hash name =
-    match Store.lookup_kind store name Resolve.KType with
+    match Prelude_identity.lookup_kind store name Resolve.KType with
     | Some { Resolve.hash; _ } -> Some hash
     | None -> None
   in
@@ -278,7 +291,7 @@ let run_thunk_seeded ctx ?bounds ~test_run ~program ~root_seed ~test_seed ~sched
         ~replay_command thunk)
 
 let world_required (cctx : Check.ctx) (store : Store.t) : Hash.t list =
-  match Store.lookup_kind store "wcase" Resolve.KCon with
+  match Prelude_identity.lookup_kind store "wcase" Resolve.KCon with
   | None -> []
   | Some { Resolve.hash; _ } -> (
       match Types.repr (Check.con_scheme cctx hash).Types.ty with
@@ -287,7 +300,7 @@ let world_required (cctx : Check.ctx) (store : Store.t) : Hash.t list =
           | Types.TArrow ([], row, _) ->
               let row = Types.repr_row row in
               let check_h =
-                match Store.lookup_kind store "check" Resolve.KEffect with
+                match Prelude_identity.lookup_kind store "check" Resolve.KEffect with
                 | Some { Resolve.hash; _ } -> Some hash
                 | None -> None
               in
@@ -317,8 +330,8 @@ let choice_value ctx (d : Infer_dist.dist_v) (i : int) : (Value.t, Runtime_err.t
   | Infer_dist.Categorical entries -> Ok (fst (List.nth entries i))
   | Infer_dist.Bernoulli _ -> (
       match
-        ( Store.lookup_kind (Eval.store ctx) "true" Resolve.KCon,
-          Store.lookup_kind (Eval.store ctx) "false" Resolve.KCon )
+        ( Prelude_identity.lookup_kind (Eval.store ctx) "true" Resolve.KCon,
+          Prelude_identity.lookup_kind (Eval.store ctx) "false" Resolve.KCon )
       with
       | Some { Resolve.hash = t; _ }, Some { Resolve.hash = f; _ } ->
           if i = 0 then Ok (Value.VCon { con = f; name = "false"; args = [] })
@@ -363,7 +376,8 @@ let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
           else Pass (List.length es)
         in
         Ok { pr_verdict = v; pr_log = List.rev !log }
-    | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
+    | Ok (Eval.COp { op; name = "sample"; args = [ dv ]; kont; _ }) when prelude_op ctx op "sample"
+      -> (
         match Infer_dist.dist_of_value ctx dv with
         | Error e -> Error (`Runtime (Runtime_err.to_string e))
         | Ok d -> (
@@ -383,7 +397,8 @@ let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
                     match Eval.resume_captured_state ctx kont v with
                     | Error e -> Error (`Runtime (Runtime_err.to_string e))
                     | Ok state -> go state rest))))
-    | Ok (Eval.COp { name = "observe"; args = [ _; _ ]; kont; _ }) -> (
+    | Ok (Eval.COp { op; name = "observe"; args = [ _; _ ]; kont; _ })
+      when prelude_op ctx op "observe" -> (
         (* sampling lane: conditioning is ignored (weights are an enumeration
                concept); the exhaustive lane scales branches properly *)
         match Eval.resume_captured_state ctx kont Value.unit_v with
@@ -391,13 +406,14 @@ let drive_prop ctx ~rng ~(forced : int list) (thunk : Value.t) :
         | Ok state -> go state forced)
     | Ok
         (Eval.COp
-           { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
-      -> (
-        entries := (label, ok = "true") :: !entries;
+           { op; name = "check"; args = [ Value.VCon { con = ok; _ }; Value.VText label ]; kont; _ })
+      when prelude_op ctx op "check" -> (
+        entries := (label, prelude_true ctx ok) :: !entries;
         match Eval.resume_captured_state ctx kont Value.unit_v with
         | Error e -> Error (`Runtime (Runtime_err.to_string e))
         | Ok state -> go state forced)
-    | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
+    | Ok (Eval.COp { op; name = "fail"; args = [ Value.VText msg ]; _ })
+      when prelude_op ctx op "fail" ->
         let es = List.rev !entries in
         let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
         Ok { pr_verdict = Fail { soft; hard = Some msg }; pr_log = List.rev !log }
@@ -529,7 +545,8 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
           let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
           if soft <> [] then failure := Some (Fail { soft; hard = None });
           Ok ()
-      | Ok (Eval.COp { name = "sample"; args = [ dv ]; kont; _ }) -> (
+      | Ok (Eval.COp { op; name = "sample"; args = [ dv ]; kont; _ })
+        when prelude_op ctx op "sample" -> (
           match
             Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.support ctx d)
           with
@@ -547,7 +564,8 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
                         | Ok () -> go rest))
               in
               go support)
-      | Ok (Eval.COp { name = "observe"; args = [ dv; v ]; kont; _ }) -> (
+      | Ok (Eval.COp { op; name = "observe"; args = [ dv; v ]; kont; _ })
+        when prelude_op ctx op "observe" -> (
           match Result.bind (Infer_dist.dist_of_value ctx dv) (fun d -> Infer_dist.pmf ctx d v) with
           | Error e -> Error (Runtime_err.to_string e)
           | Ok p -> (
@@ -556,12 +574,19 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
               | Ok state -> explore state (weight *. p) entries))
       | Ok
           (Eval.COp
-             { name = "check"; args = [ Value.VCon { name = ok; _ }; Value.VText label ]; kont; _ })
-        -> (
+             {
+               op;
+               name = "check";
+               args = [ Value.VCon { con = ok; _ }; Value.VText label ];
+               kont;
+               _;
+             })
+        when prelude_op ctx op "check" -> (
           match Eval.resume_captured_state ctx kont Value.unit_v with
           | Error e -> Error (Runtime_err.to_string e)
-          | Ok state -> explore state weight ((label, ok = "true") :: entries))
-      | Ok (Eval.COp { name = "fail"; args = [ Value.VText msg ]; _ }) ->
+          | Ok state -> explore state weight ((label, prelude_true ctx ok) :: entries))
+      | Ok (Eval.COp { op; name = "fail"; args = [ Value.VText msg ]; _ })
+        when prelude_op ctx op "fail" ->
           let es = List.rev entries in
           let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
           failure := Some (Fail { soft; hard = Some msg });

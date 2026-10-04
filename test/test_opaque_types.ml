@@ -284,6 +284,132 @@ let test_projection_and_setters () =
   Alcotest.(check bool) "its constructors are not" false (exported Resolve.KCon "heads");
   Alcotest.(check int) "they are hidden members" 2 (List.length interface.Interface.hidden)
 
+(* TYPE.1 S2c: builtins build frozen prelude identities, so a source that rebinds `true`/`false` to
+   its own (opaque) constructors never receives its own values from them *)
+let test_frozen_builtin_identities () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let prelude_true =
+    match Prelude_identity.lookup_kind store "true" Resolve.KCon with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.fail "no prelude true"
+  in
+  Alcotest.(check (list string))
+    "a file rebinds the boolean constructors" []
+    (codes (walk store "opaque type Bool = | False | True\n"));
+  (match Store.lookup_kind store "true" Resolve.KCon with
+  | Some { Resolve.hash; _ } ->
+      Alcotest.(check bool) "the name is rebound" false (Hash.equal hash prelude_true)
+  | None -> Alcotest.fail "true is unbound");
+  let value =
+    match
+      Eval_support.eval_with ctx store "(app (var support) (app (var bernoulli) (lit 0.5)))"
+    with
+    | Ok v -> v
+    | Error e -> Alcotest.failf "support failed: %s" (Runtime_err.to_string e)
+  in
+  let rec booleans (v : Value.t) =
+    match v with
+    | Value.VCon { con; name = "true" | "false"; _ } -> [ con ]
+    | Value.VCon { args; _ } -> List.concat_map booleans args
+    | Value.VTuple items -> List.concat_map booleans items
+    | _ -> []
+  in
+  let seen = booleans value in
+  Alcotest.(check bool) "support returns booleans" true (seen <> []);
+  Alcotest.(check bool)
+    "every one is the prelude's" true
+    (List.for_all
+       (fun con ->
+         match Store.locate store con with
+         | Ok { Store.decl = { Kernel.it = Kernel.DefType { opaque; _ }; _ }; _ } -> not opaque
+         | _ -> false)
+       seen)
+
+(* the same holds in a project: a root without a namespace that rebinds the boolean constructors
+   still receives prelude booleans from builtins *)
+let test_frozen_identities_in_projects () =
+  let work =
+    Filename.concat (Filename.get_temp_dir_name ())
+      (Printf.sprintf "jacquard-opaque-frozen-%d" (Unix.getpid ()))
+  in
+  let cleanup () = ignore (Sys.command (Filename.quote_command "rm" [ "-rf"; work ])) in
+  Fun.protect ~finally:cleanup (fun () ->
+      List.iter (fun d -> Unix.mkdir d 0o755) [ work; Filename.concat work ".git" ];
+      let write name text =
+        Out_channel.with_open_bin (Filename.concat work name) (fun oc ->
+            Out_channel.output_string oc text)
+      in
+      write "project.jqd" "(project-v1 (name \"root\") (requires (core \"0.2\")) (units \"r.jac\"))";
+      write "r.jac" "opaque type Bool = | False | True\n";
+      let session, _ =
+        match
+          Project_frontend.open_graph ~prelude_dir:"../prelude" ~root:(Filename.concat work "store")
+            (Filename.concat work "project.jqd")
+        with
+        | Ok s -> s
+        | Error ds -> fail_diags "open" ds
+      in
+      let store = Project_frontend.store session and ctx = Project_frontend.eval_ctx session in
+      (match
+         ( Store.lookup_kind store "true" Resolve.KCon,
+           Prelude_identity.lookup_kind store "true" Resolve.KCon )
+       with
+      | Some { Resolve.hash = bound; _ }, Some { Resolve.hash = frozen; _ } ->
+          Alcotest.(check bool) "the root rebinds the name" false (Hash.equal bound frozen)
+      | _ -> Alcotest.fail "true is unbound");
+      let value =
+        match
+          Eval_support.eval_with ctx store "(app (var support) (app (var bernoulli) (lit 0.5)))"
+        with
+        | Ok v -> v
+        | Error e -> Alcotest.failf "support failed: %s" (Runtime_err.to_string e)
+      in
+      let rec opaque_booleans (v : Value.t) =
+        match v with
+        | Value.VCon { con; name = "true" | "false"; _ } -> (
+            match Store.locate store con with
+            | Ok { Store.decl = { Kernel.it = Kernel.DefType { opaque; _ }; _ }; _ } ->
+                if opaque then 1 else 0
+            | _ -> 0)
+        | Value.VCon { args; _ } -> List.fold_left (fun n a -> n + opaque_booleans a) 0 args
+        | Value.VTuple items -> List.fold_left (fun n a -> n + opaque_booleans a) 0 items
+        | _ -> 0
+      in
+      Alcotest.(check int) "no root-owned boolean" 0 (opaque_booleans value))
+
+(* the store remembers a confirmed pin only until it hides or removes an object *)
+let test_confirmed_pins_follow_the_store () =
+  let fresh label =
+    let root =
+      Filename.concat (Filename.get_temp_dir_name ())
+        (Printf.sprintf "jacquard-opaque-visible-%s-%d" label (Unix.getpid ()))
+    in
+    at_exit (fun () -> ignore (Sys.command (Filename.quote_command "rm" [ "-rf"; root ])));
+    match Store.open_store root with Ok s -> s | Error ds -> fail_diags "open" ds
+  in
+  let bool_decl = kernel_decl "(deftype bool () (con false) (con true))" in
+  let pinned_true store = Prelude_identity.lookup_kind store "true" Resolve.KCon in
+  (* a transaction installs the prelude's bool, a lookup confirms its pin, and the rollback removes it *)
+  let store = fresh "rollback" in
+  let result =
+    Store.transaction store (fun () ->
+        ignore (Store.put_decl store bool_decl);
+        Alcotest.(check bool) "confirmed inside" true (Option.is_some (pinned_true store));
+        Error ())
+  in
+  Alcotest.(check bool) "the transaction rolled back" true (Result.is_error result);
+  Alcotest.(check bool) "the pin is forgotten" true (Option.is_none (pinned_true store));
+  (* a confirmed member that the store then hides is not returned either *)
+  let store = fresh "hide" in
+  ignore (Store.put_decl store bool_decl);
+  let hash =
+    match pinned_true store with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.fail "the prelude's true is not pinned"
+  in
+  Store.hide_derived store hash;
+  Alcotest.(check bool) "a hidden pin is not returned" true (Option.is_none (pinned_true store))
+
 let suite =
   [
     Alcotest.test_case "kernel marker" `Quick test_kernel_marker;
@@ -293,4 +419,7 @@ let suite =
     Alcotest.test_case "printing and formatting" `Quick test_printing;
     Alcotest.test_case "single-file sealing" `Quick test_single_file_seal;
     Alcotest.test_case "public projection and setters" `Quick test_projection_and_setters;
+    Alcotest.test_case "frozen builtin identities" `Quick test_frozen_builtin_identities;
+    Alcotest.test_case "frozen identities in projects" `Quick test_frozen_identities_in_projects;
+    Alcotest.test_case "confirmed pins follow the store" `Quick test_confirmed_pins_follow_the_store;
   ]

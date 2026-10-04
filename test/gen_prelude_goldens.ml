@@ -40,4 +40,11 @@ let () =
       let oc = open_out_bin out in
       List.iter (fun l -> output_string oc (l ^ "\n")) lines;
       close_out oc;
-      Printf.printf "wrote %d lines to %s\n" (List.length lines) out
+      Printf.printf "wrote %d lines to %s\n" (List.length lines) out;
+      (* TYPE.1: the public bindings the frozen builtin identities are generated from *)
+      let bindings_out = Filename.concat (Filename.dirname out) "prelude-bindings.golden" in
+      let bindings = Prelude_identity.binding_lines store in
+      let oc = open_out_bin bindings_out in
+      List.iter (fun l -> output_string oc (l ^ "\n")) bindings;
+      close_out oc;
+      Printf.printf "wrote %d lines to %s\n" (List.length bindings) bindings_out

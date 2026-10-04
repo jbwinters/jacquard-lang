@@ -152,8 +152,8 @@ let support ctx (d : dist_v) : ((Value.t * float) list, Runtime_err.t) result =
   match d with
   | Bernoulli p -> (
       match
-        ( Store.lookup_kind (Eval.store ctx) "true" Resolve.KCon,
-          Store.lookup_kind (Eval.store ctx) "false" Resolve.KCon )
+        ( Prelude_identity.lookup_kind (Eval.store ctx) "true" Resolve.KCon,
+          Prelude_identity.lookup_kind (Eval.store ctx) "false" Resolve.KCon )
       with
       | Some { Resolve.hash = t; _ }, Some { Resolve.hash = f; _ } ->
           Ok
@@ -196,6 +196,13 @@ let pmf ctx (d : dist_v) (v : Value.t) : (float, Runtime_err.t) result =
 (* --- driving the machine --- *)
 
 (* Run a state to either a terminal value or the first root-reaching dist op. *)
+(* TYPE.1: an operation is the prelude's [sample] or [observe] by its frozen identity, never by a
+   name a user effect may also use *)
+let is_dist_op (ctx : Eval.ctx) op name =
+  match Prelude_identity.lookup_kind (Eval.store ctx) name Resolve.KOp with
+  | Some { Resolve.hash; _ } -> Hash.equal hash op
+  | None -> false
+
 type outcome =
   | Done of Value.t
   | Op of { op : Hash.t; name : string; args : Value.t list; resume : Eval.captured_kont }
@@ -249,7 +256,7 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
   else
     let ( let* ) = Result.bind in
     let lookup kind name =
-      match Store.lookup_kind (Eval.store ctx) name kind with
+      match Prelude_identity.lookup_kind (Eval.store ctx) name kind with
       | Some { Resolve.hash; _ } -> Ok hash
       | None ->
           err ~code:"E0915" "the released `%s` identity is unavailable in the evaluator store" name
@@ -588,13 +595,15 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
     | Ok (Validated_done v) ->
         runs := { value = v; weight } :: !runs;
         Ok ()
-    | Ok (Validated_op { name = "sample"; args = [ dv ]; resume; _ }) -> (
+    | Ok (Validated_op { op; name = "sample"; args = [ dv ]; resume; _ })
+      when is_dist_op ctx op "sample" -> (
         match Result.bind (dist_of_value ctx dv) (sample_dist ctx rng) with
         | Error e -> Error e
         | Ok x ->
             Result.bind (Eval.resume_validated_state ctx resume x) (fun state ->
                 one_run rng state weight))
-    | Ok (Validated_op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
+    | Ok (Validated_op { op; name = "observe"; args = [ dv; v ]; resume; _ })
+      when is_dist_op ctx op "observe" -> (
         match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
         | Error e -> Error e
         | Ok p ->
@@ -734,7 +743,8 @@ let enumerate_v1 ?max_branches (ctx : Eval.ctx) (model : Eval.state) :
       | Ok (Done v) ->
           if terminal () then leaves := { value = v; weight } :: !leaves;
           Ok ()
-      | Ok (Op { name = "sample"; args = [ dv ]; resume; _ }) -> (
+      | Ok (Op { op; name = "sample"; args = [ dv ]; resume; _ }) when is_dist_op ctx op "sample"
+        -> (
           match Result.bind (dist_of_value ctx dv) (support ctx) with
           | Error e -> Error e
           | Ok entries ->
@@ -748,7 +758,8 @@ let enumerate_v1 ?max_branches (ctx : Eval.ctx) (model : Eval.state) :
                       (fun () -> branches rest)
               in
               branches entries)
-      | Ok (Op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
+      | Ok (Op { op; name = "observe"; args = [ dv; v ]; resume; _ })
+        when is_dist_op ctx op "observe" -> (
           match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
           | Error e -> Error e
           | Ok p ->
@@ -790,7 +801,8 @@ let lw_surviving_runs (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.stat
     | Ok (Validated_done v) ->
         if possible then runs := { value = v; weight } :: !runs;
         Ok ()
-    | Ok (Validated_op { name = "sample"; args = [ dv ]; resume; _ }) -> (
+    | Ok (Validated_op { op; name = "sample"; args = [ dv ]; resume; _ })
+      when is_dist_op ctx op "sample" -> (
         match dist_of_value ctx dv with
         | Error e -> Error e
         | Ok d -> (
@@ -805,7 +817,8 @@ let lw_surviving_runs (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.stat
             | Ok x ->
                 Result.bind (Eval.resume_validated_state ctx resume x) (fun state ->
                     one_run rng state weight (possible && not empty))))
-    | Ok (Validated_op { name = "observe"; args = [ dv; v ]; resume; _ }) -> (
+    | Ok (Validated_op { op; name = "observe"; args = [ dv; v ]; resume; _ })
+      when is_dist_op ctx op "observe" -> (
         match Result.bind (dist_of_value ctx dv) (fun d -> pmf ctx d v) with
         | Error e -> Error e
         | Ok p ->

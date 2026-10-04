@@ -329,7 +329,7 @@ let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_
             else granted_hashes store allows
           in
           let eval_hash =
-            match Store.lookup_kind store "eval" Resolve.KEffect with
+            match Prelude_identity.lookup_kind store "eval" Resolve.KEffect with
             | Some { Resolve.hash; _ } -> Some hash
             | None -> None
           in
@@ -944,7 +944,7 @@ let infer_check store model =
       | Error ds -> Error ds
       | Ok { Check.row; _ } -> (
           let granted =
-            match Store.lookup_kind store "dist" Resolve.KEffect with
+            match Prelude_identity.lookup_kind store "dist" Resolve.KEffect with
             | Some { Resolve.hash; _ } -> [ hash ]
             | None -> []
           in
@@ -1342,8 +1342,8 @@ let replay_cmd log_file program forks to_n compare prelude =
                   else `Stub
             in
             (match
-               ( Store.lookup_kind store "fetch" Resolve.KOp,
-                 Store.lookup_kind store "mk-response" Resolve.KCon )
+               ( Prelude_identity.lookup_kind store "fetch" Resolve.KOp,
+                 Prelude_identity.lookup_kind store "mk-response" Resolve.KCon )
              with
             | Some { Resolve.hash = fetch_op; _ }, Some { Resolve.hash = resp_con; _ } ->
                 Eval.register_root_handler ctx fetch_op (fun args ->
@@ -1457,7 +1457,7 @@ let replay_cmd log_file program forks to_n compare prelude =
    status reflects failures. *)
 let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir ~no_cache
     ~default_cache_dir ~coverage ~prelude ~discover () =
-  match Store.lookup_kind store "test.run" Resolve.KTerm with
+  match Prelude_identity.lookup_kind store "test.run" Resolve.KTerm with
   | None -> print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
   | Some { Resolve.hash = tr; _ } -> (
       match Warp.value_of ctx tr with

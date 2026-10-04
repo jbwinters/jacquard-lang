@@ -13,6 +13,12 @@ val store : ctx -> Store.t
 (** [store ctx] returns the backing store used for declaration and name lookup. *)
 
 val code_resolver : ctx -> (Kernel.expr -> (Kernel.expr, Diag.t list) result) option
+val term_guard : ctx -> (Hash.t -> bool) option
+
+val set_term_guard : ctx -> (Hash.t -> bool) -> unit
+(** [set_term_guard ctx admits] restricts the term identities a builtin may run from a hash carried
+    in a runtime value (a posterior model reference) to those [admits] accepts (TYPE.1). Project and
+    bundle runs admit prelude terms and terms some context in the graph exports. *)
 
 val set_code_resolver : ctx -> (Kernel.expr -> (Kernel.expr, Diag.t list) result) -> unit
 (** [set_code_resolver ctx resolve] makes [eval-code] resolve every payload with [resolve] instead

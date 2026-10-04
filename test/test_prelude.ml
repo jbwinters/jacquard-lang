@@ -288,6 +288,13 @@ let test_prelude_hashes_golden () =
         "prelude hashes match corpus/golden/prelude-hashes.golden (regenerate with `dune exec \
          test/gen_prelude_goldens.exe` and review the diff)"
         expected actual;
+      Alcotest.(check (list string))
+        "prelude bindings match corpus/golden/prelude-bindings.golden, which pins the frozen \
+         builtin identities (regenerate with `dune exec test/gen_prelude_goldens.exe`)"
+        (Corpus_support.read_file "../corpus/golden/prelude-bindings.golden"
+        |> String.split_on_char '\n'
+        |> List.filter (fun l -> l <> ""))
+        (Prelude_identity.binding_lines store);
       test_reviewed_operation_modes store
 
 let eval_ok src =

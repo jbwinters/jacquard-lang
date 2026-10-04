@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1183`
+- Alcotest/QCheck cases: `1191`
 - Cram transcript files: `77`
 - Documentation examples: `36` named examples across `8` documents
 
@@ -797,3 +797,14 @@ Entry units may declare their own types outside the namespace; an unprefixed typ
 No region, entries included, may reach a type or effect inside another context's namespace through a live reference (E1739).
 
 The source inventory is now `1183 / 77 / 36`.
+
+TYPE.1 slice 2c freezes builtin identities. Builtins construct, recognise,
+call, register and type prelude declarations through `Prelude_identity`, whose
+pins are generated from `corpus/golden/prelude-bindings.golden`, never through a
+name the store binds at run time. `infer_dist` recognises `sample` and
+`observe` by identity.
+
+In a project or bundle run, a posterior model reference must name a prelude
+term or a term some context exports. Otherwise it is refused (E1709). New
+`opaque-types` and `bundle-regions` cases cover both. The source inventory is now
+`1191 / 77 / 36`.

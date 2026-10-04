@@ -466,7 +466,7 @@ let granted_effects store allows =
      declared ConsoleInput effect (Prelude.install_console installs both root handlers) *)
   let console_input =
     if List.exists (fun name -> String.lowercase_ascii name = "console") allows then
-      match Store.lookup_kind store "console-input" Resolve.KEffect with
+      match Prelude_identity.lookup_kind store "console-input" Resolve.KEffect with
       | Some { Resolve.hash; _ } -> [ hash ]
       | None -> []
     else []

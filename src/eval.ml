@@ -203,6 +203,9 @@ type ctx = {
       (** scheduler-only mode: capture granted operations before invoking their root handlers *)
   mutable code_resolver : (Kernel.expr -> (Kernel.expr, Diag.t list) result) option;
       (** how [eval-code] resolves a payload; [None] resolves against the store's public names *)
+  mutable term_guard : (Hash.t -> bool) option;
+      (** TYPE.1: which term identities a builtin may run from a runtime hash (a posterior model);
+          [None] admits any stored term, as a single file does *)
   mutable track_coverage : bool;
       (** coverage bookkeeping costs a hash-keyed table write per term reference — measured ~12% of
           a pure-recursion run (PF.2 phase 2). The run path never reads coverage, so the CLI turns
@@ -255,6 +258,13 @@ let next_audit_context_id = Atomic.make 0
     root-handler tables. *)
 let code_resolver ctx = ctx.code_resolver
 
+let term_guard ctx = ctx.term_guard
+
+let set_term_guard ctx guard =
+  if ctx.observing then
+    invalid_arg "Eval.set_term_guard: an observation callback cannot change resolution";
+  ctx.term_guard <- Some guard
+
 let set_code_resolver ctx resolver =
   if ctx.observing then
     invalid_arg "Eval.set_code_resolver: an observation callback cannot change resolution";
@@ -279,6 +289,7 @@ let make_ctx store =
     capture_ops = false;
     capture_root_handlers = false;
     code_resolver = None;
+    term_guard = None;
     track_coverage = true;
     coverage = Hashtbl.create 64;
     recovery_immutable_clean = Physical_cache.create 128;
