@@ -34,7 +34,7 @@ tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1167`
 - Cram transcript files: `76`
-- Documentation examples: `35` named examples across `8` documents
+- Documentation examples: `36` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
 native interpreter/compiler differential cases, leak and memory checks,
@@ -730,3 +730,9 @@ Slice 3 of scoped effect instances (design §12 A4) compiles scopes natively.
   - `test/cli/scoped-instances.t`, which now checks interpreter/native parity.
 
 No test case or cram file is added, so the source inventory stays `1167 / 76 / 35`.
+
+Slice 4 of scoped effect instances documents the scoped forms in
+`docs/stdlib.md` (Ring 1, "Scoped instances"). The section covers their
+signatures, the checker's rules and their codes, and the migration. It adds one
+run doctest, `stdlib-scoped-instances` (the two-store example). The source
+inventory is now `1167 / 76 / 36`.

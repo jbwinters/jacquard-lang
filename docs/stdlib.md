@@ -380,6 +380,75 @@ Every signature reads the same way: take a computation whose row includes the
 effect, return one whose row does not, pass everything else through. Handling is
 subtraction made visible.
 
+### Scoped instances
+
+The four effects above are *ambient*: the nearest handler serves an operation,
+whoever installed it. State, Throw and Emit also come as *scoped instances*. A
+scope hands its callback a capability and serves only the operations made
+through that capability. The scoped forms and their operations are listed by
+signature; their bodies are trusted prelude terms, so this is not executable
+source:
+
+```text
+state.scoped   : forall a s | e. (s, (StateRef s) ->{StateInstance | e} a) ->{| e} a
+throw.scoped   : forall a x | e. ((ThrowRef x) ->{ThrowInstance | e} a) ->{| e} Result x a
+emit.scoped    : forall a w | e. ((EmitRef w) ->{EmitInstance | e} a) ->{| e} (a, List w)
+state.get-at   : (StateRef s) ->{StateInstance} s
+state.put-at   : (StateRef s, s) ->{StateInstance} ()
+throw.throw-at : (ThrowRef x, x) ->{ThrowInstance} a
+emit.emit-at   : (EmitRef w, w) ->{EmitInstance} ()
+```
+
+An operation on another scope's capability passes through an inner scope
+untouched, so two stores of the same type never confuse each other. Here the
+outer store ends at 11 and the inner one stays 20:
+
+```jacquard doctest=stdlib-scoped-instances mode=run fixture=stdlib-scoped-instances.jac stdout=stdlib-scoped-instances.stdout stderr=empty exit=0
+state.scoped(10, fn (outer) ->
+  state.scoped(20, fn (inner) -> {
+    state.put-at(outer, 11)
+    (state.get-at(outer), state.get-at(inner))
+  }))
+```
+
+The checker enforces these rules:
+
+- **Direct use.** Call a scoped form directly, with a literal one-parameter
+  lambda as its callback. A wrapper, an alias, an annotated head, or passing
+  the form as a value is refused (E0831).
+- **Non-escape.** A capability cannot leave its scope through the result, a
+  closure, a thrown or emitted value, or an enclosing variable (E0832). Return
+  or store the values you read, not the capability.
+- **Spawned work.** Work that runs on a fresh continuation (`async.spawn`,
+  `async.scope`, and the `dist.sample-lw` and `dist.sample-lw-weights-v1`
+  thunks) cannot perform an operation on a capability whose scope is outside
+  that work (E0833). It may open and discharge its own scope, and merely
+  capturing an unused capability is allowed. Because their rows share a tail, a
+  sibling callback in a body that spawns is restricted the same way.
+- **Handlers.** A user handler cannot handle an instance operation (E0834).
+- **Opacity.** Capabilities cannot be forged or taken apart (E0835). A
+  capability type cannot be written directly into a nominal type's field or a
+  user operation's signature (E0836). A declared type parameter may carry one,
+  subject to non-escape.
+- **Determinacy.** A row annotation or published scheme that names an instance
+  effect needs a capability that determines it. A top-level expression cannot
+  leave an instance operation unhandled (E0830).
+
+These guarantees cover statically checked code; the results of unchecked `eval`
+are outside them. A capability smuggled out through `eval` is trapped at run
+time (E0920) when an operation on it finds no frame of its scope on the current
+continuation. Scopes run identically in native builds. The design, its
+limits and the evidence are in `docs/designs/scoped-effect-instances.md`.
+
+**Migration.** These declarations were added to the prelude:
+
+- an existing store refuses the new prelude (E0705), so re-initialize it;
+- retained interface manifests and sealed artifacts (`Prelude_changed`) and
+  bundles (E1720) must be regenerated;
+- project dependency pins must be refreshed with `jacquard project pin`.
+
+No existing declaration hash changed.
+
 ## 5. The seams: data and control, converted lawfully
 
 Principle 2 splits the library into a data style and a control style. Four functions
