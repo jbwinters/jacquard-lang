@@ -125,7 +125,7 @@ module Jacquard
        | TForall(name* tyvars, name* rowvars, type body)
 
   decl = DefTerm(binding+ group)             -- a mutually recursive SCC, hashed as a unit
-       | DefType(name id, name* vars, conspec+ constructors)
+       | DefType(name id, name* vars, bool opaque, conspec+ constructors)
        | DefEffect(name id, name* vars, opspec+ operations)
 
   -- auxiliary products (structures, not forms)
@@ -284,7 +284,9 @@ Three forms, and the third is where two commitments become one mechanism:
   strongly connected component as a unit, members in canonical order, self-references as
   bound indices (§6).
 - **`DefType`** declares sums with optionally-labeled fields. Constructors are not forms;
-  they are references (`Con`-kind) applied with ordinary `App`.
+  they are references (`Con`-kind) applied with ordinary `App`. An `(opaque)` marker after
+  the type parameters declares an opaque type, whose constructors are sealed to the owning
+  project (`docs/designs/abstract-types.md`); opacity is part of the declaration's identity.
 - **`DefEffect`** declares an effect and its operations' signatures. This single form is
   the doorway for IO, `Abort`, `Eval`, and `Dist` alike. Capabilities need **no** kernel
   surface at all: an effect names *what* a computation does; whether it *may* is decided

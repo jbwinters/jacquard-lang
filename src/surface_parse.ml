@@ -433,10 +433,15 @@ let rec mode_effect_ahead state index =
   | Surface_lex.Keyword "effect" -> true
   | _ -> false
 
+(* [opaque] is contextual: it starts a declaration only when `type` follows it directly. *)
+let opaque_type_ahead state index =
+  (token_at state (index + 1)).Surface_lex.token = Surface_lex.Keyword "type"
+
 let top_item_ahead state index =
   match (token_at state index).Surface_lex.token with
   | Surface_lex.Keyword ("type" | "effect" | "jqd") -> true
   | Surface_lex.Keyword ("once" | "multi") -> mode_effect_ahead state index
+  | Surface_lex.Ident "opaque" when opaque_type_ahead state index -> true
   | token -> (
       match term_name token with
       | None -> false
@@ -2552,7 +2557,7 @@ let next_bar state =
   let index = index_after_layout state state.index in
   if (token_at state index).Surface_lex.token = Surface_lex.Bar then Some index else None
 
-let parse_type_decl state keyword =
+let parse_type_decl ?(opaque = false) state keyword =
   let name, name_token = parse_decl_name state "a type name" type_decl_name in
   let vars = parse_type_vars state (fun token -> token = Surface_lex.Equal) in
   ignore (expect state Surface_lex.Equal "`=` in the type declaration");
@@ -2594,7 +2599,7 @@ let parse_type_decl state keyword =
     | [] -> meta_with_span keyword.Surface_lex.span
   in
   let meta = Meta.with_surface_container "declaration-name" (meta_with_span name_token.span) meta in
-  Surface_ast.{ it = TypeDecl { name; vars; constructors }; meta }
+  Surface_ast.{ it = TypeDecl { name; vars; opaque; constructors }; meta }
 
 let parse_operation_types state =
   match expect state Surface_lex.LParen "`(` before operation parameter types" with
@@ -2874,6 +2879,10 @@ let parse_top state =
       ignore (advance state);
       top_hole state token
   | Surface_lex.Keyword "type" -> parse_type_decl state (advance state)
+  | Surface_lex.Ident "opaque" when opaque_type_ahead state state.index ->
+      let keyword = advance state in
+      ignore (advance state);
+      parse_type_decl ~opaque:true state keyword
   | Surface_lex.Keyword "effect" ->
       let keyword = advance state in
       parse_effect_decl state ~start:keyword ~effect_mode:None keyword

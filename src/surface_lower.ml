@@ -1171,7 +1171,7 @@ let generated_setters ~explicit_terms ~type_name (constructors : Kernel.conspec 
 let lower_nonterm_top (top : Surface_ast.top) =
   match top.it with
   | Surface_ast.TopExpr expr -> Result.map (fun expr -> Kernel.Expr expr) (lower_expr_node expr)
-  | Surface_ast.TypeDecl { name; vars; constructors } ->
+  | Surface_ast.TypeDecl { name; vars; opaque; constructors } ->
       let lower_field (field : Surface_ast.field) =
         let* fty = lower_ty field.ty in
         Ok Kernel.{ label = field.label; fty; fmeta = field.meta }
@@ -1183,7 +1183,9 @@ let lower_nonterm_top (top : Surface_ast.top) =
       let* cons = map_results lower_constructor constructors in
       let* () = field_label_errors ~type_name:name cons in
       (* accessors need the whole file (E1241); [lower_tops] generates them after this decl *)
-      Ok (Kernel.Decl Kernel.{ it = DefType { tname = name; tvars = vars; cons }; meta = top.meta })
+      Ok
+        (Kernel.Decl
+           Kernel.{ it = DefType { tname = name; tvars = vars; opaque; cons }; meta = top.meta })
   | Surface_ast.EffectDecl { name; vars; operations } ->
       let lower_operation (operation : Surface_ast.operation) =
         let* op_mode =

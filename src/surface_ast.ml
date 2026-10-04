@@ -96,7 +96,7 @@ type top = top_node node
 and top_node =
   | Signature of name * ty
   | Definition of { name : name; equation : bool; params : pat list; value : expr }
-  | TypeDecl of { name : name; vars : name list; constructors : constructor list }
+  | TypeDecl of { name : name; vars : name list; opaque : bool; constructors : constructor list }
   | EffectDecl of { name : name; vars : name list; operations : operation list }
   | TopExpr of expr
   | RawTop of Form.t

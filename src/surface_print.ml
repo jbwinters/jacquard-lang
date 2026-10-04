@@ -1582,11 +1582,13 @@ let pp_operation ?inherited_mode context lookup fmt (operation : Kernel.opspec) 
   Format.fprintf fmt " ->@ %a@]" (pp_ty context lookup) operation.op_result;
   pp_trailing context operation.smeta fmt
 
-let flat_type_decl_length lookup tname tvars constructors =
+let flat_type_decl_length lookup ~opaque tname tvars constructors =
   let buffer = Buffer.create 128 in
   let formatter = Format.formatter_of_buffer buffer in
   Format.pp_set_margin formatter 1_000_000;
-  Format.fprintf formatter "@[<h>type %a" (pp_named Surface_name.Type) tname;
+  Format.fprintf formatter "@[<h>%stype %a"
+    (if opaque then "opaque " else "")
+    (pp_named Surface_name.Type) tname;
   List.iter (fun name -> Format.fprintf formatter " %a" (pp_named Surface_name.Tvar) name) tvars;
   Format.fprintf formatter " =";
   List.iter
@@ -1605,7 +1607,7 @@ let pp_decl context lookup fmt (decl : Kernel.decl) =
   | Kernel.DefTerm bindings ->
       if not (printable_term_group bindings) then raise Bug_unsupported_surface_form;
       Format.fprintf fmt "@[<v>%a@]" (pp_sep "" (pp_binding context lookup)) bindings
-  | Kernel.DefType { tname; tvars; cons } ->
+  | Kernel.DefType { tname; tvars; opaque; cons } ->
       (* A horizontal box never breaks, so an own-line comment, or a line comment followed by
          another constructor, requires the vertical layout. *)
       let needs_lines =
@@ -1621,10 +1623,12 @@ let pp_decl context lookup fmt (decl : Kernel.decl) =
                  earlier)
       in
       let vertical =
-        needs_lines || flat_type_decl_length lookup tname tvars cons > Format.pp_get_margin fmt ()
+        needs_lines
+        || flat_type_decl_length lookup ~opaque tname tvars cons > Format.pp_get_margin fmt ()
       in
       Format.fprintf fmt
-        (if vertical then "@[<v 2>type %a" else "@[<h>type %a")
+        (if vertical then "@[<v 2>%stype %a" else "@[<h>%stype %a")
+        (if opaque then "opaque " else "")
         (pp_named Surface_name.Type) tname;
       List.iter (fun name -> Format.fprintf fmt " %a" (pp_named Surface_name.Tvar) name) tvars;
       Format.fprintf fmt (if vertical then " =@," else " = ");

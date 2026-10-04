@@ -108,6 +108,7 @@ let () =
       ("surface-named-calls", Test_surface_named_calls.suite);
       ("surface-parse-recovery", Test_surface_parse_recovery.suite);
       ("surface-decls", Test_surface_decls.suite);
+      ("opaque-types", Test_opaque_types.suite);
       ("surface-try", Test_surface_try.suite);
       ("surface-field-update", Test_surface_field_update.suite);
       ("surface-compose", Test_surface_compose.suite);
