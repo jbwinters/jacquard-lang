@@ -53,6 +53,10 @@ val member_visibility : t -> Hash.t -> visibility option
 
 (** {1 Producing} *)
 
+val kind_matches : Store.t -> string -> Resolve.nkind -> Hash.t -> bool
+(** [kind_matches store name kind hash] holds when [hash] is a declaration of [kind] and, unless it
+    is a term, [name] is that declaration's own name. *)
+
 val of_side : ?source:Hash.t -> ?recorded:bool -> Check.ctx -> Diff.side -> (t, Diag.t list) result
 (** [of_side checker side] describes every binding [side] exposes that [side.store] publicly binds
     to the same identity. With [~recorded:true] it describes every binding [side] exposes whose

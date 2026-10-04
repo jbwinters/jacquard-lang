@@ -533,6 +533,10 @@ checks, in order:
      and none is a boundary-prefix of another (E1707);
    - every carried context is a dependency of the bundle's own context
      (E1729);
+   - each context's region (the closure of its roots, stopping at what other
+     contexts export and at the prelude) constructs or matches only sealed
+     types its own context owns (E1738), and reaches, other than through types
+     alone, only types and effects in its namespace (E1739);
    - closure completeness (step 3) resolves only to the bundle's own objects
      and the prelude, never to an earlier import, and so does every recorded
      export and its owner (E1728, checked before steps 5–6).

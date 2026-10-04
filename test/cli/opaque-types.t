@@ -131,3 +131,27 @@ Each file `jacquard tiers` loads is its own defining scope (E0315):
   $ jacquard tiers owner.jqd consumer.jqd 2>&1 | grep -A1 'error\[E0315\]' | sed -E 's/[0-9a-f]{64}/HASH/; s/^.*error/error/'
   error[E0315]: A sealed constructor is used outside its defining scope.
     Cause: constructor `tier-heads` (HASH) belongs to the opaque type `tier-coin`, which this source does not declare
+
+Entries may declare their own types, transparent or opaque, outside the
+project's namespace. A bundle carries them, and verification attributes an
+unprefixed type to the bundle's own root:
+
+  $ cd ../.. && mkdir -p ent && cd ent
+  $ printf '(project-v1 (name "ent") (requires (core "0.2")) (namespace ent) (units "l.jac") (exports (term ent.one)) (entries (run demo (units "demo.jac")) (test suite (units "t.jac"))))' > project.jqd
+  $ echo 'ent.one = 1' > l.jac
+  $ printf 'type Local = | Local(value: Int)\nopaque type Hidden = | Hidden(value: Int)\nlocal.value(Local(ent.one))\nhidden.value(Hidden(2))\n' > demo.jac
+  $ printf 'type Fixture = | Fixture(value: Int)\nent.tests = Group("ent", [Case("fixture", fn () -> check.eq(fixture.value(Fixture(3)), 3, int.eq, int.show, "fixture"))])\n' > t.jac
+  $ jacquard project bundle -o ../ent.bundle > /dev/null && jacquard project run --bundle ../ent.bundle demo
+  1
+  2
+  $ jacquard project test --bundle ../ent.bundle suite 2>&1 | tail -1
+  1 passed, 0 failed, 0 skipped, 0 refused
+
+A root without a namespace owns its opaque types:
+
+  $ cd .. && mkdir -p nons && cd nons
+  $ printf '(project-v1 (name "nons") (requires (core "0.2")) (units "l.jac") (entries (run demo (units "demo.jac"))))' > project.jqd
+  $ printf 'opaque type Coin = | Heads | Tails\nflip(c) = match c { | Heads -> Tails | Tails -> Heads }\n' > l.jac
+  $ echo 'flip(Heads)' > demo.jac
+  $ jacquard project bundle -o ../nons.bundle > /dev/null && jacquard project run --bundle ../nons.bundle demo
+  tails
