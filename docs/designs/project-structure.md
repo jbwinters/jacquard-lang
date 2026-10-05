@@ -177,6 +177,9 @@ The rules:
   - it is exported exactly when its type is exported with constructors, and
     stays hidden when the type is exported abstractly
   - it is never checked against the prefix
+  - an `opaque type` (TYPE.1, `docs/designs/abstract-types.md`) seals its
+    constructors: they can never be exported (E1736), and only the owning
+    project constructs or matches them
 - **Visible constructors must not collide.** Constructor names that become
   visible together (local, dependency exports, prelude) are checked
   explicitly. Two with the same name from different owners is E1731, naming
@@ -191,6 +194,11 @@ The rules:
   E1707 is checked before E1714.
 - A project without `namespace` has no contract. That is allowed only for a
   project nothing depends on (E1708).
+- **Types and effects are owned by namespace** (TYPE.1). A type or effect
+  belongs to the graph project whose namespace prefixes its name; prelude
+  identities belong to none. No project may declare a type or effect inside
+  another project's namespace, even byte for byte (E1737), so a root without a
+  namespace cannot re-declare a dependency's type to become its co-owner.
 
 **Consequences:**
 
@@ -251,6 +259,14 @@ This single rule applies to **names and to explicit identities**:
 - If two direct dependencies both export the same identity (for example, both
   re-export a shared type in a later version), that identity is visible once.
   The rule depends on identities, not on installation order.
+
+**Abstract export and opaque types.** Exporting `(type X)` without its
+constructors hides them by name only (W1703 says so). An `opaque type` closes
+the remaining routes as well: constructor export (E1736), re-declaration
+(E1737), bundles whose recorded namespaces do not match what they carry
+(E1739) or that carry a sealed constructor outside its owner's region (E1738), `eval-code` payloads, host protocol v0 (E1604) and generated
+setters. Its values print as `<opaque name>`. `docs/designs/abstract-types.md`
+§2.4 lists each rule.
 
 **What this is and is not.** This is **language access control** for checked
 client code. It is not concealment: private objects are present in stores and

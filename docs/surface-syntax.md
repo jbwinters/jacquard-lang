@@ -75,7 +75,7 @@ file          := seps? [top-item (seps top-item)*] seps?
 top-item      := signature | definition | type-decl | effect-decl | expr | raw-top
 signature     := term-name ":" cont type
 definition    := term-name ["(" ([term-name ":" cont] pattern ("," [term-name ":" cont] pattern)*)? ")"] "=" cont expr
-type-decl     := "type" type-name type-vars? "=" cont "|"? constructor (seps? "|" cont constructor)*
+type-decl     := ["opaque"] "type" type-name type-vars? "=" cont "|"? constructor (seps? "|" cont constructor)*
 constructor   := con-name type-atom* | con-name "(" fields? ")"
 field         := [term-name ":" cont] type
 effect-decl   := mode "effect" effect-name type-vars? "where" "{" seps? uniform-op-signature (seps uniform-op-signature)* seps? "}"
@@ -498,7 +498,8 @@ arithmetic receives a visible dictionary and calls, for example,
 elaborate to that exact value and argument; no such sugar is approved here.
 
 Reserved keywords, the complete list: `type effect once multi fn let rec match handle
-return resume quote unquote if then else as where forall jqd try with`. `with`
+return resume quote unquote if then else as where forall jqd try with`.
+`opaque` is contextual, not reserved (§5, Types and effects). `with`
 has one use, the nominal field update `Ctor(value with label: e)` (SX.28b,
 §5 Types and effects). Comments are `--` to end
 of line; `--|` is a doc comment attaching to the next declaration's `doc`
@@ -867,6 +868,30 @@ and each field takes its own line. `fmt` never rewrites a setter call into a
 `jacquard export` writes the elaborated twin, and a `with` form inside `quote`
 is refused like a named call (E1238). `test/test_surface_field_update.ml` and
 `test/cli/surface-field-update.t` pin the contract.
+
+TYPE.1 adds opaque types (`docs/designs/abstract-types.md`). The contextual
+keyword `opaque` before a top-level `type` seals the type's constructors:
+
+```jacquard
+opaque type ProbValue = ProbValue(value: Real)
+prob.of-real(r) = if real.between?(r, 0.0, 1.0) then Ok(ProbValue(r)) else Err("out of range")
+```
+
+Only the declaring project, or the single source that declares the type,
+constructs or matches the constructors; every other client goes through the
+functions the owner exports. `opaque` is valid only in that position, so an
+identifier named `opaque` keeps working. The marker lowers to
+`(deftype prob-value () (opaque) (con …))` and is part of the type's identity
+(declaration tag `0x47`), so making a type opaque, or transparent again,
+changes the type, its constructors, its accessors and every term that mentions
+it; transparent declarations keep their exact bytes and hashes. Accessors are
+still generated, since reading a field cannot break an invariant, but setters
+are not. Another single source that uses a sealed constructor by name or
+explicit identity is E0315; in projects the refusals are E1705, E1709, E1736
+and E1737. A value of an opaque type prints as `<opaque prob-value>` under
+`debug.inspect`, in run results and in runtime errors, on both engines, and
+as `<opaque>` in typed observations. `demos/abstract-types` shows three such
+libraries and a client.
 
 `Choice`'s `a` is a phantom parameter: it never appears in `choose`'s
 signature, and that is legal: an effect's type parameters scope over every
