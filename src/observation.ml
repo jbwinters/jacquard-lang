@@ -26,6 +26,9 @@ let rec of_value (v : Value.t) =
       Text s
   | Value.VHash h -> Hash h
   | Value.VTuple items -> Tuple (List.map of_value items)
+  | Value.VCon { con; _ } when Option.is_some (Opaque_registry.type_of con) ->
+      (* TYPE.1: an opaque type's representation is never observed; its arguments are not walked *)
+      Opaque "opaque"
   | Value.VCon { con; name; args } ->
       Constructor { identity = con; name; arguments = List.map of_value args }
   | Value.VCode form -> Code form

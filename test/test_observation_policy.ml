@@ -669,6 +669,15 @@ let test_impossible_fields () =
   in
   refuse "an unknown opaque kind" observed
     (replace_once secret "unsupported kind=secret" "unsupported kind=password");
+  (* TYPE.1: an opaque type's value and a capability are known unsupported kinds *)
+  List.iter
+    (fun kind ->
+      ignore
+        (expect_ok
+           ("the " ^ kind ^ " kind")
+           (Observation_transcript.parse ~policy:observed
+              (replace_once secret "unsupported kind=secret" ("unsupported kind=" ^ kind)))))
+    [ "opaque"; "capability" ];
   (* unfinished arguments mean the handler never ran: no output can follow them *)
   let big = String.make 60_000 'a' in
   let projected =

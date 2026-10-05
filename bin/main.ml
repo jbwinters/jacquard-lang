@@ -378,7 +378,7 @@ let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_
                     in
                     match execution with
                     | Ok v ->
-                        unmetered_print (fun () -> Value.show v);
+                        unmetered_print (fun () -> Value.display v);
                         Ok ()
                     | Error err ->
                         runtime_failure := Some err;
@@ -1069,6 +1069,9 @@ let posterior_cache_lookup ~cache_dir key : (Value.t * float) list option =
 
 (* posterior entries cached as (posterior (entry FORM prob) ...). Values are re-rendered
    from their printed forms for display, so keys compare by rendering on both paths. *)
+(* TYPE.1: dist-diff's structural keys and their user-facing (redacted) renderings *)
+let dist_diff_display : (string, string) Hashtbl.t = Hashtbl.create 64
+
 let posterior_cache_store ~cache_dir key (entries : (Form.t * float) list) : unit =
   match cache_dir with
   | None -> ()
@@ -1092,14 +1095,16 @@ let enumerate_rendered ctx store ~cache_dir model_expr : ((string * float) list,
     =
   let key =
     match Canon.hash_top (Kernel.Expr model_expr) with
-    | Ok hs -> "dist-diff|" ^ Hash.to_hex hs.Canon.decl_hash
-    | Error _ -> "dist-diff|unhashable"
+    (* v2 (TYPE.1): a cache written before opaque redaction may hold an opaque posterior's
+       structural text, so it is never read again *)
+    | Ok hs -> "dist-diff-v2|" ^ Hash.to_hex hs.Canon.decl_hash
+    | Error _ -> "dist-diff-v2|unhashable"
   in
   ignore store;
   ignore ();
   match posterior_cache_lookup ~cache_dir key with
   | Some entries ->
-      Printf.eprintf "dist-diff: cached posterior %s\n%!" (String.sub key 10 8);
+      Printf.eprintf "dist-diff: cached posterior %s\n%!" (String.sub key 13 8);
       Ok
         (List.map
            (fun (v, p) ->
@@ -1113,8 +1118,22 @@ let enumerate_rendered ctx store ~cache_dir model_expr : ((string * float) list,
       match Infer_dist.enumerate ctx (Eval.expr_state model_expr) with
       | Error ds -> Error ds
       | Ok posterior ->
-          Printf.eprintf "dist-diff: enumerated %s\n%!" (String.sub key 10 8);
+          Printf.eprintf "dist-diff: enumerated %s\n%!" (String.sub key 13 8);
+          (* TYPE.1: entries match by their structural rendering and print redacted; a posterior
+             holding an opaque value is never cached, since a cache hit keeps only the key *)
           let rendered = List.map (fun (v, p) -> (Value.show v, p)) posterior.Infer_dist.entries in
+          (* a redacted display is never replaced: two models may spell an opaque and a
+             transparent value alike *)
+          List.iter
+            (fun (v, _) ->
+              let key = Value.show v in
+              match Hashtbl.find_opt dist_diff_display key with
+              | Some shown when shown <> key -> ()
+              | _ -> Hashtbl.replace dist_diff_display key (Value.display v))
+            posterior.Infer_dist.entries;
+          let opaque =
+            List.exists (fun (v, _) -> Value.show v <> Value.display v) posterior.Infer_dist.entries
+          in
           (* cache as forms when the values have literal spellings; ints/cons/bools do *)
           let form_of (v, p) =
             match Reader.parse_one ~file:"cache" (Printf.sprintf "(lit %s)" (fst (v, p))) with
@@ -1122,16 +1141,17 @@ let enumerate_rendered ctx store ~cache_dir model_expr : ((string * float) list,
             | Error _ -> None
           in
           ignore form_of;
-          posterior_cache_store ~cache_dir key
-            (List.filter_map
-               (fun (shown, p) ->
-                 match
-                   Reader.parse_one ~file:"cache"
-                     ("(shown " ^ "\"" ^ Printer.escape_text shown ^ "\")")
-                 with
-                 | Ok f -> Some (f, p)
-                 | Error _ -> None)
-               rendered);
+          if not opaque then
+            posterior_cache_store ~cache_dir key
+              (List.filter_map
+                 (fun (shown, p) ->
+                   match
+                     Reader.parse_one ~file:"cache"
+                       ("(shown " ^ "\"" ^ Printer.escape_text shown ^ "\")")
+                   with
+                   | Ok f -> Some (f, p)
+                   | Error _ -> None)
+                 rendered);
           Ok rendered)
 
 let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
@@ -1230,10 +1250,12 @@ let dist_diff_cmd model_a model_b tolerance cache_dir no_cache sweep prelude =
         (match label with Some l -> Printf.printf "-- sweep %s --\n" l | None -> ());
         if gained = [] && lost = [] && deltas = [] then print_endline "no divergence"
         else begin
-          List.iter (fun k -> Printf.printf "support gained: %s\n" k) gained;
-          List.iter (fun k -> Printf.printf "support lost:   %s\n" k) lost;
+          let shown k = Option.value ~default:k (Hashtbl.find_opt dist_diff_display k) in
+          List.iter (fun k -> Printf.printf "support gained: %s\n" (shown k)) gained;
+          List.iter (fun k -> Printf.printf "support lost:   %s\n" (shown k)) lost;
           List.iter
-            (fun (k, a, b, d) -> Printf.printf "P(%s): %.6f -> %.6f (delta %+.6f)\n" k a b d)
+            (fun (k, a, b, d) ->
+              Printf.printf "P(%s): %.6f -> %.6f (delta %+.6f)\n" (shown k) a b d)
             deltas
         end
       in
@@ -1405,12 +1427,12 @@ let replay_cmd log_file program forks to_n compare prelude =
                         Error
                           (Runtime_err.Type_error
                              (Printf.sprintf "fetch expects one request, got %s"
-                                (String.concat ", " (List.map Value.show args)))))
+                                (String.concat ", " (List.map Value.display args)))))
             | _ -> ());
             let on_expr e =
               match Round_robin.run_expr ctx e with
               | Ok v ->
-                  print_endline (Value.show v);
+                  print_endline (Value.display v);
                   Ok ()
               | Error err ->
                   print_runtime_error err;

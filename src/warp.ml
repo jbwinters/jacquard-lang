@@ -103,7 +103,7 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
           _;
         } ->
         entries ((label, ok = "true") :: acc) rest
-    | v -> Error (Printf.sprintf "malformed report entries: %s" (Value.show v))
+    | v -> Error (Printf.sprintf "malformed report entries: %s" (Value.display v))
   in
   match v with
   | Value.VCon { name = "mk-report"; args = [ es; hard ]; _ } -> (
@@ -118,8 +118,8 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
               if soft <> [] then Ok (Fail { soft; hard = None })
               else if es = [] then Ok NoChecks
               else Ok (Pass (List.length es))
-          | v -> Error (Printf.sprintf "malformed report hard field: %s" (Value.show v))))
-  | v -> Error (Printf.sprintf "not a report: %s" (Value.show v))
+          | v -> Error (Printf.sprintf "malformed report hard field: %s" (Value.display v))))
+  | v -> Error (Printf.sprintf "not a report: %s" (Value.display v))
 
 (* RT.1: exhaustion is incomplete, never a verdict. Exhaustion is sticky, so a runner that ran out
    anywhere (and any verdict it built from the error) reports it as a runner error instead. *)
@@ -787,7 +787,7 @@ let run_vary_value ctx ~sample_seed generator function_ =
   | Ok value ->
       ( relational_failure
           (Printf.sprintf "VaryValue generator produced %s; expected a two-element tuple"
-             (Value.show value)),
+             (Value.display value)),
         Printf.sprintf "same under value: malformed pair, seed %d" sample_seed )
 
 (* --- the cache (W6.3) --- *)
@@ -860,7 +860,7 @@ let relational_key_string ~member ~suite_seed ~prop_mode value =
         (Printf.sprintf
            "%s|relational|%s|variation=value|seed-identity=%s|suite-seed=%d|sample-seed=%d" version
            (Hash.to_hex member) schedule_identity_version suite_seed sample_seed)
-  | value -> Error (Printf.sprintf "not a relational Warp value: %s" (Value.show value))
+  | value -> Error (Printf.sprintf "not a relational Warp value: %s" (Value.display value))
 
 let verdict_form (verdict : verdict) : Form.t =
   match verdict with
@@ -1047,7 +1047,7 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
             run_vary_value ctx ~sample_seed:test_seed generator function_
         | malformed ->
             ( relational_failure
-                (Printf.sprintf "Malformed relational variation: %s" (Value.show malformed)),
+                (Printf.sprintf "Malformed relational variation: %s" (Value.display malformed)),
               "same under: malformed variation" )
       in
       let (verdict, note), coverage = with_coverage ctx run in
@@ -1123,7 +1123,7 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
                 Error "computation fuel exhausted"
             | Ok os -> walk (child_index + 1) (os :: acc) rest
             | Error e -> Error e)
-        | v -> Error (Printf.sprintf "malformed group: %s" (Value.show v))
+        | v -> Error (Printf.sprintf "malformed group: %s" (Value.display v))
       in
       walk 0 [] tests
   | Value.VCon { name = "wcase"; args = [ Value.VText label; thunk ]; _ } -> (
@@ -1133,7 +1133,7 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
       | Ok (verdict, coverage) ->
           Ok [ { display; verdict = Some verdict; note = None; coverage; cached = false } ]
       | Error e -> Error (Printf.sprintf "%s: %s" display e))
-  | v -> Error (Printf.sprintf "not a test value: %s" (Value.show v))
+  | v -> Error (Printf.sprintf "not a test value: %s" (Value.display v))
 
 (** [run_discovered ctx ~test_run ~suite_seed ~cache_dir ~granted d] executes one discovered test.
     Hermetic Cases consult the cache by member hash; groups cache as a unit under the group's member

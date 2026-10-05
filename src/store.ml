@@ -241,7 +241,10 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
     match decl.Kernel.it with
     | Kernel.DefTerm _ ->
         List.mapi (fun i (_, h) -> (h, (hs.Canon.decl_hash, Member i))) hs.Canon.named
-    | Kernel.DefType _ ->
+    | Kernel.DefType { opaque; tname; _ } ->
+        (* TYPE.1: renderers redact an opaque type's constructors wherever its values travel *)
+        if opaque then
+          List.iteri (fun i (_, h) -> if i > 0 then Opaque_registry.register h tname) hs.Canon.named;
         (* named = (tname, decl_hash) :: constructors *)
         List.mapi
           (fun i (_, h) -> (h, (hs.Canon.decl_hash, if i = 0 then Whole else Constructor (i - 1))))

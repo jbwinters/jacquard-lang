@@ -26,7 +26,8 @@ type value =
   | Code of Form.t  (** a quoted code value; forms are immutable data *)
   | Opaque of string
       (** a value observation does not expose: ["secret"], ["closure"], ["resumption"], ["builtin"],
-          ["operation"], ["constructor"], ["task"] or ["channel"] *)
+          ["operation"], ["constructor"], ["task"], ["channel"], ["capability"], or ["opaque"] for a
+          value of an opaque type (TYPE.1), whose arguments are not walked *)
 
 (** Every event carries [call], a correlation id: the [Output] and [Result] of a root call carry the
     id of that call's [Operation], so a consumer pairs them exactly even when calls to one operation

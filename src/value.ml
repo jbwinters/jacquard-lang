@@ -85,7 +85,8 @@ let unit_v = VTuple []
 (** Stable rendering for goldens and diagnostics. Reals use the reader-compatible spelling; text is
     escaped like source; constructors print as [Name] or [Name(arg, ...)]; non-literal values print
     as bracketed placeholders. *)
-let rec show_into buffer value =
+let rec show_into ?(redact = false) buffer value =
+  let show_into = show_into ~redact in
   (* one buffer for the whole rendering keeps it linear in its output; each node and byte ticks
      computation fuel (RT.1) *)
   Fuel_meter.tick 1;
@@ -112,6 +113,12 @@ let rec show_into buffer value =
       add (Hash.to_hex hash)
   | VSecret _ -> add "<secret redacted>"
   | VTuple items -> items_into items
+  | (VCon { con; _ } | VConstructor { con; _ })
+    when redact && Option.is_some (Opaque_registry.type_of con) ->
+      (* TYPE.1: user-facing renderings never reveal an opaque type's representation *)
+      let type_name = Option.get (Opaque_registry.type_of con) in
+      Fuel_meter.tick (String.length type_name);
+      add ("<opaque " ^ type_name ^ ">")
   | VCon { name; args = []; _ } ->
       Fuel_meter.tick (String.length name);
       add name
@@ -142,6 +149,14 @@ let rec show_into buffer value =
 let show value =
   let buffer = Buffer.create 64 in
   show_into buffer value;
+  Buffer.contents buffer
+
+(** [display value] is {!show} for user-facing output: a value of an opaque type renders as
+    [<opaque name>] (TYPE.1). [show] stays structural, since equality and aggregation keys and
+    recorded transcripts compare it. *)
+let display value =
+  let buffer = Buffer.create 64 in
+  show_into ~redact:true buffer value;
   Buffer.contents buffer
 
 let pp fmt v = Format.pp_print_string fmt (show v)

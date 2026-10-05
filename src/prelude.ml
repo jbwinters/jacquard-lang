@@ -286,7 +286,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
         Error
           (Runtime_err.Type_error
              (Printf.sprintf "%s expects two ints, got %s" name
-                (String.concat ", " (List.map Value.show args))))
+                (String.concat ", " (List.map Value.display args))))
   in
   let natives =
     [
@@ -316,7 +316,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
         Error
           (Runtime_err.Type_error
              (Printf.sprintf "%s expects two reals, got %s" name
-                (String.concat ", " (List.map Value.show args))))
+                (String.concat ", " (List.map Value.display args))))
   in
   let optional name native =
     match lookup_hash store ~kind:Resolve.KTerm name with
@@ -353,7 +353,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "real.lt? expects two reals, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   let real_predicate name predicate args =
     match args with
     | [ Value.VReal a; Value.VReal b ] -> Ok (vbool (predicate a b))
@@ -361,7 +361,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
         Error
           (Runtime_err.Type_error
              (Printf.sprintf "%s expects two reals, got %s" name
-                (String.concat ", " (List.map Value.show args))))
+                (String.concat ", " (List.map Value.display args))))
   in
   optional "real.gt?" (real_predicate "real.gt?" ( > ));
   optional "real.gte?" (real_predicate "real.gte?" ( >= ));
@@ -387,14 +387,14 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
               Error
                 (Runtime_err.Type_error
                    (Printf.sprintf "text-compare expects two texts, got %s"
-                      (String.concat ", " (List.map Value.show args)))))
+                      (String.concat ", " (List.map Value.display args)))))
   | _ -> ());
   (* SL.5 text builtins below use codepoint semantics per D9 via {!utf8_boundaries}. *)
   let type_err name args =
     Error
       (Runtime_err.Type_error
          (Printf.sprintf "%s got unexpected arguments %s" name
-            (String.concat ", " (List.map Value.show args))))
+            (String.concat ", " (List.map Value.display args))))
   in
   let text1 name f args = match args with [ Value.VText s ] -> f s | args -> type_err name args in
   let text2 name f args =
@@ -487,7 +487,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
         | value ->
             Error
               (Runtime_err.Type_error
-                 (Printf.sprintf "text.join expects a list of texts, got %s" (Value.show value)))
+                 (Printf.sprintf "text.join expects a list of texts, got %s" (Value.display value)))
       in
       optional "text.split"
         (text2 "text.split" (fun s sep ->
@@ -537,7 +537,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                 Error
                   (Runtime_err.Type_error
                      (Printf.sprintf "text.join expects Text at argument %d, got %s" index
-                        (Value.show value)))
+                        (Value.display value)))
           in
           join (Buffer.create 32) 1 args)
   | _ -> ());
@@ -723,7 +723,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
             | v ->
                 Error
                   (Runtime_err.Type_error
-                     (Printf.sprintf "code.form expects a list of code, got %s" (Value.show v)))
+                     (Printf.sprintf "code.form expects a list of code, got %s" (Value.display v)))
           in
           optional "code.form" (fun args ->
               match args with
@@ -788,7 +788,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
      (W4.1/W4.4); native implementations over the recognized constructors *)
   optional "debug.inspect" (fun args ->
       match args with
-      | [ v ] -> Ok (Value.VText (Value.show v))
+      | [ v ] -> Ok (Value.VText (Value.display v))
       | args -> type_err "debug.inspect" args);
   optional "pmf" (fun args ->
       match args with
@@ -799,7 +799,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "pmf expects a distribution and a value, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   optional "dist.sample-lw" (fun args ->
       match args with
       | [ thunk; Value.VInt samples; Value.VInt seed ] -> (
@@ -856,7 +856,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "dist.sample-lw expects a thunk and two ints, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   (* INF.1: the surviving runs of the same seeded driver, oldest first and unnormalized; the
      prelude's dist.sample-lw-v1 classifies them *)
   optional "dist.sample-lw-weights-v1" (fun args ->
@@ -902,7 +902,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "dist.sample-lw-weights-v1 expects a thunk and two ints, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   optional "support" (fun args ->
       match args with
       | [ dv ] ->
@@ -937,7 +937,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "support expects a distribution, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   let with_posterior_signatures name implementation args =
     match !posterior_builtin_signatures store with
     | Ok signatures -> implementation ctx ~builtin_signatures:signatures args
@@ -994,7 +994,7 @@ let install_console
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "print expects one text, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Eval.register_root_handler ctx read_op (fun args ->
       match args with
       | [] -> Ok (Value.VText (read_line ()))
@@ -1002,7 +1002,7 @@ let install_console
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "read-line expects no arguments, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   (match
      ( lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "next-line",
        lookup_hash (Eval.store ctx) ~kind:Resolve.KCon "some",
@@ -1026,7 +1026,7 @@ let install_console
               Error
                 (Runtime_err.Type_error
                    (Printf.sprintf "next-line expects no arguments, got %s"
-                      (String.concat ", " (List.map Value.show args)))))
+                      (String.concat ", " (List.map Value.display args)))))
   | _ -> ());
   Ok ()
 
@@ -1051,7 +1051,7 @@ let install_clock ?(now = fun () -> int_of_float (Unix.gettimeofday () *. 1000.)
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "sleep expects one int, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Ok ()
 
 (** [install_fs ctx] grants [fs]. SANDBOX CAVEAT, stated loudly: the grant is the ONLY boundary —
@@ -1071,7 +1071,7 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "read expects one path, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Eval.register_root_handler ctx write_op (fun args ->
       match args with
       | [ Value.VText path; Value.VText content ] ->
@@ -1084,7 +1084,7 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "write expects a path and a text, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   match
     ( Prelude_identity.lookup_kind (Eval.store ctx) "nil" Resolve.KCon,
       Prelude_identity.lookup_kind (Eval.store ctx) "cons" Resolve.KCon )
@@ -1105,7 +1105,7 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
               Error
                 (Runtime_err.Type_error
                    (Printf.sprintf "list-dir expects one path, got %s"
-                      (String.concat ", " (List.map Value.show args)))));
+                      (String.concat ", " (List.map Value.display args)))));
       Ok ()
   | _ -> err ~code:"E0702" "prelude list constructors missing for fs.list-dir"
 
@@ -1191,7 +1191,7 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "complete expects one prompt, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Ok ()
 
 (** A provider-facing Secret lookup failure. The variants deliberately carry no provider response,
@@ -1235,7 +1235,8 @@ let install_secret ~read (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let bad operation args =
     Error
       (Runtime_err.Type_error
-         (Printf.sprintf "%s received %s" operation (String.concat ", " (List.map Value.show args))))
+         (Printf.sprintf "%s received %s" operation
+            (String.concat ", " (List.map Value.display args))))
   in
   Eval.register_root_handler ctx read_op (fun args ->
       match args with
@@ -1377,7 +1378,7 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
               Error
                 (Runtime_err.Eval_error
                    (Printf.sprintf "expected one code value, got %s"
-                      (String.concat ", " (List.map Value.show args)))));
+                      (String.concat ", " (List.map Value.display args)))));
       Ok ()
 
 (** [install_net ctx] grants the [net] effect with the M0 stub handler: [net-fetch] returns a canned
@@ -1401,7 +1402,7 @@ let install_net (ctx : Eval.ctx) : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "fetch expects one request, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Ok ()
 
 (** [install_dist ctx ~seed] grants the [dist] effect with the seeded SAMPLING handler (stdlib
@@ -1420,7 +1421,7 @@ let install_dist (ctx : Eval.ctx) ~seed : (unit, Diag.t list) result =
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "sample expects one distribution, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Eval.register_root_handler ctx observe_op (fun _ -> Error Runtime_err.Observe_at_root);
   Ok ()
 
@@ -1449,7 +1450,7 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "write expects a path and a text, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   let* fetch_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "fetch" in
   let* resp_con = lookup_hash (Eval.store ctx) ~kind:Resolve.KCon "mk-response" in
   Eval.register_root_handler ctx fetch_op (fun args ->
@@ -1467,7 +1468,7 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "fetch expects one request, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   let* complete_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "complete" in
   Eval.register_root_handler ctx complete_op (fun args ->
       match args with
@@ -1478,7 +1479,7 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
           Error
             (Runtime_err.Type_error
                (Printf.sprintf "complete expects one prompt, got %s"
-                  (String.concat ", " (List.map Value.show args)))));
+                  (String.concat ", " (List.map Value.display args)))));
   Ok ()
 
 (** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
