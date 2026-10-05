@@ -70,8 +70,8 @@ val encode_boundary_value : budget:boundary_budget -> Value.t -> (Yojson.Safe.t,
     runtime values (Secret, Task, Channel, scoped instance and code values), callable, or run-owned
     values return E1604; malformed UTF-8 and exceeded limits retain E1601/E1602. A constructor of a
     user-defined [opaque type] is encoded structurally here, so a caller must also pass the value
-    through [validate_argument_value] and emit nothing unless both succeed, as invoke preflight and
-    the session do (TYPE.1). *)
+    through [validate_argument_value] and emit nothing unless both succeed, as the session does;
+    invoke preflight validates the values it decodes (TYPE.1). *)
 
 val validate_argument_value :
   Check.ctx -> expected:Types.ty -> Value.t -> (unit, Diag.t list) result

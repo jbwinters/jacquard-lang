@@ -199,9 +199,9 @@ still compile after re-pinning; only the added export is compatible:
   error[E1710]: A dependency's pin does not match its context identity.
   changed: interface; breaking
   $ cp ../lib/m.orig ../lib/m.jac && printf 'mig.tails = MigTails\n' >> ../lib/m.jac && sed -i 's/(term mig.flip)/(term mig.flip) (term mig.tails)/' ../lib/project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*'
+  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|(changed: .*)'
   error[E1710]: A dependency's pin does not match its context identity.
-  changed: interface; compatible
+  (changed: interface; compatible term mig.tails: added)
   $ jacquard project pin > /dev/null && jacquard project check > /dev/null && echo re-pinned
   re-pinned
   $ echo 'mig.flip(mig.tails)' > demo.jac && jacquard project run demo
@@ -216,8 +216,9 @@ it is refused before anything is imported (E1726):
   1
   $ sed -i 's/ (opaque)//' ../lib.bundle/objects/*.jqd
   $ sed -i 's|(path "../lib")|(bundle "../lib.bundle")|' project.jqd
-  $ jacquard project pin 2>&1 | grep -o 'error\[E1726\].*'
+  $ jacquard project pin 2>&1 | grep -o 'error\[E1726\].*\|hashes to'
   error[E1726]: A bundle object's hash does not match.
+  hashes to
 
 Dynamic code in a project is refused a sealed constructor too, the owner's
 own included, by name or by an explicit identity assembled as code:
