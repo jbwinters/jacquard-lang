@@ -23,8 +23,8 @@ static void type_err1(const char *msg_prefix, uint16_t got_n, const jq_value *ar
     __attribute__((noreturn));
 static void type_err1(const char *msg_prefix, uint16_t got_n, const jq_value *args, uint16_t n) {
   (void)got_n;
-  char *first = n > 0 ? jq_show(args[0]) : NULL;
-  char *second = n > 1 ? jq_show(args[1]) : NULL;
+  char *first = n > 0 ? jq_display(args[0]) : NULL;
+  char *second = n > 1 ? jq_display(args[1]) : NULL;
   if (n > 1)
     jq_runtime_failf(JQ_ERROR_TYPE, "%s%s, %s", msg_prefix, first, second);
   jq_runtime_failf(JQ_ERROR_TYPE, "%s%s", msg_prefix, first ? first : "");
@@ -211,7 +211,7 @@ jq_value jq_g_fs_list_dir(jq_rt *rt, const jq_value *args) {
 jq_value jq_g_dist_sample(jq_rt *rt, const jq_value *args) {
   extern jq_value jq_g_dist_draw(jq_rt *, jq_value); /* jq_intrinsics.c */
   if (!jq_is_ptr(args[0]) || jq_block_of(args[0])->tag != JQ_CON) {
-    char *s = jq_show(args[0]);
+    char *s = jq_display(args[0]);
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   return jq_g_dist_draw(rt, args[0]);

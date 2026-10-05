@@ -20,7 +20,7 @@
 static void type_err2(const char *name, const char *kind, jq_value a, jq_value b)
     __attribute__((noreturn));
 static void type_err2(const char *name, const char *kind, jq_value a, jq_value b) {
-  char *sa = jq_show(a), *sb = jq_show(b);
+  char *sa = jq_display(a), *sb = jq_display(b);
   jq_runtime_failf(JQ_ERROR_TYPE, "%s expects two %s, got %s, %s", name, kind, sa, sb);
 }
 
@@ -128,7 +128,7 @@ jq_value jq_i_real_lte_q(jq_rt *rt, const jq_value *a) {
 jq_value jq_i_text_length(jq_rt *rt, const jq_value *a) {
   (void)rt;
   if (!is_text(a[0])) {
-    char *s = jq_show(a[0]);
+    char *s = jq_display(a[0]);
     jq_runtime_failf(JQ_ERROR_TYPE, "text.length got unexpected arguments %s", s);
   }
   jq_value r = jq_int((int64_t)jq_utf8_count(jq_text_bytes(a[0]), jq_text_len(a[0])));
@@ -162,7 +162,7 @@ jq_value jq_i_text_concat(jq_rt *rt, const jq_value *a) {
 static void text_join_list_error(const jq_value *a, jq_value bad)
     __attribute__((noreturn));
 static void text_join_list_error(const jq_value *a, jq_value bad) {
-  char *shown = jq_show(bad);
+  char *shown = jq_display(bad);
   jq_drop(a[0]);
   jq_drop(a[1]);
   jq_runtime_failf(JQ_ERROR_TYPE, "text.join expects a list of texts, got %s", shown);
@@ -208,7 +208,7 @@ jq_value jq_i_text_join_variadic_v1(jq_rt *rt, const jq_value *a, uint16_t n) {
   uint64_t total = 0;
   for (uint16_t i = 0; i < n; i++) {
     if (!is_text(a[i])) {
-      char *shown = jq_show(a[i]);
+      char *shown = jq_display(a[i]);
       for (uint16_t j = 0; j < n; j++) jq_drop(a[j]);
       jq_runtime_failf(JQ_ERROR_TYPE, "text.join expects Text at argument %u, got %s",
                        (unsigned)(i + 1), shown);
@@ -258,7 +258,7 @@ static void type_err_args(const char *name, const jq_value *a, uint16_t n) {
   char *shown[JQ_MAX_ARITY] = {0};
   size_t length = strlen(name) + strlen(" got unexpected arguments ") + 1;
   for (uint16_t i = 0; i < n; i++) {
-    shown[i] = jq_show(a[i]);
+    shown[i] = jq_display(a[i]);
     length += strlen(shown[i]) + (i ? 2 : 0);
   }
   char *message = malloc(length);
@@ -615,7 +615,7 @@ static void check_entries(jq_value entries) {
         continue;
       }
     }
-    char *s = jq_show(v);
+    char *s = jq_display(v);
     jq_runtime_failf(JQ_ERROR_TYPE, "categorical expects a list of pairs, got %s", s);
   }
 }
@@ -641,7 +641,7 @@ static void check_dist(jq_value d) {
       arith_err("uniform-int range %lld..%lld is empty", (long long)lo, (long long)hi);
     return;
   }
-  char *s = jq_show(d);
+  char *s = jq_display(d);
   jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
 }
 
@@ -955,7 +955,7 @@ jq_value jq_i_code_form(jq_rt *rt, const jq_value *a) {
     }
   }
   if (bad) {
-    char *shown = jq_show(it);
+    char *shown = jq_display(it);
     jq_runtime_failf(JQ_ERROR_TYPE, "code.form expects a list of code, got %s", shown);
   }
   if (count > (UINT16_MAX - 1) / 2)
@@ -1116,7 +1116,7 @@ jq_value jq_i_code_hash(jq_rt *rt, const jq_value *a) {
 
 jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a) {
   (void)rt;
-  char *rendered = jq_show(a[0]);
+  char *rendered = jq_display(a[0]);
   jq_value result = jq_text((const uint8_t *)rendered, strlen(rendered));
   free(rendered);
   jq_drop(a[0]);
@@ -1125,7 +1125,7 @@ jq_value jq_i_debug_inspect(jq_rt *rt, const jq_value *a) {
 
 jq_value jq_i_support(jq_rt *rt, const jq_value *a) {
   if (!jq_is_ptr(a[0]) || jq_block_of(a[0])->tag != JQ_CON) {
-    char *s = jq_show(a[0]);
+    char *s = jq_display(a[0]);
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(a[0]);
@@ -1139,7 +1139,7 @@ jq_value jq_i_support(jq_rt *rt, const jq_value *a) {
 jq_value jq_i_pmf(jq_rt *rt, const jq_value *a) {
   jq_value d = a[0], v = a[1];
   if (!jq_is_ptr(d) || jq_block_of(d)->tag != JQ_CON) {
-    char *s = jq_show(d);
+    char *s = jq_display(d);
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(d);
@@ -1244,7 +1244,7 @@ typedef struct lw_state {
 jq_value jq_lw_sample(jq_rt *rt, jq_value dv) {
   lw_state *st = (lw_state *)rt->lw;
   if (!jq_is_ptr(dv) || jq_block_of(dv)->tag != JQ_CON) {
-    char *s = jq_show(dv);
+    char *s = jq_display(dv);
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(dv);
@@ -1265,7 +1265,7 @@ jq_value jq_lw_sample(jq_rt *rt, jq_value dv) {
 jq_value jq_lw_observe(jq_rt *rt, jq_value dv, jq_value v) {
   lw_state *st = (lw_state *)rt->lw;
   if (!jq_is_ptr(dv) || jq_block_of(dv)->tag != JQ_CON) {
-    char *s = jq_show(dv);
+    char *s = jq_display(dv);
     jq_runtime_failf(JQ_ERROR_TYPE, "%s is not a distribution value", s);
   }
   check_dist(dv);
@@ -1297,9 +1297,9 @@ static int lw_entry_cmp(const void *pa, const void *pb) {
 jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
   jq_value thunk = a[0];
   if (!jq_is_int(a[1]) || !jq_is_int(a[2])) {
-    char *s0 = jq_show(a[0]);
-    char *s1 = jq_show(a[1]);
-    char *s2 = jq_show(a[2]);
+    char *s0 = jq_display(a[0]);
+    char *s1 = jq_display(a[1]);
+    char *s2 = jq_display(a[2]);
     jq_runtime_failf(JQ_ERROR_TYPE,
                      "dist.sample-lw expects a thunk and two ints, got %s, %s, %s", s0, s1,
                      s2);
@@ -1392,9 +1392,9 @@ jq_value jq_i_dist_sample_lw(jq_rt *rt, const jq_value *a) {
 jq_value jq_i_dist_sample_lw_weights_v1(jq_rt *rt, const jq_value *a) {
   jq_value thunk = a[0];
   if (!jq_is_int(a[1]) || !jq_is_int(a[2])) {
-    char *s0 = jq_show(a[0]);
-    char *s1 = jq_show(a[1]);
-    char *s2 = jq_show(a[2]);
+    char *s0 = jq_display(a[0]);
+    char *s1 = jq_display(a[1]);
+    char *s2 = jq_display(a[2]);
     jq_runtime_failf(JQ_ERROR_TYPE,
                      "dist.sample-lw-weights-v1 expects a thunk and two ints, got %s, %s, %s",
                      s0, s1, s2);

@@ -155,3 +155,21 @@ A root without a namespace owns its opaque types:
   $ echo 'flip(Heads)' > demo.jac
   $ jacquard project bundle -o ../nons.bundle > /dev/null && jacquard project run --bundle ../nons.bundle demo
   <opaque coin>
+
+dist-diff matches posterior entries by structure but prints them redacted, and
+never caches a posterior that holds an opaque value:
+
+  $ cd .. && mkdir -p dd && cd dd
+  $ cat > coin-a.jqd <<'JACQUARD'
+  > (deftype dd-coin () (opaque) (con dd-heads) (con dd-tails))
+  > (defterm ((binding prior () (lit 0.5))))
+  > (match (app (var sample) (app (var bernoulli) (var prior)))
+  >   (clause (pcon true) (var dd-heads))
+  >   (clause (pcon false) (var dd-tails)))
+  > JACQUARD
+  $ sed 's/(lit 0.5)/(lit 0.75)/' coin-a.jqd > coin-b.jqd
+  $ jacquard dist-diff coin-a.jqd coin-b.jqd --tolerance 0.001 --cache-dir cache 2>/dev/null | sort
+  P(<opaque dd-coin>): 0.500000 -> 0.250000 (delta -0.250000)
+  P(<opaque dd-coin>): 0.500000 -> 0.750000 (delta +0.250000)
+  $ ls cache 2>/dev/null | wc -l
+  0

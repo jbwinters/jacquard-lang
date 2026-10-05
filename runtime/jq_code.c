@@ -28,7 +28,7 @@ jq_value jq_code_node(jq_value head_text, uint16_t argc) {
 jq_value jq_code_splice_guard(jq_rt *rt, jq_value v) {
   (void)rt;
   if (jq_is_code(v)) return v;
-  char *s = jq_show(v);
+  char *s = jq_display(v);
   jq_runtime_failf(JQ_ERROR_TYPE, "unquote splice evaluated to %s, not code", s);
 }
 

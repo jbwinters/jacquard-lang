@@ -183,7 +183,7 @@ static void test_blocks(void) {
   CHECK(memcmp(jq_text_bytes(txt), msg, strlen(msg)) == 0, "text bytes");
   jq_drop(txt);
 
-  static const jq_con_info some_info = { 1, 0, 1, "some" };
+  static const jq_con_info some_info = { 1, 0, 1, "some", NULL, 0 };
   jq_value inner = jq_tuple(1, (jq_value[]){ jq_int(1) });
   jq_value c = jq_con(&some_info, (jq_value[]){ inner });
   CHECK(jq_con_info_of(c) == &some_info, "con identity is the info pointer");
@@ -201,7 +201,7 @@ static void test_blocks(void) {
                "#000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f") == 0,
         "hash show uses canonical lowercase hex");
   free(hash_shown);
-  static const jq_con_info hash_box_info = { 2, 0, 1, "hash-box" };
+  static const jq_con_info hash_box_info = { 2, 0, 1, "hash-box", NULL, 0 };
   jq_value boxed_hash = jq_con(&hash_box_info, (jq_value[]){ hv });
   char *boxed_shown = jq_show(boxed_hash);
   CHECK(strcmp(boxed_shown,
@@ -1007,7 +1007,7 @@ int main(int argc, char **argv) {
     return 0;
   }
   if (argc > 1 && strcmp(argv[1], "arity-overflow") == 0) {
-    static const jq_con_info huge = { 0, 0, 65535, "huge" };
+    static const jq_con_info huge = { 0, 0, 65535, "huge", NULL, 0 };
     jq_value fields[1] = { jq_int(0) }; /* never copied: the guard fires first */
     jq_con(&huge, fields);
     return 0;

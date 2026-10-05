@@ -26,7 +26,7 @@ jq_value jq_apply(JQ_PARAMS) {
   jq_value fn = clo;
   uint16_t n = rt->apply_n;
   if (jq_is_int(fn)) {
-    char *s = jq_show(fn);
+    char *s = jq_display(fn);
     fail(JQ_ERROR_TYPE, "%s is not applicable", s);
   }
   jq_block *b = jq_block_of(fn);
@@ -80,7 +80,7 @@ jq_value jq_apply(JQ_PARAMS) {
     return r;
   }
   default: {
-    char *s = jq_show(fn);
+    char *s = jq_display(fn);
     fail(JQ_ERROR_TYPE, "%s is not applicable", s);
   }
   }
@@ -88,6 +88,6 @@ jq_value jq_apply(JQ_PARAMS) {
 
 void jq_match_fail(jq_rt *rt, jq_value scrutinee) {
   (void)rt;
-  char *s = jq_show(scrutinee);
+  char *s = jq_display(scrutinee);
   fail(JQ_ERROR_MATCH, "%s", s);
 }

@@ -262,7 +262,7 @@ let compile_program (store : Store.t) (d : discovery)
       match Store.locate store h with
       | Ok
           {
-            Store.decl = { Kernel.it = Kernel.DefType { cons = cs; _ }; _ };
+            Store.decl = { Kernel.it = Kernel.DefType { cons = cs; tname; opaque; _ }; _ };
             role = Store.Constructor i;
             decl_hash;
           } -> (
@@ -283,6 +283,7 @@ let compile_program (store : Store.t) (d : discovery)
                   carity = List.length fields;
                   ctype_id = tid;
                   cordinal = i;
+                  copaque = (if opaque then Some tname else None);
                 }
           | None -> ())
       | _ -> ()

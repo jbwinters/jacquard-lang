@@ -59,7 +59,14 @@ let line buf fmt =
 (* Program-level info the emitter needs                                *)
 (* ------------------------------------------------------------------ *)
 
-type conref = { chash : Hash.t; cname : string; carity : int; ctype_id : int; cordinal : int }
+type conref = {
+  chash : Hash.t;
+  cname : string;
+  carity : int;
+  ctype_id : int;
+  cordinal : int;
+  copaque : string option;  (** TYPE.1: the declaring type's name when it is opaque *)
+}
 
 type opref = {
   ohash : Hash.t;
@@ -925,8 +932,10 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
   let cons = List.sort (fun a b -> compare (hex12 a.chash) (hex12 b.chash)) cons in
   List.iter
     (fun cr ->
-      line st.decls "const jq_con_info %s = { %d, %d, %d, %s };" (ci_name cr.chash) cr.ctype_id
-        cr.cordinal cr.carity (c_string cr.cname))
+      line st.decls "const jq_con_info %s = { %d, %d, %d, %s, %s, %d };" (ci_name cr.chash)
+        cr.ctype_id cr.cordinal cr.carity (c_string cr.cname)
+        (match cr.copaque with Some t -> c_string t | None -> "NULL")
+        (if Option.is_some cr.copaque then 1 else 0))
     cons;
   List.iter (fun cr -> st.declared <- SSet.add ("ci:" ^ hex12 cr.chash) st.declared) cons;
   (* effect op infos, the ordinal-indexed metadata table, and the grant slots *)
@@ -1110,7 +1119,7 @@ let main_source (prog : program) ~precise ~(v_true : Hash.t) ~(v_false : Hash.t)
          stderr (warning or refusal) would overtake THIS value in a merged
          capture. Effect output inside evaluation stays buffered on both
          engines (print_string / fwrite), so this is the only flush point. *)
-      line st.ub "{ char *s = jq_show(_v); puts(s); free(s); fflush(stdout); }";
+      line st.ub "{ char *s = jq_display(_v); puts(s); free(s); fflush(stdout); }";
       line st.ub "jq_drop(_v);";
       st.ub.indent <- st.ub.indent - 1;
       line st.ub "}")

@@ -96,10 +96,10 @@ static void mode_show(void) {
   show_line(nested);
   jq_drop(nested);
   /* constructors applied and not */
-  static const jq_con_info nil_info = { 0, 0, 0, "nil" };
-  static const jq_con_info cons_info = { 0, 1, 2, "cons" };
-  static const jq_con_info some_info = { 1, 0, 1, "some" };
-  static const jq_con_info pair_info = { 2, 0, 2, "pair" };
+  static const jq_con_info nil_info = { 0, 0, 0, "nil", NULL, 0 };
+  static const jq_con_info cons_info = { 0, 1, 2, "cons", NULL, 0 };
+  static const jq_con_info some_info = { 1, 0, 1, "some", NULL, 0 };
+  static const jq_con_info pair_info = { 2, 0, 2, "pair", NULL, 0 };
   jq_value nil = jq_con(&nil_info, NULL);
   show_line(nil);
   jq_value c =
