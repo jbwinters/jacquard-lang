@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1191`
+- Alcotest/QCheck cases: `1193`
 - Cram transcript files: `77`
 - Documentation examples: `36` named examples across `8` documents
 
@@ -808,3 +808,15 @@ In a project or bundle run, a posterior model reference must name a prelude
 term or a term some context exports. Otherwise it is refused (E1709). New
 `opaque-types` and `bundle-regions` cases cover both. The source inventory is now
 `1191 / 77 / 36`.
+
+TYPE.1 slice 3a refuses the two remaining construction routes.
+- `eval-code` refuses a payload with a live reference to a constructor of an
+  opaque type, in every mode and including the owner's own dynamic code;
+  quoted data stays plain data.
+- Host protocol v0 refuses opaque types in both directions (E1604). The type
+  preflight walks reachable field types once, so a transparent wrapper around
+  an opaque type is refused too, and the value guard refuses an opaque
+  constructor wherever it appears.
+
+`opaque-types` and the host preflight suite cover both. The source inventory is
+now `1193 / 77 / 36`.

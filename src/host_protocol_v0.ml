@@ -765,8 +765,43 @@ let rec equal_boundary_types left right =
       && List.for_all2 equal_boundary_types left_items right_items
   | _ -> false
 
-let boundary_type_supported ty =
+(* TYPE.1: v0 has no encoding for an opaque type, so a boundary type that reaches one, directly or
+   through the fields of a transparent wrapper, is refused (E1604). The walk follows each reachable
+   declaration's field types once. *)
+let reaches_opaque store identity =
+  let rec visit seen = function
+    | [] -> false
+    | hash :: rest when List.exists (Hash.equal hash) seen -> visit seen rest
+    | hash :: rest -> (
+        match Store.locate_internal store hash with
+        | Ok { Store.decl = { Kernel.it = Kernel.DefType { opaque = true; _ }; _ }; _ } -> true
+        | Ok { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; _ } ->
+            let fields =
+              List.concat_map
+                (fun (c : Kernel.conspec) ->
+                  List.concat_map (fun (f : Kernel.field) -> Store.ty_refs f.Kernel.fty) c.fields)
+                cons
+            in
+            visit (hash :: seen) (fields @ rest)
+        (* an effect in a field's arrow row carries its operations' types *)
+        | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; _ } ->
+            let types =
+              List.concat_map
+                (fun (o : Kernel.opspec) ->
+                  List.concat_map Store.ty_refs o.Kernel.op_params
+                  @ Store.ty_refs o.Kernel.op_result)
+                ops
+            in
+            visit (hash :: seen) (types @ rest)
+        | _ -> visit (hash :: seen) rest)
+  in
+  visit [] [ identity ]
+
+let boundary_type_supported ~store ty =
   let rec check = function
+    | Types.TCon (identity, _) when reaches_opaque store identity ->
+        error ~code:"E1604"
+          "An opaque type, or a type that contains one, cannot cross the v0 boundary."
     | Types.TCon (_, arguments) -> check_all arguments
     | Types.TTuple items -> check_all items
     | Types.TArrow _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _ | Types.TVar _
@@ -822,8 +857,10 @@ let validate_target checker callable =
           | Types.RVar _ | Types.RSkolem _ ->
               error ~code:"E1603" "The selected target has an open effect row."
         in
-        let* () = map_result boundary_type_supported parameters |> Result.map (fun _ -> ()) in
-        let* () = boundary_type_supported result in
+        let* () =
+          map_result (boundary_type_supported ~store) parameters |> Result.map (fun _ -> ())
+        in
+        let* () = boundary_type_supported ~store result in
         Ok (parameters, Types.effect_identities row, result)
     | Types.TCon _ | Types.TTuple _ | Types.TResume _ | Types.TVariadicArrow _ | Types.TExactThunk _
     | Types.TVar _ | Types.TSkolem _ | Types.TLabel _ ->
@@ -864,11 +901,13 @@ let constructor_info checker identity =
   match Store.locate store identity with
   | Ok
       {
-        Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ };
+        Store.decl = { Kernel.it = Kernel.DefType { cons; opaque; _ }; _ };
         role = Store.Constructor index;
         _;
       } -> (
       match List.nth_opt cons index with
+      | _ when opaque ->
+          error ~code:"E1604" "A boundary value names a constructor of an opaque type."
       | None -> error ~code:"E1603" "The constructor identity has invalid store metadata."
       | Some constructor ->
           let* _ =
@@ -900,6 +939,9 @@ let validate_argument_value checker ~expected value =
             validate_all item_types items
         | Types.TTuple _ -> mismatch "A tuple argument has the wrong number of items."
         | _ -> mismatch "A tuple argument disagrees with its parameter type.")
+    | Value.VCon { con; _ } when Option.is_some (Store.sealed_constructor (Check.store checker) con)
+      ->
+        error ~code:"E1604" "A value of an opaque type cannot cross the v0 boundary."
     | Value.VCon { con; args; _ } ->
         let* scheme =
           map_error ~code:"E1603" "A constructor argument cannot be checked in this store."
@@ -921,7 +963,10 @@ let validate_argument_value checker ~expected value =
             | exception (Types.Unify_error _ | Types.Instance_refusal _) ->
                 mismatch "A constructor argument disagrees with its nominal parameter type."
           in
-          let* () = map_result boundary_type_supported fields |> Result.map (fun _ -> ()) in
+          let* () =
+            map_result (boundary_type_supported ~store:(Check.store checker)) fields
+            |> Result.map (fun _ -> ())
+          in
           validate_all fields args
     | Value.VSecret _ | Value.VConstructor _ | Value.VOp _ | Value.VClosure _ | Value.VBuiltin _
     | Value.VTrustedBuiltin _ | Value.VCode _ | Value.VTask _ | Value.VChannel _ | Value.VInstance _
@@ -995,8 +1040,11 @@ let validate_operation checker ~effects entry =
       else
         match Types.repr contract.Check.scheme.Types.ty with
         | Types.TArrow (parameters, _, result) ->
-            let* () = map_result boundary_type_supported parameters |> Result.map (fun _ -> ()) in
-            let* () = boundary_type_supported result in
+            let store = Check.store checker in
+            let* () =
+              map_result (boundary_type_supported ~store) parameters |> Result.map (fun _ -> ())
+            in
+            let* () = boundary_type_supported ~store result in
             Ok
               {
                 effect_identity = contract.Check.effect_identity;
