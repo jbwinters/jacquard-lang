@@ -154,4 +154,4 @@ A root without a namespace owns its opaque types:
   $ printf 'opaque type Coin = | Heads | Tails\nflip(c) = match c { | Heads -> Tails | Tails -> Heads }\n' > l.jac
   $ echo 'flip(Heads)' > demo.jac
   $ jacquard project bundle -o ../nons.bundle > /dev/null && jacquard project run --bundle ../nons.bundle demo
-  tails
+  <opaque coin>

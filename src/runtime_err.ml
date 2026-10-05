@@ -73,7 +73,7 @@ let to_string = function
     Embedded subsystem diagnostics retain their existing identity. Only ordinary runtime failures
     with historically assigned public codes carry one; the rest remain deliberately code-less
     instead of inventing new release identities. Secret-bearing values must already be redacted by
-    {!Value.show} before they enter a runtime error. *)
+    {!Value.display} before they enter a runtime error. *)
 let to_diag error =
   let make ?code ~domain ~summary ~next_step () =
     Diag.error ?code ~domain ~summary ~cause:(to_string error) ~next_step ~contrast:None ()

@@ -894,7 +894,7 @@ let substitute_splices (payload : Form.t) (values : Value.t list) : Form.t =
         queue := rest;
         match v with
         | VCode f -> f
-        | v -> rt_type "unquote splice evaluated to %s, not code" (Value.show v))
+        | v -> rt_type "unquote splice evaluated to %s, not code" (Value.display v))
     | [] -> rt_type "splice value queue exhausted (internal)"
   in
   let rec go ?(level = 0) (f : Form.t) : Form.t =
@@ -1411,7 +1411,7 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
         let env =
           match match_pats args params h.hscope.env with
           | Some env -> env
-          | None -> rt (Runtime_err.Match_failure (Value.show (VTuple args)))
+          | None -> rt (Runtime_err.Match_failure (Value.display (VTuple args)))
         in
         let resume_value =
           match op_mode ctx op with
@@ -1464,7 +1464,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
         let env =
           match match_pats args params scope.env with
           | Some env -> env
-          | None -> rt (Runtime_err.Match_failure (Value.show (VTuple args)))
+          | None -> rt (Runtime_err.Match_failure (Value.display (VTuple args)))
         in
         SEval ({ scope with env }, body, k)
   | VBuiltin (_, native) as fn -> invoke_untrusted_native ctx fn native args k
@@ -1505,7 +1505,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
               SApply (v, frames @ k)
           | None -> rt Runtime_err.Once_resumed_twice)
       | _ -> rt_arity "a resumption takes exactly one argument, got %d" (List.length args))
-  | v -> rt_type "%s is not applicable" (Value.show v)
+  | v -> rt_type "%s is not applicable" (Value.display v)
 
 (** [apply ctx fn args k] validates all reachable runtime payloads before invoking native code or
     performing an operation. Machine transitions use [apply_unchecked] after their initial state has
@@ -1783,10 +1783,10 @@ and step_unchecked ctx (state : state) : state option =
       | FLet { binder; body; scope } -> (
           match match_pat v binder scope.env with
           | Some env -> Some (SEval ({ scope with env }, body, k))
-          | None -> rt (Runtime_err.Match_failure (Value.show v)))
+          | None -> rt (Runtime_err.Match_failure (Value.display v)))
       | FMatch { clauses; scope; _ } ->
           let rec try_clauses = function
-            | [] -> rt (Runtime_err.Match_failure (Value.show v))
+            | [] -> rt (Runtime_err.Match_failure (Value.display v))
             | { Kernel.cpat; cbody; _ } :: rest -> (
                 match match_pat v cpat scope.env with
                 | Some env -> SEval ({ scope with env }, cbody, k)
@@ -1808,7 +1808,7 @@ and step_unchecked ctx (state : state) : state option =
           (* body finished normally: run the return clause in the handler's scope *)
           match match_pat v rbinder hscope.env with
           | Some env -> Some (SEval ({ hscope with env }, rbody, k))
-          | None -> rt (Runtime_err.Match_failure (Value.show v))))
+          | None -> rt (Runtime_err.Match_failure (Value.display v))))
 
 (** Drive a validated state to its terminal value (tail-recursive trampoline). Internal transitions
     only rearrange validated payloads or tie a fresh recursive cell; native and untrusted memo

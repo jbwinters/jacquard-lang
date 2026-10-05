@@ -136,7 +136,7 @@ let dist_of_value (ctx : Eval.ctx) (v : Value.t) : (dist_v, Runtime_err.t) resul
         | v ->
             Error
               (Runtime_err.Type_error
-                 (Printf.sprintf "categorical expects a list of pairs, got %s" (Value.show v)))
+                 (Printf.sprintf "categorical expects a list of pairs, got %s" (Value.display v)))
       in
       Result.map (fun es -> Categorical es) (entries_of entries)
   | VCon { name = "uniform-int"; args = [ VInt lo; VInt hi ]; _ } ->
@@ -145,7 +145,7 @@ let dist_of_value (ctx : Eval.ctx) (v : Value.t) : (dist_v, Runtime_err.t) resul
       else Ok (UniformInt (lo, hi))
   | v ->
       Error
-        (Runtime_err.Type_error (Printf.sprintf "%s is not a distribution value" (Value.show v)))
+        (Runtime_err.Type_error (Printf.sprintf "%s is not a distribution value" (Value.display v)))
 
 (* Support with probabilities. Bernoulli's support uses the prelude bool constructors. *)
 let support ctx (d : dist_v) : ((Value.t * float) list, Runtime_err.t) result =
@@ -324,7 +324,7 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
           invalid_distribution
             "exact observe requires transparent data support; opaque or executable value %s is not \
              comparable"
-            (Value.show value)
+            (Value.display value)
     and comparable_values = function
       | [] -> Ok ()
       | value :: rest ->
@@ -376,7 +376,7 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
                   else
                     invalid_arithmetic
                       "observe support accumulation overflowed for value %s in support order"
-                      (Value.show observed)
+                      (Value.display observed)
                 else sum mass theoretically_positive rest
           in
           sum 0.0 false entries
@@ -401,7 +401,8 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
       | VCon { con; args = []; _ } when Hash.equal con medium_con -> Ok 1
       | VCon { con; args = []; _ } when Hash.equal con high_con -> Ok 2
       | VCon { con; args = []; _ } when Hash.equal con forbidden_con -> Ok 3
-      | value -> err ~code:"E0913" "expected a released Risk constructor, got %s" (Value.show value)
+      | value ->
+          err ~code:"E0913" "expected a released Risk constructor, got %s" (Value.display value)
     in
     let add_terminal risk path_weight theoretically_positive =
       let current = !weights in
@@ -909,4 +910,4 @@ let show_metadata (m : metadata) : string =
 (** Render a posterior table, one row per value, probabilities to 6 places. *)
 let show_posterior (p : posterior) : string =
   String.concat "\n"
-    (List.map (fun (v, pr) -> Printf.sprintf "%.6f  %s" pr (Value.show v)) p.entries)
+    (List.map (fun (v, pr) -> Printf.sprintf "%.6f  %s" pr (Value.display v)) p.entries)

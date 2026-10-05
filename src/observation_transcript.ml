@@ -50,7 +50,18 @@ let create policy =
 
 (* the opaque kinds {!Observation.of_value} produces *)
 let opaque_kinds =
-  [ "secret"; "closure"; "resumption"; "builtin"; "operation"; "constructor"; "task"; "channel" ]
+  [
+    "secret";
+    "closure";
+    "resumption";
+    "builtin";
+    "operation";
+    "constructor";
+    "task";
+    "channel";
+    "capability";
+    "opaque";
+  ]
 
 let rec first_opaque = function
   | Observation.Opaque kind -> Some kind

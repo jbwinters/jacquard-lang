@@ -443,6 +443,98 @@ let test_eval_code_refuses_sealed () =
   | Ok v -> Alcotest.failf "quoted data: unexpected %s" (Value.show v)
   | Error e -> Alcotest.failf "quoted data is not a use: %s" (Runtime_err.to_string e)
 
+(* TYPE.1 S3b: user-facing renderings and observations never reveal an opaque representation,
+   while structural keys keep distinct opaque values distinct *)
+let test_display_and_keys () =
+  let store, ctx = Eval_support.make_prelude_ctx () in
+  let source =
+    coin_source
+    ^ "opaque type Box = Box(size: Int)\n\
+       both = support(Categorical([MkPair(Heads, 0.5), MkPair(Tails, 0.5)]))\n\
+       boxed = (Box(1), [Heads])\n\
+       maker = Box\n\
+       stuck(c) = match c { | Heads -> 1 }\n"
+  in
+  Alcotest.(check (list string))
+    "the owner declares and uses its types" []
+    (codes (walk store source));
+  let eval_value name =
+    match Eval_support.eval_with ctx store (Printf.sprintf "(var %s)" name) with
+    | Ok v -> v
+    | Error e -> Alcotest.failf "%s: %s" name (Runtime_err.to_string e)
+  in
+  let inspect name =
+    match
+      Eval_support.eval_with ctx store (Printf.sprintf "(app (var debug.inspect) (var %s))" name)
+    with
+    | Ok (Value.VText text) -> text
+    | Ok v -> Alcotest.failf "inspect %s: %s" name (Value.show v)
+    | Error e -> Alcotest.failf "inspect %s: %s" name (Runtime_err.to_string e)
+  in
+  Alcotest.(check string)
+    "nested values" "(<opaque box>, cons(<opaque coin>, nil))" (inspect "boxed");
+  Alcotest.(check string) "an unapplied constructor" "<opaque box>" (inspect "maker");
+  (* the structural rendering stays the key: two outcomes, kept apart *)
+  let outcomes =
+    let rec items = function
+      | Value.VCon { name = "cons"; args = [ head; tail ]; _ } -> head :: items tail
+      | _ -> []
+    in
+    items (eval_value "both")
+  in
+  Alcotest.(check int) "distinct opaque outcomes stay distinct" 2 (List.length outcomes);
+  Alcotest.(check bool)
+    "and their structural renderings differ" true
+    (match outcomes with [ a; b ] -> Value.show a <> Value.show b | _ -> false);
+  (* enumeration and pmf compare outcomes structurally, so distinct opaque values keep apart *)
+  (match
+     Infer_dist.enumerate ctx
+       (Eval.expr_state
+          (match
+             Reader.parse_one ~file:"m.jqd"
+               "(match (app (var sample) (app (var bernoulli) (lit 0.5))) (clause (pcon true) (var \
+                heads)) (clause (pcon false) (var tails)))"
+           with
+          | Ok f -> (
+              match Kernel.expr_of_form f with
+              | Ok e -> (
+                  match Resolve.resolve_expr (Store.names_view store) e with
+                  | Ok e -> e
+                  | Error ds -> fail_diags "resolve" ds)
+              | Error ds -> fail_diags "validate" ds)
+          | Error ds -> fail_diags "parse" ds))
+   with
+  | Ok posterior ->
+      Alcotest.(check int)
+        "enumeration keeps both outcomes" 2
+        (List.length posterior.Infer_dist.entries)
+  | Error ds -> fail_diags "enumerate" ds);
+  (match
+     Eval_support.eval_with ctx store
+       "(app (var pmf) (app (var categorical) (app (var cons) (app (var mk-pair) (var heads) (lit \
+        0.5)) (app (var cons) (app (var mk-pair) (var tails) (lit 0.5)) (var nil)))) (var heads))"
+   with
+  | Ok (Value.VReal p) -> Alcotest.(check (float 1e-9)) "pmf weighs one outcome" 0.5 p
+  | Ok v -> Alcotest.failf "pmf: %s" (Value.show v)
+  | Error e -> Alcotest.failf "pmf: %s" (Runtime_err.to_string e));
+  (* a match failure names the value redacted *)
+  (match Eval_support.eval_with ctx store "(app (var stuck) (var tails))" with
+  | Error e ->
+      let message = Runtime_err.to_string e in
+      Alcotest.(check bool)
+        "a match failure is redacted" true
+        (let has needle =
+           let n = String.length needle and m = String.length message in
+           let rec go i = i + n <= m && (String.sub message i n = needle || go (i + 1)) in
+           go 0
+         in
+         has "<opaque coin>" && not (has "tails"))
+  | Ok v -> Alcotest.failf "stuck matched %s" (Value.show v));
+  (* observations do not walk an opaque value *)
+  match Observation.of_value (eval_value "boxed") with
+  | Observation.Tuple [ Observation.Opaque "opaque"; _ ] -> ()
+  | v -> Alcotest.failf "observed %s" (Observation.render v)
+
 let suite =
   [
     Alcotest.test_case "kernel marker" `Quick test_kernel_marker;
@@ -456,4 +548,5 @@ let suite =
     Alcotest.test_case "frozen identities in projects" `Quick test_frozen_identities_in_projects;
     Alcotest.test_case "confirmed pins follow the store" `Quick test_confirmed_pins_follow_the_store;
     Alcotest.test_case "eval-code refuses sealed constructors" `Quick test_eval_code_refuses_sealed;
+    Alcotest.test_case "display and keys" `Quick test_display_and_keys;
   ]

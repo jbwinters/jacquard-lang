@@ -39,7 +39,7 @@ let type_error name args =
   Error
     (Runtime_err.Type_error
        (Printf.sprintf "%s received incompatible values: %s" name
-          (String.concat ", " (List.map Value.show args))))
+          (String.concat ", " (List.map Value.display args))))
 
 let lookup store kind name =
   match Prelude_identity.lookup_kind store name kind with
@@ -90,7 +90,7 @@ let call_term ctx name args =
 let unwrap_result = function
   | VCon { name = "ok"; args = [ value ]; _ } -> Ok value
   | VCon { name = "err"; args = [ VText message ]; _ } -> Error message
-  | value -> Error ("trusted validator returned malformed Result: " ^ Value.show value)
+  | value -> Error ("trusted validator returned malformed Result: " ^ Value.display value)
 
 let validate_call ctx call =
   match call_term ctx "governance.validate-call" [ call ] with
@@ -105,13 +105,13 @@ let validate_assessment ctx assessment =
 let assessment_id ctx assessment =
   match call_term ctx "governance.assessment-id" [ assessment ] with
   | Ok (VHash hash) -> Ok hash
-  | Ok value -> Error ("assessment ID boundary returned " ^ Value.show value)
+  | Ok value -> Error ("assessment ID boundary returned " ^ Value.display value)
   | Error error -> Error (Runtime_err.to_string error)
 
 let assessment_code ctx assessment =
   match call_term ctx "governance.assessment-code" [ assessment ] with
   | Ok (VCode code) -> Ok code
-  | Ok value -> Error ("assessment Code boundary returned " ^ Value.show value)
+  | Ok value -> Error ("assessment Code boundary returned " ^ Value.display value)
   | Error error -> Error (Runtime_err.to_string error)
 
 let exact_config_code max_branches = form "posterior-exact-config-v1" [ lit_int max_branches ]
@@ -344,7 +344,8 @@ let run_exact ctx ~builtin_signatures model_ref config source_evidence call =
   let* call_id =
     match validate_call ctx call with
     | Ok (VHash call_id) -> Ok call_id
-    | Ok value -> Error ("E1545: validated Call returned a non-hash identity: " ^ Value.show value)
+    | Ok value ->
+        Error ("E1545: validated Call returned a non-hash identity: " ^ Value.display value)
     | Error message -> Error message
   in
   let* () = check_model_signature store builtin_signatures model_id in
@@ -611,7 +612,8 @@ let project_exact ctx call baseline exact_value rule =
   let* call_id =
     match validate_call ctx call with
     | Ok (VHash call_id) -> Ok call_id
-    | Ok value -> Error ("E1546: validated Call returned a non-hash identity: " ^ Value.show value)
+    | Ok value ->
+        Error ("E1546: validated Call returned a non-hash identity: " ^ Value.display value)
     | Error message -> Error message
   in
   let* _ = validate_assessment ctx baseline in
@@ -797,7 +799,7 @@ let sampled_belief store posterior =
         let* forbidden = add belief.forbidden probability in
         fold { belief with forbidden } rest
     | (value, _) :: _ ->
-        Error ("E1547: approximate risk model returned a non-Risk value: " ^ Value.show value)
+        Error ("E1547: approximate risk model returned a non-Risk value: " ^ Value.display value)
   in
   fold { low = 0.0; medium = 0.0; high = 0.0; forbidden = 0.0 } posterior.Infer_dist.entries
 
@@ -816,7 +818,8 @@ let sample_evidence ctx ~builtin_signatures model_ref config source_evidence cal
   let* call_id =
     match validate_call ctx call with
     | Ok (VHash call_id) -> Ok call_id
-    | Ok value -> Error ("E1547: validated Call returned a non-hash identity: " ^ Value.show value)
+    | Ok value ->
+        Error ("E1547: validated Call returned a non-hash identity: " ^ Value.display value)
     | Error message -> Error message
   in
   let* () = check_model_signature store builtin_signatures model_id in

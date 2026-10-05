@@ -32,7 +32,7 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.2.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1193`
+- Alcotest/QCheck cases: `1194`
 - Cram transcript files: `77`
 - Documentation examples: `36` named examples across `8` documents
 
@@ -820,3 +820,19 @@ TYPE.1 slice 3a refuses the two remaining construction routes.
 
 `opaque-types` and the host preflight suite cover both. The source inventory is
 now `1193 / 77 / 36`.
+
+TYPE.1 slice 3b1 redacts opaque values in the interpreter.
+- `Value.display` renders an opaque type's saturated or unapplied constructor
+  as `<opaque name>`. `debug.inspect`, run and replay output, diagnostics and
+  match-failure messages use it.
+- `Value.show` stays structural for inference and aggregation keys, run
+  transcripts and scheduler traces.
+- `dist-diff` matches by structure, prints redacted, and never caches a
+  posterior that holds an opaque value.
+- Typed observations map an opaque value to the `opaque` kind without walking
+  it; transcripts accept the `opaque` and the previously missing `capability`
+  kinds.
+- Opacity is a fact about a constructor's identity, recorded by every store in
+  `Opaque_registry`.
+
+The source inventory is now `1194 / 77 / 36`.
