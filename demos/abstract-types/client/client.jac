@@ -18,7 +18,7 @@ client.nel-line(xs) =
           text.concat(
             text.concat("first = ", text.from-int(nel.head(n))),
             text.concat(
-              "; doubled length = ",
+              "; length after doubling = ",
               text.from-int(list.length(nel.to-list(nel.map(n, fn (x) -> int.mul(x, 2))))))))
     | None -> println("refused: the list is empty")
   }

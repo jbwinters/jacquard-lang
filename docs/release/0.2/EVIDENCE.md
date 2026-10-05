@@ -852,5 +852,6 @@ in [0, 1] that rejects NaN), `nel` (a non-empty list) and `req` (a validated
 signup request), each with a Warp suite, and a client application that depends
 on all three. `abstract-types-demos.t` runs the suites, compares the client's
 transcript with `EXAMPLE.txt` under the interpreter and natively, and shows the
-client's own construction and pattern match of a sealed value refused (E1705).
+library's export of its sealed constructor refused (E1736) and the client's
+own construction and match of one refused as not exported (E1705).
 The source inventory is now `1194 / 78 / 36`.

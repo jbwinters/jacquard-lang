@@ -17,7 +17,7 @@ Each library's suite passes, NaN and out-of-range probabilities included:
   > done
   6 passed, 0 failed, 0 skipped, 0 refused
   4 passed, 0 failed, 0 skipped, 0 refused
-  4 passed, 0 failed, 0 skipped, 0 refused
+  6 passed, 0 failed, 0 skipped, 0 refused
 
 The client needs only Console, and both engines print the recorded
 transcript, in which an opaque value displays as its type alone:
@@ -39,7 +39,7 @@ transcript, in which an opaque value displays as its type alone:
   refused: a probability lies in [0, 1]
   refused: a probability lies in [0, 1]
   both halves: 0.250
-  first = 3; doubled length = 3
+  first = 3; length after doubling = 3
   refused: the list is empty
   welcome Ada <ada@example.org>
   refused: the name is blank
@@ -48,8 +48,18 @@ transcript, in which an opaque value displays as its type alone:
   printed opaquely: <opaque prob-value>
   ()
 
-The client can neither construct a sealed value nor match one apart; the
-transparent ReqInvalid reasons stay open to it:
+The types are sealed: a library may not export the constructor of its opaque
+type (E1736), so the redacted line above is the only view a client gets:
+
+  $ cp "$A/prob/project.jqd" prob.bak
+  $ sed -i 's/(type prob-value)/(type prob-value) (con prob-value)/' "$A/prob/project.jqd"
+  $ jac project check --project "$A/prob" 2>&1 | grep -o 'error\[E1736\].*' | head -1
+  error[E1736]: A manifest exports a sealed constructor.
+  $ cp prob.bak "$A/prob/project.jqd"
+
+The client's own construction or pattern match of a sealed value names a
+constructor its library does not export (E1705), while the transparent
+ReqInvalid reasons, which `req` does export, stay open to it:
 
   $ cp "$A/client/client.jac" client.bak
   $ echo 'client.forge() = ProbValue(2.0)' >> "$A/client/client.jac"

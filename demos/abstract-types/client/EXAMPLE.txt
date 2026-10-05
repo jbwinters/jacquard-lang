@@ -4,7 +4,7 @@ P = 1.000; not P = 0.000
 refused: a probability lies in [0, 1]
 refused: a probability lies in [0, 1]
 both halves: 0.250
-first = 3; doubled length = 3
+first = 3; length after doubling = 3
 refused: the list is empty
 welcome Ada <ada@example.org>
 refused: the name is blank

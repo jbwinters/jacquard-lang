@@ -300,8 +300,8 @@ hash. The release notes record it.
 
 ## 4. Demonstrations
 
-Three library projects under `demos/abstract-types/`, each with a client
-application:
+Three library projects under `demos/abstract-types/`, and a client
+application that depends on all three:
 
 - **Probability** (namespace `prob`): `opaque type ProbValue = ProbValue(value: Real)`.
   - `prob.of-real : Real -> Result Text ProbValue` rejects NaN and values

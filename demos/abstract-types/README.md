@@ -18,5 +18,6 @@ construct and match.
     jac project run --project demos/abstract-types/client demo --allow console
 
 `client/EXAMPLE.txt` is the recorded transcript; `test/cli/abstract-types-demos.t`
-checks it under the interpreter and natively, and shows that the client's own
-attempts to construct or match a sealed value are refused (E1705).
+checks it under the interpreter and natively, shows that a library may not
+export its sealed constructor (E1736), and that the client's own attempts to
+construct or match a sealed value are refused (E1705).
