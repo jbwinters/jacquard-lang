@@ -60,10 +60,11 @@ Breaking or observable changes, each refused with a stated code:
   including a transparent type whose fields reach one. Manifest-abstract types
   are unaffected.
 - **Native runtime.** `jq_con_info` gains `type_name` and `opaque`, and the
-  runtime adds `jq_display`. C code that initializes `jq_con_info` by hand must
-  set the two fields; omitted trailing fields zero-fill to a transparent
-  constructor with no type name, so its values print unredacted, and
-  `-Wmissing-field-initializers` reports them. `jq_show` is unchanged and stays the structural key.
+  runtime adds `jq_display`. C code that initializes `jq_con_info` by hand for an opaque
+  constructor must set both fields; zero-filled trailing fields describe a
+  transparent constructor, so its values would print unredacted. `-Wextra`
+  (`-Wmissing-field-initializers`) reports omitted trailing fields in
+  positional initializers. `jq_show` is unchanged and stays the structural key.
 
 Identity and compatibility, including the migration table for changes to an
 opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
@@ -76,8 +77,8 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
 - `test/test_bundle_regions.ml`: bundle namespaces and regions (E1738,
   E1739) and the posterior model guard (E1709).
 - `test/cli/project-bundle.t`: `bundle-v2`, its namespace checks (E1739),
-  the refusal of a `bundle-v1` bundle that carries dependency contexts (E1735)
-  and the acceptance of one that does not.
+  the refusal of a `bundle-v1` bundle that carries dependency contexts or an
+  opaque declaration (E1735), and the acceptance of one that carries neither.
 - `test/test_host_invoke_preflight.ml`, `test/test_host_boundary_codec.ml` and
   `test/test_host_session.ml`: host protocol v0 refusals (E1604).
 - `test/cli/opaque-types.t`: constructor export (E1736), re-declaration,
@@ -85,8 +86,10 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
   redacted `dist-diff` output with no cache file.
 - `test/native-gauntlet/g53-opaque-display.jqd`: native and interpreter
   redaction agree byte for byte.
-- `test/cli/abstract-types-demos.t`: the `demos/abstract-types` libraries and
-  client on both engines.
+- `test/cli/abstract-types-demos.t`: the three `demos/abstract-types`
+  libraries' Warp suites under the interpreter, and the client's recorded
+  transcript under both engines, with the refusals of a sealed constructor
+  export (E1736) and of the client's own construction or match (E1705).
 - `docs/release/0.2/EVIDENCE.md` records each slice's evidence.
 
 ## Claim Boundary
