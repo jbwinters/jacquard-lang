@@ -79,8 +79,8 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
 - `test/cli/project-bundle.t`: `bundle-v2`, its namespace checks (E1739),
   the refusal of a `bundle-v1` bundle that carries dependency contexts or an
   opaque declaration (E1735), and the acceptance of one that carries neither.
-- `test/test_host_invoke_preflight.ml`, `test/test_host_boundary_codec.ml` and
-  `test/test_host_session.ml`: host protocol v0 refusals (E1604).
+- `test/test_host_invoke_preflight.ml`: host protocol v0 refuses opaque types
+  in both directions, including through a transparent wrapper (E1604).
 - `test/cli/opaque-types.t`: constructor export (E1736), re-declaration,
   including a byte-for-byte copy and an entry unit (E1737), explicit identities (E1709), and
   redacted `dist-diff` output with no cache file.

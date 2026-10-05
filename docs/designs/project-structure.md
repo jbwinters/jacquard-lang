@@ -263,8 +263,8 @@ This single rule applies to **names and to explicit identities**:
 **Abstract export and opaque types.** Exporting `(type X)` without its
 constructors hides them by name only (W1703 says so). An `opaque type` closes
 the remaining routes as well: constructor export (E1736), re-declaration
-(E1737), bundles that carry a sealed constructor outside its owner's region
-(E1738, E1739), `eval-code` payloads, host protocol v0 (E1604) and generated
+(E1737), bundles whose recorded namespaces do not match what they carry
+(E1739) or that carry a sealed constructor outside its owner's region (E1738), `eval-code` payloads, host protocol v0 (E1604) and generated
 setters. Its values print as `<opaque name>`. `docs/designs/abstract-types.md`
 §2.4 lists each rule.
 
