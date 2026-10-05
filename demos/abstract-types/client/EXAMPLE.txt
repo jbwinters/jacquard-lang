@@ -1,0 +1,14 @@
+ABSTRACT TYPES: values a client holds were checked by their library
+P = 0.250; not P = 0.750
+P = 1.000; not P = 0.000
+refused: a probability lies in [0, 1]
+refused: a probability lies in [0, 1]
+both halves: 0.250
+first = 3; length after doubling = 3
+refused: the list is empty
+welcome Ada <ada@example.org>
+refused: the name is blank
+refused: the email has no @: grace
+refused: the age is outside 13..130: 9
+printed opaquely: <opaque prob-value>
+()

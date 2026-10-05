@@ -33,7 +33,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1194`
-- Cram transcript files: `77`
+- Cram transcript files: `78`
 - Documentation examples: `36` named examples across `8` documents
 
 The development suite also includes corpus goldens, release-manifest checks,
@@ -846,3 +846,12 @@ TYPE.1 slice 3b2 brings the redaction to native code.
 - `g53-opaque-display` runs byte-identically on both engines.
 - New tests cover `dist-diff` on an opaque model (redacted lines, no cache file)
   and likelihood weighting keeping distinct opaque outcomes.
+
+TYPE.1 slice 4 adds the `demos/abstract-types` projects: `prob` (a probability
+in [0, 1] that rejects NaN), `nel` (a non-empty list) and `req` (a validated
+signup request), each with a Warp suite, and a client application that depends
+on all three. `abstract-types-demos.t` runs the suites, compares the client's
+transcript with `EXAMPLE.txt` under the interpreter and natively, and shows the
+library's export of its sealed constructor refused (E1736) and the client's
+own construction and match of one refused as not exported (E1705).
+The source inventory is now `1194 / 78 / 36`.
