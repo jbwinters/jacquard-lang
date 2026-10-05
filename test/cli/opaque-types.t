@@ -173,3 +173,62 @@ never caches a posterior that holds an opaque value:
   P(<opaque dd-coin>): 0.500000 -> 0.750000 (delta +0.250000)
   $ ls cache 2>/dev/null | wc -l
   0
+
+Migration (docs/release/api-identities/DECISION.md, Opaque Types): opacity is
+part of the type's identity, so making a pinned dependency's type transparent,
+changing an opaque type's representation, or adding an export each changes the
+dependency's context identity, and the consumer must re-pin (E1710). The
+interface diff calls any changed exported identity breaking, even where clients
+still compile after re-pinning; only the added export is compatible:
+
+  $ cd .. && mkdir -p mig/lib mig/app && cd mig/lib
+  $ printf '(project-v1 (name "mlib") (requires (core "0.2")) (namespace mig) (units "m.jac") (exports (type mig-coin) (term mig.heads) (term mig.flip)))' > project.jqd
+  $ printf 'opaque type MigCoin = | MigHeads | MigTails\nmig.heads = MigHeads\nmig.flip(c) = match c { | MigHeads -> MigTails | MigTails -> MigHeads }\n' > m.jac
+  $ cp m.jac m.orig && cp project.jqd project.orig
+  $ cd ../app
+  $ printf '(project-v1 (name "mapp") (requires (core "0.2")) (namespace mapp) (deps (dep (as m) (path "../lib"))) (entries (run demo (units "demo.jac"))))' > project.jqd
+  $ echo 'mig.flip(mig.heads)' > demo.jac
+  $ jacquard project pin > /dev/null && jacquard project run demo
+  <opaque mig-coin>
+  $ sed -i 's/^opaque type/type/' ../lib/m.jac
+  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*'
+  error[E1710]: A dependency's pin does not match its context identity.
+  changed: interface; breaking
+  $ cp ../lib/m.orig ../lib/m.jac && sed -i 's/MigTails/MigOther/g' ../lib/m.jac
+  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*'
+  error[E1710]: A dependency's pin does not match its context identity.
+  changed: interface; breaking
+  $ cp ../lib/m.orig ../lib/m.jac && printf 'mig.tails = MigTails\n' >> ../lib/m.jac && sed -i 's/(term mig.flip)/(term mig.flip) (term mig.tails)/' ../lib/project.jqd
+  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|(changed: .*)'
+  error[E1710]: A dependency's pin does not match its context identity.
+  (changed: interface; compatible term mig.tails: added)
+  $ jacquard project pin > /dev/null && jacquard project check > /dev/null && echo re-pinned
+  re-pinned
+  $ echo 'mig.flip(mig.tails)' > demo.jac && jacquard project run demo
+  <opaque mig-coin>
+
+A bundle object whose opaque marker is stripped no longer matches its hash, so
+it is refused before anything is imported (E1726):
+
+  $ cp ../lib/m.orig ../lib/m.jac && cp ../lib/project.orig ../lib/project.jqd
+  $ (cd ../lib && jacquard project bundle -o ../lib.bundle > /dev/null)
+  $ grep -l '(opaque)' ../lib.bundle/objects/*.jqd | wc -l
+  1
+  $ sed -i 's/ (opaque)//' ../lib.bundle/objects/*.jqd
+  $ sed -i 's|(path "../lib")|(bundle "../lib.bundle")|' project.jqd
+  $ jacquard project pin 2>&1 | grep -o 'error\[E1726\].*\|hashes to'
+  error[E1726]: A bundle object's hash does not match.
+  hashes to
+
+Dynamic code in a project is refused a sealed constructor too, the owner's
+own included, by name or by an explicit identity assembled as code:
+
+  $ cd ../lib
+  $ printf '(project-v1 (name "mlib") (requires (core "0.2")) (namespace mig) (units "m.jac") (exports (type mig-coin) (term mig.heads) (term mig.flip)) (entries (run dyn (units "dyn.jac") (grants eval))))' > project.jqd
+  $ echo '`op:eval-code`(quote { MigTails })' > dyn.jac
+  $ jacquard project run dyn --allow eval 2>&1 | grep -o 'uses constructor `[a-z-]*` of the opaque type `[a-z-]*`'
+  uses constructor `mig-tails` of the opaque type `mig-coin`
+  $ H=$(jacquard project hash | grep ' mig-tails ' | cut -d' ' -f3)
+  $ printf '`op:eval-code`(quote { #%s:con })\n' "$H" > dyn.jac
+  $ jacquard project run dyn --allow eval 2>&1 | grep -o 'uses constructor `[a-z-]*` of the opaque type `[a-z-]*`'
+  uses constructor `mig-tails` of the opaque type `mig-coin`

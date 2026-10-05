@@ -855,3 +855,12 @@ transcript with `EXAMPLE.txt` under the interpreter and natively, and shows the
 library's export of its sealed constructor refused (E1736) and the client's
 own construction and match of one refused as not exported (E1705).
 The source inventory is now `1194 / 78 / 36`.
+
+TYPE.1 hardening extends `opaque-types.t` end to end: making a pinned
+dependency's type transparent, changing an opaque type's representation and
+adding an export each require a re-pin (E1710, classified breaking, breaking
+and compatible); a bundle object with its opaque marker stripped is refused
+(E1726); and project-mode `eval-code` refuses the owner's sealed constructor by
+name and by explicit identity. The host codec documentation states that a
+user-defined opaque constructor is refused by the boundary value check, not by
+the raw encoder. The source inventory stays `1194 / 78 / 36`.

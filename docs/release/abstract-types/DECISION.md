@@ -82,8 +82,11 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
 - `test/test_host_invoke_preflight.ml`: host protocol v0 refuses opaque types
   in both directions, including through a transparent wrapper (E1604).
 - `test/cli/opaque-types.t`: constructor export (E1736), re-declaration,
-  including a byte-for-byte copy and an entry unit (E1737), explicit identities (E1709), and
-  redacted `dist-diff` output with no cache file.
+  including a byte-for-byte copy and an entry unit (E1737), explicit identities (E1709),
+  redacted `dist-diff` output with no cache file, re-pinning after an opacity change, a
+  representation change and an added export (E1710), a stripped opaque marker in a bundle
+  object (E1726), and project-mode `eval-code` refusing a sealed constructor by name and by
+  explicit identity.
 - `test/native-gauntlet/g53-opaque-display.jqd`: native and interpreter
   redaction agree byte for byte.
 - `test/cli/abstract-types-demos.t`: the three `demos/abstract-types`
