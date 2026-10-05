@@ -128,7 +128,7 @@ observations, which an opacity change alters.
 | changing a smart constructor's body | compatible; validation outcomes may change | re-pin |
 | removing an export | breaking | re-pin |
 | adding a validated function or exporting an existing accessor | compatible | re-pin |
-| widening a manifest-abstract type (`diff` labels it "abstraction widened") | compatible, absent constructor-name collisions | re-pin |
+| widening a manifest-abstract type (`diff` reports its constructors as "exposed", an additive change) | compatible, absent constructor-name collisions | re-pin |
 
 These claims cover clients that use stable public names. A client that names
 an exported term or type by explicit hash must update the hash after any change

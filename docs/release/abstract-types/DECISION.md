@@ -29,9 +29,10 @@ Owner decisions (2026-10-03):
 
 Breaking or observable changes, each refused with a stated code:
 
-- **E1737.** A root project without a namespace may no longer declare a type
-  or effect whose name lies in a dependency's namespace, even a byte-for-byte
-  copy. Rename the declaration, or give the root its own namespace.
+- **E1737.** A root project without a namespace, or an entry unit of any
+  project, may no longer declare a type or effect whose name lies in another
+  project's namespace, even a byte-for-byte copy. Rename the declaration, or
+  give the root its own namespace.
 - **Prelude names stay the prelude's.** A single file, or a root without a
   namespace, that rebinds a prelude constructor or governance term name no
   longer gets its own declaration back from the builtins that look those names
@@ -60,7 +61,9 @@ Breaking or observable changes, each refused with a stated code:
   are unaffected.
 - **Native runtime.** `jq_con_info` gains `type_name` and `opaque`, and the
   runtime adds `jq_display`. C code that initializes `jq_con_info` by hand must
-  supply the two fields. `jq_show` is unchanged and stays the structural key.
+  set the two fields; omitted trailing fields zero-fill to a transparent
+  constructor with no type name, so its values print unredacted, and
+  `-Wmissing-field-initializers` reports them. `jq_show` is unchanged and stays the structural key.
 
 Identity and compatibility, including the migration table for changes to an
 opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
@@ -72,11 +75,13 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
   identities, the `eval-code` refusal, and display versus structural keys.
 - `test/test_bundle_regions.ml`: bundle namespaces and regions (E1738,
   E1739) and the posterior model guard (E1709).
-- `test/cli/project-bundle.t`: `bundle-v2` and its namespace checks (E1739).
+- `test/cli/project-bundle.t`: `bundle-v2`, its namespace checks (E1739),
+  the refusal of a `bundle-v1` bundle that carries dependency contexts (E1735)
+  and the acceptance of one that does not.
 - `test/test_host_invoke_preflight.ml`, `test/test_host_boundary_codec.ml` and
   `test/test_host_session.ml`: host protocol v0 refusals (E1604).
-- `test/cli/opaque-types.t`: constructor export (E1736), re-declaration in
-  either installation order (E1737), explicit identities (E1709), and
+- `test/cli/opaque-types.t`: constructor export (E1736), re-declaration,
+  including a byte-for-byte copy and an entry unit (E1737), explicit identities (E1709), and
   redacted `dist-diff` output with no cache file.
 - `test/native-gauntlet/g53-opaque-display.jqd`: native and interpreter
   redaction agree byte for byte.
