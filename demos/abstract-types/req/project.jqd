@@ -1,0 +1,9 @@
+(project-v1
+  (name "req")
+  (requires (core "0.2"))
+  (namespace req)
+  (units "req.jac")
+  (exports
+    (type req-valid) (type req-invalid) (con blank-name) (con bad-email) (con age-out-of-range)
+    (term req.validate) (term req.name) (term req.email) (term req.age) (term req.reason))
+  (entries (test suite (units "tests.jac"))))

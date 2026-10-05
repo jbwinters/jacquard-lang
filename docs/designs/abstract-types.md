@@ -51,7 +51,7 @@ Reading the code establishes these routes:
 
 ### 2.1 The marker
 
-`opaque type ProbValue = ProbValue(Real)` in a project with namespace `prob` declares an **opaque type** named `prob-value`.
+`opaque type ProbValue = ProbValue(value: Real)` in a project with namespace `prob` declares an **opaque type** named `prob-value`.
 
 - `opaque` is a contextual keyword, valid only before `type` at the top level,
   so existing identifiers named `opaque` keep working.
@@ -303,7 +303,7 @@ hash. The release notes record it.
 Three library projects under `demos/abstract-types/`, each with a client
 application:
 
-- **Probability** (namespace `prob`): `opaque type ProbValue = ProbValue(Real)`.
+- **Probability** (namespace `prob`): `opaque type ProbValue = ProbValue(value: Real)`.
   - `prob.of-real : Real -> Result Text ProbValue` rejects NaN and values
     outside [0, 1].
   - `prob.value`, `prob.complement` and `prob.both` are closed over the

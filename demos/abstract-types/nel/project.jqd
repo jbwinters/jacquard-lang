@@ -1,0 +1,7 @@
+(project-v1
+  (name "nel")
+  (requires (core "0.2"))
+  (namespace nel)
+  (units "nel.jac")
+  (exports (type nel-list) (term nel.of-list) (term nel.singleton) (term nel.head) (term nel.to-list) (term nel.map))
+  (entries (test suite (units "tests.jac"))))

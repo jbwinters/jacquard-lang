@@ -1,0 +1,7 @@
+(project-v1
+  (name "abstract-types-client")
+  (requires (core "0.2"))
+  (namespace client)
+  (units "client.jac")
+  (deps (dep (as nel) (path "../nel") (pin #c977c6d0748f867cf568ac2f911d94146e22807972615d385d9fa40c335b42c4)) (dep (as prob) (path "../prob") (pin #18d7a63d3a122137f8e8669c9fae4772fa4d77c92b32692e2d6f8d31b8417421)) (dep (as req) (path "../req") (pin #14b8e9ebefa624908feca60ca254bb16b06b8b6e5f8a55b1b865a1ecfd1fda8e)))
+  (entries (run demo (units "demo.jac") (grants console) (native))))
