@@ -66,8 +66,12 @@ val decode_boundary_value :
 val encode_boundary_value : budget:boundary_budget -> Value.t -> (Yojson.Safe.t, Diag.t list) result
 
 (** [encode_boundary_value ~budget value] emits the deterministic lossless descriptor for a
-    boundary-safe Core value. Constructor display names never cross the wire. Opaque, callable, or
-    run-owned values return E1604; malformed UTF-8 and exceeded limits retain E1601/E1602. *)
+    boundary-safe Core value. Constructor display names never cross the wire. Primitive opaque
+    runtime values (Secret, Task, Channel, scoped instance and code values), callable, or run-owned
+    values return E1604; malformed UTF-8 and exceeded limits retain E1601/E1602. A constructor of a
+    user-defined [opaque type] is encoded structurally here, so a caller must also pass the value
+    through [validate_argument_value] and emit nothing unless both succeed, as invoke preflight and
+    the session do (TYPE.1). *)
 
 val validate_argument_value :
   Check.ctx -> expected:Types.ty -> Value.t -> (unit, Diag.t list) result
