@@ -498,7 +498,8 @@ arithmetic receives a visible dictionary and calls, for example,
 elaborate to that exact value and argument; no such sugar is approved here.
 
 Reserved keywords, the complete list: `type effect once multi fn let rec match handle
-return resume quote unquote if then else as where forall jqd try with`. `with`
+return resume quote unquote if then else as where forall jqd try with`.
+`opaque` is contextual, not reserved (§5, Types and effects). `with`
 has one use, the nominal field update `Ctor(value with label: e)` (SX.28b,
 §5 Types and effects). Comments are `--` to end
 of line; `--|` is a doc comment attaching to the next declaration's `doc`

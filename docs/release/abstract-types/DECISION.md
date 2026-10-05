@@ -8,9 +8,10 @@ Add opaque types. `opaque type ProbValue = ProbValue(value: Real)` declares a
 type whose constructors are sealed: only the owning project, or the single
 source that declares the type, constructs or matches them. A library can then
 enforce an invariant (a probability lies in [0, 1], a list is non-empty, a
-request was validated) that clients cannot bypass by name, by hash, by
-re-declaration, through a bundle, through `eval-code`, through host protocol
-v0, or through a generated setter. Opacity is part of the type's identity
+request was validated) that clients in a project graph cannot bypass by name,
+by hash, by re-declaration, through a bundle, through `eval-code`, through host
+protocol v0, or through a generated setter. Single files get a narrower
+guarantee (Claim Boundary). Opacity is part of the type's identity
 (declaration tag `0x47`). Transparent declarations keep their bytes, so no
 existing hash changes, the prelude's included.
 
@@ -35,12 +36,14 @@ Breaking or observable changes, each refused with a stated code:
   namespace, that rebinds a prelude constructor or governance term name no
   longer gets its own declaration back from the builtins that look those names
   up; the builtins use the pinned prelude identities.
-- **Posterior models must be exported.** A project or bundle run can no longer
-  pass a dependency's private model term to a posterior builtin by hash (E1709).
+- **Posterior models must be exported.** In a project or bundle run, a
+  posterior builtin accepts only a prelude term or a term some context exports;
+  passing any other model by hash, the root's own unexported terms and entry
+  definitions included, is refused (E1709). Export the model term.
 - **Bundles are `bundle-v2`.** A bundle records the namespace of every context
   it carries. A `bundle-v1` bundle that carries dependency contexts, or that
   contains an opaque declaration, is refused (E1735); rebuild it with
-  `jacquard project bundle`. Older readers refuse `bundle-v2` (E1735).
+  `jacquard project bundle`. Older readers refuse `bundle-v2` (E1720 or E1735).
 - **Older tools fail closed.** A tool without TYPE.1 reads the opaque marker as
   a malformed constructor specification. It refuses a bundle that carries an
   opaque declaration, and it cannot open a persistent store that holds one at
@@ -67,8 +70,9 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
 - `test/test_opaque_types.ml`: the marker, canonical identity, printing,
   single-file sealing (E0315), public projections and setters, frozen builtin
   identities, the `eval-code` refusal, and display versus structural keys.
-- `test/test_bundle_regions.ml` and `test/cli/project-bundle.t`: bundle
-  namespaces and regions (E1738, E1739).
+- `test/test_bundle_regions.ml`: bundle namespaces and regions (E1738,
+  E1739) and the posterior model guard (E1709).
+- `test/cli/project-bundle.t`: `bundle-v2` and its namespace checks (E1739).
 - `test/test_host_invoke_preflight.ml`, `test/test_host_boundary_codec.ml` and
   `test/test_host_session.ml`: host protocol v0 refusals (E1604).
 - `test/cli/opaque-types.t`: constructor export (E1736), re-declaration in
@@ -85,6 +89,9 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
 Opacity is language access control for checked code, not concealment. Stores,
 bundles and run transcripts hold every value's representation and are readable
 by anyone with the files. Value ordering can still reveal a representation.
+Single-file sealing protects only within one run and against `eval-code`:
+another file may repeat the declaration and so construct its values, and a
+persistent store is trusted content whose stored terms any later run can call.
 In project mode, dynamic code runs with the root's visibility, so the root's
 own private helpers stay callable from `eval-code`. A sealed-handle host
 protocol is future work.
