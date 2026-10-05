@@ -105,6 +105,36 @@ code; that is its decision to make.
 - DX.1 (227) reads labels, signatures, and identities by name from the sealed
   interface instead of re-deriving them.
 
+## Opaque Types (TYPE.1)
+
+An `opaque type` (`docs/designs/abstract-types.md`) changes no format here.
+Its constructors are sealed, so they appear among an interface's hidden
+members and never among its exports (E1736). Opacity is part of the type's
+identity (declaration tag `0x47`), so it flows into every interface and context
+pin that mentions the type, and `Interface.diff` reports making a type opaque,
+or transparent again, as an identity change.
+
+Any change to an interface's identity, additive or not, changes the context
+pin, and dependent projects re-pin. The table gives source compatibility: do
+clients still compile after rebuilding and re-pinning? The caveat in each row
+is behavioural. Behavioural compatibility never covers display or typed
+observations, which an opacity change alters.
+
+| Change | Source compatibility (behavioural caveat) | Pin |
+|---|---|---|
+| making a type opaque | breaking | re-pin |
+| making an opaque type transparent again (the abstraction widens) | compatible, absent constructor-name collisions; display and observations now expose the representation | re-pin |
+| changing an opaque type's representation (fields, constructor names, field labels) | compatible if every public signature and exported accessor is preserved; behavioural only if their semantics are too, and clients that depend on ordering or structural equality can still observe the representation | re-pin |
+| changing a smart constructor's body | compatible; validation outcomes may change | re-pin |
+| removing an export | breaking | re-pin |
+| adding a validated function or exporting an existing accessor | compatible | re-pin |
+| widening a manifest-abstract type (`diff` labels it "abstraction widened") | compatible, absent constructor-name collisions | re-pin |
+
+These claims cover clients that use stable public names. A client that names
+an exported term or type by explicit hash must update the hash after any change
+to that identity. Exposing constructors can collide with a client's or another
+dependency's constructor names (E1731).
+
 ## Evidence
 
 - `test/test_interface.ml`: rename and reformat stability; label, signature,

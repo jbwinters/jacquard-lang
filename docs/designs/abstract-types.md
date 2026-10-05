@@ -1,6 +1,6 @@
 # TYPE.0 Abstract Types and Checked Construction Boundaries
 
-- Status: design for TYPE.1 (not yet implemented), revised after twelve rounds of independent review.
+- Status: implemented by TYPE.1 (upgrade notes: `docs/release/abstract-types/DECISION.md`); the design was revised after twelve rounds of independent review.
 - Owner decisions recorded 2026-10-03:
   - an `opaque type` marker;
   - re-declaration refused for all types and effects;

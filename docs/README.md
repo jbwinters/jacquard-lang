@@ -151,7 +151,9 @@ Read these together when reviewing the historical 0.1 candidate boundary:
 - `designs/abstract-types.md`: TYPE.0 design for opaque types: an `opaque
   type` marker whose constructors are sealed to the owning project, namespace
   ownership, verified bundle regions, `<opaque name>` display, and the TYPE.1
-  slices.
+  slices. TYPE.1 implements it; [`release/abstract-types/`](release/abstract-types/DECISION.md)
+  has the upgrade notes, and `demos/abstract-types` shows three libraries and
+  a client.
 - `designs/behavioral-change-review.md`: DES.1 design proposal (not a
   contract) for reviewing two compatible checked versions over declared inputs
   and worlds: observation policy, status taxonomy, condition grouping,
