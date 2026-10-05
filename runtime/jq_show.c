@@ -232,7 +232,7 @@ char *jq_code_scalar(uint64_t kind, jq_value datum) {
   return b.data;
 }
 
-static void show_into(jq_buf *b, jq_value v) {
+static void show_into(jq_buf *b, jq_value v, int redact) {
   if (jq_is_int(v)) {
     buf_addf(b, "%lld", (long long)jq_int_val(v));
     return;
@@ -255,18 +255,23 @@ static void show_into(jq_buf *b, jq_value v) {
     buf_adds(b, "(");
     for (uint16_t i = 0; i < blk->n; i++) {
       if (i) buf_adds(b, ", ");
-      show_into(b, jq_fields(v)[i]);
+      show_into(b, jq_fields(v)[i], redact);
     }
     buf_adds(b, ")");
     break;
   case JQ_CON: {
     const jq_con_info *info = jq_con_info_of(v);
+    if (redact && info->opaque) {
+      /* TYPE.1: user-facing renderings never reveal an opaque representation */
+      buf_addf(b, "<opaque %s>", info->type_name);
+      break;
+    }
     buf_adds(b, info->name);
     if (jq_con_arity(v) > 0) {
       buf_adds(b, "(");
       for (uint16_t i = 0; i < jq_con_arity(v); i++) {
         if (i) buf_adds(b, ", ");
-        show_into(b, jq_con_fields(v)[i]);
+        show_into(b, jq_con_fields(v)[i], redact);
       }
       buf_adds(b, ")");
     }
@@ -277,6 +282,10 @@ static void show_into(jq_buf *b, jq_value v) {
     break;
   case JQ_CONSTRUCTOR: {
     const jq_con_info *info = (const jq_con_info *)blk->payload[0];
+    if (redact && info->opaque) {
+      buf_addf(b, "<opaque %s>", info->type_name);
+      break;
+    }
     buf_addf(b, "<constructor %s/%u>", info->name, info->arity);
     break;
   }
@@ -313,11 +322,21 @@ static void show_into(jq_buf *b, jq_value v) {
   }
 }
 
-/* Render like Value.show; the caller frees the returned string. */
+/* Render like Value.show, the structural key; the caller frees the returned string. */
 char *jq_show(jq_value v) {
   jq_buf b = { 0 };
   buf_grow(&b, 16);
   b.data[0] = 0;
-  show_into(&b, v);
+  show_into(&b, v, 0);
+  return b.data;
+}
+
+/* Render like Value.display, for user-facing output: an opaque type's value prints as
+   <opaque name> (TYPE.1). The caller frees the returned string. */
+char *jq_display(jq_value v) {
+  jq_buf b = { 0 };
+  buf_grow(&b, 16);
+  b.data[0] = 0;
+  show_into(&b, v, 1);
   return b.data;
 }

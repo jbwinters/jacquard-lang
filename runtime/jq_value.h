@@ -155,7 +155,8 @@ jq_value jq_int_mod_checked(jq_value a, jq_value b);
 
 /* --- parity kit (task 66; jq_show.c, jq_utf8.c, jq_rng.c) --- */
 
-char *jq_show(jq_value v); /* Value.show rendering; caller frees */
+char *jq_show(jq_value v); /* Value.show rendering, the structural key; caller frees */
+char *jq_display(jq_value v); /* Value.display: opaque values as <opaque name>; caller frees */
 uint64_t jq_utf8_width(const uint8_t *s, uint64_t n, uint64_t i);
 uint64_t jq_utf8_count(const uint8_t *s, uint64_t n); /* text.length (D9) */
 int64_t jq_rng_next(int64_t *state);                  /* Infer_dist.Rng */
@@ -179,6 +180,8 @@ typedef struct jq_con_info {
   uint32_t ordinal;
   uint32_t arity;
   const char *name; /* feeds <constructor f/2>, con rendering, arity errors */
+  const char *type_name; /* the declaring type's name; NULL unless [opaque] */
+  uint32_t opaque;       /* TYPE.1: jq_display renders the value as <opaque type_name> */
 } jq_con_info;
 
 typedef struct jq_op_info {

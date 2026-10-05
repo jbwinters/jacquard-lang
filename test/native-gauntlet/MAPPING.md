@@ -77,4 +77,5 @@ probe path, not acceptance by the public CLI.
 | (TS.2 slice 3, test_scoped_instances_runtime) | g50-scoped-multishot.jqd | multi-shot resumption inside (2) and around (3) a State scope, A3.7's Emit fork, and a fork nested between two Emit scopes with an inner forward to the outer scope, with no E0906 |
 | (TS.2 slice 3, test_scoped_instances_runtime) | g51-scoped-throw-emit.jqd | nested Throw skips intervening code (`err("outer")`), Throw inside State keeps the store, State inside Emit, Emit order, and ambient handlers that do not intercept instance throws |
 | (TS.2 slice 3) | g52-scoped-capability-show.jqd | a capability is `<capability>` under `debug.inspect` in both engines |
+| (TYPE.1 slice 3b2) | g53-opaque-display.jqd | an opaque type's values are `<opaque name>` in run output and inspection on both engines; `pmf` keeps opaque outcomes apart |
 | (TS.2 slice 3, unchecked probe) | e08-stale-state-get.jqd, e09-stale-throw-forwarded.jqd, e10-stale-emit.jqd | a leaked capability is refused statically (E0832); run through the unchecked probe, its later use is the stale-capability trap E0920 with byte-identical output and exit 2 |

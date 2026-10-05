@@ -517,6 +517,20 @@ let test_display_and_keys () =
   | Ok (Value.VReal p) -> Alcotest.(check (float 1e-9)) "pmf weighs one outcome" 0.5 p
   | Ok v -> Alcotest.failf "pmf: %s" (Value.show v)
   | Error e -> Alcotest.failf "pmf: %s" (Runtime_err.to_string e));
+  (* likelihood weighting merges runs by the structural key too *)
+  (match
+     Eval_support.eval_with ctx store
+       "(app (var dist.sample-lw) (lam () (match (app (var sample) (app (var bernoulli) (lit \
+        0.5))) (clause (pcon true) (var heads)) (clause (pcon false) (var tails)))) (lit 7) (lit \
+        200))"
+   with
+  | Ok v ->
+      let rec length = function
+        | Value.VCon { name = "cons"; args = [ _; tail ]; _ } -> 1 + length tail
+        | _ -> 0
+      in
+      Alcotest.(check int) "weighted runs keep both outcomes" 2 (length v)
+  | Error e -> Alcotest.failf "sample-lw: %s" (Runtime_err.to_string e));
   (* a match failure names the value redacted *)
   (match Eval_support.eval_with ctx store "(app (var stuck) (var tails))" with
   | Error e ->

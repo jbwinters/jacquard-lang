@@ -836,3 +836,13 @@ TYPE.1 slice 3b1 redacts opaque values in the interpreter.
   `Opaque_registry`.
 
 The source inventory is now `1194 / 77 / 36`.
+
+TYPE.1 slice 3b2 brings the redaction to native code.
+- `jq_con_info` carries the declaring type's name and an opaque flag, which
+  `jacquard build` emits.
+- `jq_display` renders an opaque value as `<opaque name>` for run output,
+  `debug.inspect` and runtime error messages. `jq_show` stays the structural
+  key for `pmf` and likelihood-weighting merges.
+- `g53-opaque-display` runs byte-identically on both engines.
+- New tests cover `dist-diff` on an opaque model (redacted lines, no cache file)
+  and likelihood weighting keeping distinct opaque outcomes.

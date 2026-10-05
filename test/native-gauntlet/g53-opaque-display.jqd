@@ -1,0 +1,12 @@
+; TYPE.1: an opaque type's values render as <opaque name> on both engines, in run output, generic
+; inspection, while pmf keeps distinct opaque outcomes apart
+(deftype g53-coin () (opaque) (con g53-heads) (con g53-tails))
+(deftype g53-box () (opaque) (con g53-box-of (field (tref int))))
+(var g53-heads)
+(app (var debug.inspect) (tuple (app (var g53-box-of) (lit 7)) (var g53-tails)))
+(var g53-box-of)
+(app (var pmf)
+  (app (var categorical)
+    (app (var cons) (app (var mk-pair) (var g53-heads) (lit 0.25))
+      (app (var cons) (app (var mk-pair) (var g53-tails) (lit 0.75)) (var nil))))
+  (var g53-heads))
