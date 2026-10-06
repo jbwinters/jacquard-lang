@@ -12,7 +12,7 @@ checkout.
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ export JACQUARD_RUNTIME=$PWD/../../runtime
   $ (cd /tmp && jacquard --version | cut -d' ' -f1)
-  0.2.0
+  0.3.0
   $ mkdir demos && cp -RL ../../demos/applications ../../demos/lib demos/ && chmod -R u+w demos
   $ P=$PWD/demos/applications/rota-optimizer
 

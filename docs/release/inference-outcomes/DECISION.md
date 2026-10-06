@@ -117,7 +117,6 @@ and budgeted enumeration are ordinary prelude code, so both engines run them.
 | a negative categorical weight | a table with negative or >1 probabilities | E0917, negative mass |
 | `infer lw` drawing only from zero-mass categoricals | a posterior | E0901 |
 | `infer lw --samples 0` | E0901 | usage error (exit 124) |
-
 | `infer lw` where some runs are impossible | the impossible values listed with probability 0 | impossible runs are dropped, so those rows are absent |
 | `infer enumerate` where some paths underflow but others do not | underflowed paths pruned, so their values were absent | underflowed paths survive and are listed with probability 0 |
 

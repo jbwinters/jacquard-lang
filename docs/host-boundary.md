@@ -17,7 +17,7 @@ Read alongside:
   external-execution limits;
 - [`concurrency.md`](concurrency.md) for the deterministic interpreted
   scheduler and explicit C4 exclusions; and
-- [`release/0.2/LIMITS.md`](release/0.2/LIMITS.md) for the released baseline.
+- [`release/0.3/LIMITS.md`](release/0.3/LIMITS.md) for the released baseline.
 
 ## 1. Purpose
 
@@ -144,7 +144,7 @@ crosses every language handler becomes a host request.
 
 The initial adapter configuration is still coarser than OS isolation:
 
-- Core 0.2 grants `Fs` and `Net` at whole-effect granularity.
+- Core 0.3 grants `Fs` and `Net` at whole-effect granularity.
 - A closed operation registry limits which adapter implementations exist, but
   it does not make resource strings type-proven authority.
 - The host process may possess credentials or OS permissions broader than the
@@ -278,7 +278,7 @@ headers are not smuggled into HB.0.
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
 | Controlled replay fixtures | production traffic replay | explicit privacy, retention, redaction, and evidence-store authority |
-| Coarse Core 0.2 grants | domain/path/port-level enforcement | concrete host report followed by Task 202's reviewed attenuation algebra and handlers |
+| Coarse Core 0.3 grants | domain/path/port-level enforcement | concrete host report followed by Task 202's reviewed attenuation algebra and handlers |
 | Linux-first integration evidence | portable host-runtime claim | CI, lifecycle, cleanup, and packaging evidence for every added platform |
 | No HTTP/product code in Core | a bundled web framework or hosted service | intentionally not a removal target; those products remain external consumers |
 

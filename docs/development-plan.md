@@ -3,7 +3,7 @@
 > **Status:** This original implementation plan is complete and retained as a
 > design and sequencing record. Its unchecked boxes describe the acceptance
 > criteria as originally written; they are not the current task backlog. For
-> the shipped boundary, use `release/0.2/`; use Task Master only when the owner
+> the shipped boundary, use `release/0.3/`; use Task Master only when the owner
 > explicitly activates it for current work.
 
 Version 0.1, July 2026. Companion to `jacquard-kernel-ast-m0.md` (the spec) and the whitepaper.

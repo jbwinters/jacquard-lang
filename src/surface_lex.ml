@@ -632,7 +632,7 @@ let next state =
         | Some '$' when peek_at state 1 = Some '"' ->
             ignore (advance state);
             ignore (advance state);
-            fail state opening "E1219" "nested marked interpolation is not supported in 0.2"
+            fail state opening "E1219" "nested marked interpolation is not supported in 0.3"
         | Some '{' ->
             state.interpolation_mode <- Expr (depth + 1, opening);
             one state LBrace

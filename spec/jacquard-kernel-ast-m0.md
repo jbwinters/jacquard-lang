@@ -1,7 +1,7 @@
-# Jacquard Kernel AST — Implemented M0/0.2 Specification
+# Jacquard Kernel AST — Implemented M0/0.3 Specification
 
 Status: implemented. This is the source-of-truth grammar for Jacquard's
-27-form kernel and permanent `.jqd` carrier as shipped in 0.2. Historical
+27-form kernel and permanent `.jqd` carrier as shipped in 0.3. Historical
 design reasoning is retained, but settled decisions are labeled as such.
 Canonical byte details are normative in `serialization.md`.
 
@@ -373,7 +373,7 @@ which is one `DefType` and one `DefEffect`. A model is any expression whose row 
 `Dist`. An inference algorithm is a `Handle`: exact enumeration resumes per
 support element and weights, while likelihood weighting samples with a fixed
 seed. Both ship for finite discrete distributions. Continuous distributions,
-gradients, and SMC do not ship in 0.2. Your fields intuition lands here too:
+gradients, and SMC do not ship in 0.3. Your fields intuition lands here too:
 composing two models multiplies their weight functions, and the handler is
 where superposition becomes a posterior.
 

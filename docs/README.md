@@ -91,26 +91,30 @@ project shape from file names alone.
   fuel-v1 cost model, and E0919 incomplete-run semantics.
 - `errors.md`: diagnostic code catalog.
 
-## Current Release 0.2 Evidence
+## Current Release 0.3 Evidence
 
-Read these together when judging the integrated 0.2 distribution:
+Read these together when judging the integrated 0.3 distribution:
 
-- `release/0.2/EVIDENCE.md`: artifact, inventory, evidence lineage, and gate.
-- `release/0.2/CLAIMS.md`: bounded integrated claims with adjacent caveats.
-- `release/0.2/LIMITS.md`: language, runtime, evidence, governance, and
+- `release/0.3/EVIDENCE.md`: artifact, inventory, evidence lineage, and gate.
+- `release/0.3/CLAIMS.md`: bounded integrated claims with adjacent caveats.
+- `release/0.3/LIMITS.md`: language, runtime, evidence, governance, and
   distribution non-claims.
-- `release/0.2/REPRO.md`: fresh-clone reproduction and same-commit RC/final
+- `release/0.3/REPRO.md`: fresh-clone reproduction and same-commit RC/final
   promotion procedure.
-- `release/0.2/FREEZE.md`: distribution version and retained semantic
+- `release/0.3/FREEZE.md`: distribution version and retained semantic
   identities.
-- `release/0.2/GAUNTLET.md`: hostile evidence classes and deliberate omissions.
-- `release/0.2/DECISION.md`: conditional RC1 and final decision.
-- `release/0.2/RELEASE-NOTES.md`: public contents and binary install.
-- `release/0.2/MANIFEST.sha256`: complete hashed change inventory from the
-  frozen 0.2 lineage base, excluding only the manifest itself.
+- `release/0.3/GAUNTLET.md`: hostile evidence classes and deliberate omissions.
+- `release/0.3/DECISION.md`: conditional RC1 and final decision.
+- `release/0.3/RELEASE-NOTES.md`: public contents and binary install.
+- `release/0.3/MANIFEST.sha256`: complete hashed change inventory from the
+  frozen 0.3 lineage base, excluding only the manifest itself.
+- `release/0.3/SLICES.md`: per-change evidence log for everything integrated
+  since 0.2.0.
 
 The detailed successor packs indexed below remain the authority for each
-subsystem. The 0.2 pack rolls them up without editing their historical bytes.
+subsystem. The 0.3 pack rolls them up without editing their historical bytes.
+`release/0.2/` keeps the published 0.2.0 pack; its manifest is verified at the
+`jacquard-core-0.2.0` tag.
 
 ## Historical Release 0.1 Evidence
 
@@ -428,8 +432,8 @@ For a future coding agent:
 
 For a release reviewer:
 
-1. `release/0.2/EVIDENCE.md`
-2. `release/0.2/CLAIMS.md`
-3. `release/0.2/LIMITS.md`
-4. `release/0.2/REPRO.md`
-5. from the repository root, run `scripts/release/reproduce-0.2.sh`
+1. `release/0.3/EVIDENCE.md`
+2. `release/0.3/CLAIMS.md`
+3. `release/0.3/LIMITS.md`
+4. `release/0.3/REPRO.md`
+5. from the repository root, run `scripts/release/reproduce-0.3.sh`

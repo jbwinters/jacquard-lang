@@ -277,6 +277,8 @@
   ../docs/README.md
   ../docs/release/0.2/DECISION.md
   ../docs/release/0.2/EVIDENCE.md
+  ../docs/release/0.3/DECISION.md
+  ../docs/release/0.3/EVIDENCE.md
   ../docs/release/surface-syntax/DECISION.md
   ../docs/release/surface-syntax/FOLLOWUPS.md
   ../docs/release/surface-syntax/MANIFEST.sha256

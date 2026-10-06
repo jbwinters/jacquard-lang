@@ -135,17 +135,18 @@ namespace of every context it carries, and verification checks each one
 (E1739): a relabelled or missing namespace, or a root namespace that differs
 from project.jqd, is refused:
 
-  $ grep -o '(namespaces.*' ../app.bundle/bundle-v2.jqd | hashes
-  (namespaces (namespace #HASH liba) (namespace #HASH app))
+  $ grep -o '(namespace #[0-9a-f]* [a-z]*)' ../app.bundle/bundle-v2.jqd | hashes | sort
+  (namespace #HASH app)
+  (namespace #HASH liba)
   $ tamper && sed -i 's/ liba)/ libz)/' ../t.bundle/bundle-v2.jqd
   $ jacquard project run --bundle ../t.bundle demo 2>&1 | head -2 | hashes
   error[E1739]: Recorded namespaces conflict with the contexts they name.
     Cause: context HASH exports `liba-box`, which is outside its namespace `libz`
-  $ tamper && sed -i -E 's/\(namespace #[0-9a-f]+ liba\) //' ../t.bundle/bundle-v2.jqd
+  $ tamper && sed -i -E 's/ ?\(namespace #[0-9a-f]+ liba\)//' ../t.bundle/bundle-v2.jqd
   $ jacquard project run --bundle ../t.bundle demo 2>&1 | head -2 | hashes
   error[E1739]: Recorded namespaces conflict with the contexts they name.
     Cause: carried context HASH records no namespace
-  $ tamper && sed -i 's/ app))/ appz))/' ../t.bundle/bundle-v2.jqd
+  $ tamper && sed -i -E 's/(\(namespace #[0-9a-f]+) app\)/\1 appz)/' ../t.bundle/bundle-v2.jqd
   $ jacquard project run --bundle ../t.bundle demo 2>&1 | head -2 | hashes
   error[E1739]: Recorded namespaces conflict with the contexts they name.
     Cause: the root context's recorded namespace differs from project.jqd
@@ -225,8 +226,9 @@ its dependency bundle carries:
   $ printf '(project-v1 (name "twice") (requires (core "0.2")) (namespace twice) (units "t.jac") (deps (dep (as a) (path "../liba")) (dep (as c) (path "../libacopy"))) (entries (run demo (units "demo.jac"))))' > project.jqd
   $ echo 'twice.go(x) = liba.plus(x, by: 1)' > t.jac && echo 'twice.go(1)' > demo.jac
   $ jacquard project pin > /dev/null && jacquard project bundle -o ../twice.bundle > /dev/null
-  $ grep -o '(namespaces.*' ../twice.bundle/bundle-v2.jqd | hashes
-  (namespaces (namespace #HASH liba) (namespace #HASH twice))
+  $ grep -o '(namespace #[0-9a-f]* [a-z]*)' ../twice.bundle/bundle-v2.jqd | hashes | sort
+  (namespace #HASH liba)
+  (namespace #HASH twice)
   $ jacquard project run --bundle ../twice.bundle demo
   2
   $ printf '(project-v1 (name "other") (requires (core "0.2")) (namespace other) (deps (dep (as p) (bundle "../app.bundle"))) (entries (run demo (units "demo.jac"))))' > project.jqd

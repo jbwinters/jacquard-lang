@@ -22,7 +22,7 @@
     }
   },
   "carrier": "stdio-u32-json-v0",
-  "core_version": "0.2.0",
+  "core_version": "0.3.0",
   "diagnostic_prose": {
     "cause_suffix_rule": "an effect_failure message must end the first diagnostic's cause",
     "compared": [ "schema", "domain", "code", "severity", "span" ],

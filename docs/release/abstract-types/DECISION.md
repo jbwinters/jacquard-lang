@@ -93,7 +93,7 @@ opaque type, are in `docs/release/api-identities/DECISION.md` (Opaque Types).
   libraries' Warp suites under the interpreter, and the client's recorded
   transcript under both engines, with the refusals of a sealed constructor
   export (E1736) and of the client's own construction or match (E1705).
-- `docs/release/0.2/EVIDENCE.md` records each slice's evidence.
+- `docs/release/0.3/SLICES.md` records each slice's evidence.
 
 ## Claim Boundary
 

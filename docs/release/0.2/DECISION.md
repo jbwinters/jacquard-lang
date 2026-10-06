@@ -3,11 +3,11 @@
 Status: candidate is ready for RC1 only after the exact candidate reproduction
 and required GitHub checks are green.
 
-Test count: `1194`
+Test count: `868`
 
-Cram count: `78`
+Cram count: `58`
 
-Documentation example count: `36` across `8` documents
+Documentation example count: `28` across `8` documents
 
 ## Decision
 
@@ -42,30 +42,3 @@ Release notes and announcements must link `CLAIMS.md` and `LIMITS.md`. They
 must not call Jacquard a sandbox, production authorization system, formally
 verified compiler, human-validated readability improvement, native async
 runtime, or general continuous probabilistic language.
-
-The checked effect-payload successor adds 37 handler/transport cases and one
-unifier isolation case, plus one CLI transcript, bringing the live inventory to
-`969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
-The historical publication manifests and their recorded source evidence remain
-unchanged; these inventory numbers describe the current source checkout.
-
-The serial host-session library adds 15 cases, bringing the current source
-inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
-finish-once accounting, and bounded evidence. See
-[the session contract](../../host-session-v0.md).
-
-The opt-in serial host worker adds 23 cases and one CLI transcript, bringing
-the current source inventory to `1007 / 61 / 28`. It covers the full
-`stdio-u32-json-v0` lifetime against a reopened store: pure and effectful
-invocations, every frozen host-failure and cancellation mapping, preflight
-fatals, stale and malformed responses, carrier loss, the selected stderr
-ceiling, descriptor ownership, and exit statuses. See
-[the worker contract](../../host-worker-v0.md).
-
-The HB.3 conformance kit adds 7 cases, bringing the current source inventory
-to `1014 / 61 / 28`. It installs the kit fixtures with the published recipe,
-binds every synthetic HB.1 vector identity to a real store member, replays all
-21 vector transcripts and all 13 terminal mappings through the installed
-worker with a deterministic fake host, and fails on any divergence that is not
-an explicitly recorded pending decision. See
-[the kit README](../../../spec/host-protocol-v0/kit/README.md).

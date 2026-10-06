@@ -83,7 +83,9 @@ jobs:
 
   github-release:
     name: Attach to GitHub Release
-    if: startsWith(github.ref, 'refs/tags/')
+    # Only a tag push publishes: a manual dispatch may package a different ref
+    # than the one it was dispatched from, so its archives stay workflow artifacts.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
     needs: package
     runs-on: ubuntu-latest
 
@@ -118,6 +120,6 @@ jobs:
             gh release create "$TAG" dist/* \
               --verify-tag \
               --title "$TAG" \
-              --notes-file docs/release/0.2/RELEASE-NOTES.md \
+              --notes-file docs/release/0.3/RELEASE-NOTES.md \
               $prerelease
           fi
