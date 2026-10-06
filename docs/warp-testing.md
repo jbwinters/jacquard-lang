@@ -1,6 +1,6 @@
 # Warp — The Jacquard Testing Framework, Design and Implemented Reference
 
-Status: Warp ships in Jacquard 0.2 with typed discovery, hermetic/world lanes,
+Status: Warp ships in Jacquard 0.3 with typed discovery, hermetic/world lanes,
 seeded and exhaustive properties, schedule exploration, cache, coverage, and
 relational cases. Historical phasing in section 11 remains as the design
 record, and statements explicitly marked as future work remain non-claims.

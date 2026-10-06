@@ -82,7 +82,7 @@ Unknown fields fail closed, duplicates and budgets are refused:
   $ printf '(project-v1 (name "p") (requires (core "9.0")))' > project.jqd
   $ jacquard project check 2>&1 | grep -A1 'error\[E17'
   error[E1704]: The running Core does not satisfy the project's requirement.
-    Cause: the project requires Core 9.0 (same major, at least that minor); running 0.2.0
+    Cause: the project requires Core 9.0 (same major, at least that minor); running 0.3.0
 
 Without a manifest the search stops at the repository root:
 

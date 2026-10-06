@@ -1,7 +1,7 @@
 # The Jacquard Standard Library — Design and Implemented Reference
 
 Status: this began as the standard-library design and now records the shipped
-Jacquard 0.2 prelude. Signature catalogs and explicitly labeled pseudocode are
+Jacquard 0.3 prelude. Signature catalogs and explicitly labeled pseudocode are
 not complete source files. Section 12 records implementation narrowings where
 the original design and current behavior differ.
 
@@ -710,7 +710,7 @@ they read it:
 | `ConsoleInput` | low | `console.scripted-input` or the `console` root grant | terminal input that reports its own end |
 | `Clock` | low | `clock.fixed` or explicit root grant | wall-clock observation or waiting |
 | `Fs` | medium | `fs.in-memory`, `fs.read-only`, or explicit root grant | filesystem access; the root grant is not path-scoped |
-| `Net` | high | `net.scripted`, `net.record`, or explicit root grant (deterministic stub in 0.2) | network-shaped requests; live socket/HTTP access requires a host adapter that does not ship |
+| `Net` | high | `net.scripted`, `net.record`, or explicit root grant (deterministic stub in 0.3) | network-shaped requests; live socket/HTTP access requires a host adapter that does not ship |
 | `Eval` | high | explicit root grant only | execution of constructed code at root authority |
 | `Infer` | medium | `infer.scripted` or explicit root grant | unverified model output |
 | `Approval` | special | four hash-revalidating Approval handlers | exact consent semantics, not ordinary risk ordering |
@@ -1383,18 +1383,18 @@ mass are E0917 and `InferenceNumericFailureV1` in both.
 **`Map k v` displays as `map.t k v`.** Elaborated signatures print the store name of the
 wrapper type; the doc's display-syntax `Map k v` is the same type.
 
-**`--allow fs` is the whole filesystem.** The grant is the only boundary in 0.2 —
+**`--allow fs` is the whole filesystem.** The grant is the only boundary in 0.3 —
 no path confinement. Attenuate with in-language handlers (`fs.read-only`); path-scoped
 grants are future work.
 
 **`--allow net` is a deterministic stub, not live networking.** It returns a
 canned success response naming the requested URL. `net.scripted`, `net.record`,
-and replay handlers provide test worlds, but Jacquard 0.2 does not ship a
+and replay handlers provide test worlds, but Jacquard 0.3 does not ship a
 socket or HTTP client adapter. An embedding can supply that boundary later.
 
 **`eval` bypasses interposed handlers.** Eval'd code runs at root authority with a fresh
 continuation, so wrapping handlers (including `fs.read-only`) do not attenuate `eval-code`
-payloads; only root grants apply. This is the documented 0.2 behavior; changing
+payloads; only root grants apply. This is the documented 0.3 behavior; changing
 it requires a separate authority decision and evidence boundary.
 
 **Smaller narrowings.** `text.trim` strips ASCII whitespace only. `uniform-int`

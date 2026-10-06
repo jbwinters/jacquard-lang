@@ -1,8 +1,8 @@
 # Effect Linearity Modes — Design and Implemented Contract
 
 Status: the operation-mode encoding, explicit surface modes, affine `Resume`
-checks, runtime backstop, and reviewed prelude assignments described here ship
-in Jacquard 0.2. Historical task/phasing language is retained as the design
+checks, runtime backstop, and reviewed prelude assignments described here have
+shipped since Jacquard 0.2. Historical task/phasing language is retained as the design
 record; sections explicitly labeled deferred remain future work.
 
 Companion to the kernel spec, the effects runtime (tasks 70/71), and the
@@ -71,7 +71,7 @@ Mode is part of the **interface hash**. Tightening an operation from `multi`
 to `once` changes what dependents' handlers are allowed to do, so it is a
 breaking interface change by construction. A future package-aware authority
 differ could report it as: "op `fetch`: multi -> once (handlers may no longer
-resume repeatedly)." Jacquard 0.2 does not ship `jac pkg`.
+resume repeatedly)." Jacquard 0.3 does not ship `jac pkg`.
 
 ## 4. Surface syntax
 

@@ -1,5 +1,5 @@
 (project-v1
   (name "applications-suite")
   (requires (core "0.2"))
-  (deps (dep (as dice) (path "../dice-coach") (pin #1a69bd499601adbf8eba52422a4afb99fa7eb9f173cf720f7c05d2438ad9ff91)) (dep (as display) (path "../shared") (pin #3c45e2a4c9a91218158bdfcd58bdeebdb1114f7b1db443f4f4666b82edb02ae8)) (dep (as picnic) (path "../picnic-planner") (pin #084293767b9280b575b3204a170a6f3e5ba18861b6d67ec7a2bc4588ce92e811)))
+  (deps (dep (as dice) (path "../dice-coach") (pin #2d3c1cdee6b7df3a4594fc3bb916dcc2000a3365d42d075c43f03bb1c6b76da5)) (dep (as display) (path "../shared") (pin #3e317f3abcadd429ae38e47cb03f811c094648f3d29fce96ecb19ca3561b9c4d)) (dep (as picnic) (path "../picnic-planner") (pin #5a7e8bcc6bc56d68c780cc4bbc6d79ceca8be3beea4b41b9769bf5cb0b9c45d6)))
   (entries (test interaction (units "interaction-tests.jac"))))

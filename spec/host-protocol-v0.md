@@ -333,7 +333,7 @@ boundary-unsafe operation signatures fail E1604 during preflight. The registry
 may cover only part of a granted effect; reaching another operation fails
 E1606 before a request is sent.
 
-The closed registry narrows adapter availability but does not turn Core 0.2's
+The closed registry narrows adapter availability but does not turn Core 0.3's
 whole-effect grant into path, host, port, or database-row containment. Correct
 adapter enforcement and OS authority remain trusted.
 
