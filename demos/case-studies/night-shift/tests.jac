@@ -4,13 +4,15 @@
 -- --exhaustive the props are proofs over all 27 fleet worlds. This file
 -- expects model.jac's definitions; run.sh assembles the two.
 
---| a test double for the eval capability: resumes the once-mode lever with a
---| sentinel so the decision spine can be proven without granting `eval`.
---| The real evaluation is pinned by run.sh's granted lane instead.
+--| a test double for the eval capability: when the once-mode lever reaches
+--| `eval`, it stops the shift with a sentinel, so the decision spine can be
+--| proven without granting `eval`. `eval-code`'s result type is polymorphic, so
+--| no handler may resume it with a concrete value; run.sh's granted lane asserts
+--| the real evaluation and the shipped verdict instead.
 eval-stub(thunk) =
   handle thunk() {
     | return x -> x
-    | eval-code(code) resume k -> k(99)
+    | eval-code(code) resume k -> ("lever reached", 99)
   }
 
 wedged?(m) = match m { | Wedged -> True | _ -> False }
@@ -57,12 +59,12 @@ night-shift-suite =
     }),
 
     -- the decision spine, Eval stubbed: green ships once, red escalates
-    Case("green preflight ships through the once-mode lever", fn () ->
+    Case("green preflight reaches the once-mode lever", fn () ->
       match throw.to-result(fn () ->
         eval-stub(fn () -> decide(preflight.solo(MkFleet(Ready, Ready, Ready))))) {
         | Ok((verdict, pool)) -> {
-            check.eq(verdict, "shipped by night-shift-bot", text.eq, text.show, "verdict")
-            check.eq(pool, 99, int.eq, int.show, "the stubbed lever fired exactly once")
+            check.eq(verdict, "lever reached", text.eq, text.show, "verdict")
+            check.eq(pool, 99, int.eq, int.show, "the green spine reached the lever")
           }
         | Err(_) -> check.true(False, "decision must not throw")
       }),
