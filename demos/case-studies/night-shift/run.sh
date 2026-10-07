@@ -36,6 +36,12 @@ if grep -F "$token_payload" "$shift_out" >/dev/null; then
 else
   echo "token stayed redacted"
 fi
+if grep -F '("shipped by night-shift-bot", 16)' "$shift_out" >/dev/null; then
+  echo "the granted lever shipped the migration"
+else
+  echo "night-shift demo bug: the granted shift did not ship the migration" >&2
+  exit 1
+fi
 
 echo "== relational: flagship Secret noninterference lane =="
 if jacquard_demo relate "$here/model.jac" --vary secret=night-shift-token --seed 42 \

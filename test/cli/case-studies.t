@@ -57,13 +57,21 @@ Stormglass compares naive and resilient checkout policies under the exact same
   PASS stormglass-suite/stormglass/payment down is never sold as a clear day (verified exhaustively (27 cases))
   5 passed, 0 failed, 0 skipped, 0 refused
 
-Night-shift runs the recovered flagship launcher end to end. This excerpt pins
-the relational lane after the existing granted execution: two distinct
-deploy-token payloads produce one equal observable shift and neither reaches
-the transcript.
+Night-shift runs the recovered flagship launcher end to end and must exit 0.
+The granted lane ships the migration with the token redacted; the relational
+lane shows two distinct deploy-token payloads produce one equal observable
+shift and neither reaches the transcript; and the Warp suite passes.
 
-  $ JACQUARD=jac sh "$D/night-shift/run.sh" 2>&1 | sed -n '/^== relational:/,/^== Warp:/p'
+  $ JACQUARD=jac sh "$D/night-shift/run.sh" > night-shift.out 2>&1; echo "exit=$?"
+  exit=0
+  $ grep 'shipped the migration\|stayed redacted' night-shift.out
+  token stayed redacted
+  the granted lever shipped the migration
+  secret variation stayed redacted
+  $ sed -n '/^== relational:/,/^== Warp:/p' night-shift.out
   == relational: flagship Secret noninterference lane ==
   relate runs=2 seed=42 verdict=equal
   secret variation stayed redacted
   == Warp: pinned schedules, stubbed lever, sampled properties ==
+  $ tail -1 night-shift.out
+  9 passed, 0 failed, 0 skipped, 0 refused
