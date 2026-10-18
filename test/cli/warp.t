@@ -289,6 +289,10 @@ both Warp lanes accept it (the night-shift suite once crashed here).
   > JACQUARD
   $ jacquard check wildcard-resume.jac
   ok
+  $ cat wildcard-resume.jac > wildcard-run.jac
+  $ echo 'stopped(fn () -> add(halt(), 1))' >> wildcard-run.jac
+  $ jacquard run wildcard-run.jac
+  7
   $ jacquard fmt wildcard-resume.jac > formatted.jac
   $ grep -c 'resume _' formatted.jac
   2
@@ -303,3 +307,13 @@ both Warp lanes accept it (the night-shift suite once crashed here).
   PASS wildcard-suite/wildcard/resume _ aborts (1 check) [cached]
   1 passed, 0 failed, 0 skipped, 0 refused
   cache: 1 hit, 0 ran
+
+Quoted code is name-addressed data, so a quoted handler must name its
+continuation; a generated name could capture a spliced reference.
+
+  $ cat > wildcard-quoted.jac <<'JACQUARD'
+  > quoted = quote { handle 1 { | return x -> x | halt() resume _ -> 0 } }
+  > JACQUARD
+  $ jacquard check wildcard-quoted.jac > quoted.out 2>&1; status=$?; grep -o 'error\[E1245\]' quoted.out; echo "exit:$status"
+  error[E1245]
+  exit:1

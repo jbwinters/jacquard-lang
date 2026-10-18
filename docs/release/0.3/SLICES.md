@@ -788,5 +788,7 @@ A handler clause that discards its continuation with `resume _` no longer
 crashes `check`, `run` or `test` when its declaration is stored: the `.jqd`
 encoding spells the wildcard binder as the first of `unused-resume`,
 `unused-resume-2`, ... that the clause does not mention, and the declaration's
-identity equals its named twin. `warp.t` runs check, fmt and both Warp lanes
-on such a suite. The source inventory is now `1195 / 78 / 36`.
+identity equals its named twin. A handler inside `quote` must name its
+continuation (new E1245): quoted code is name-addressed data, and a generated
+name could capture a spliced reference. `warp.t` runs check, run, fmt and both
+Warp lanes on such a suite and pins the quoted refusal. The source inventory is now `1195 / 78 / 36`.

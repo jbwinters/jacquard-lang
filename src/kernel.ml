@@ -725,7 +725,8 @@ let refkind_sym = function Term -> "term" | Con -> "con" | Op -> "op"
    [.jqd] notation cannot spell. Its clause encodes it as the first of [unused-resume],
    [unused-resume-2], ... that no symbol in the clause's parameters or body mentions, so the
    binder captures nothing. Canonical identity is unchanged: the hasher addresses the resume
-   binder by position, never by name. *)
+   binder by position, never by name. Quoted payloads are name-addressed data that a runtime
+   splice could extend, so surface lowering refuses [resume _] inside [quote] (E1245). *)
 let wildcard_resume_symbol forms =
   let rec mentions name (f : Form.t) =
     List.exists

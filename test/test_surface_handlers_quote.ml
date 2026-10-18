@@ -1268,16 +1268,29 @@ let test_wildcard_resume_carrier () =
     |> String.split_on_char ' '
     |> List.filter (( <> ) "")
     |> String.concat " ");
-  let quoted = lower "quote { handle body() { | return x -> x | abort() resume _ -> 0 } }" in
-  let printed = carrier_round_trip "quoted" quoted in
+  (match
+     Surface_lower.lower_expr
+       (parse_expr "quote { handle body() { | return x -> x | abort() resume _ -> 0 } }")
+   with
+  | Error diagnostics ->
+      Alcotest.(check (list string))
+        "quoted wildcard resume is refused" [ "E1245" ]
+        (List.map Diag.code_or_uncoded diagnostics)
+  | Ok _ -> Alcotest.fail "a quoted wildcard resume must be refused");
+  (* A live splice is ordinary code: its wildcard is positional, so renaming the splice's local
+     to the generated spelling leaves the quote's identity unchanged. *)
+  let spliced local =
+    lower
+      (Printf.sprintf
+         "fn (%s) -> quote { unquote(handle %s { | return x -> x | %s(y) resume _ -> %s }) }" local
+         local op local)
+  in
   Alcotest.(check bool)
-    "quoted payload spells the fresh name" true
-    (let needle = "(opclause abort () unused-resume (lit 0))" in
-     let n = String.length needle in
-     let rec scan i =
-       i + n <= String.length printed && (String.sub printed i n = needle || scan (i + 1))
-     in
-     scan 0)
+    "live-splice wildcard is alpha-invariant" true
+    (Hash.equal
+       (hash_expr "spliced c" (spliced "c"))
+       (hash_expr "spliced unused-resume" (spliced "unused-resume")));
+  ignore (carrier_round_trip "spliced" (spliced "unused-resume"))
 
 let suite =
   [
