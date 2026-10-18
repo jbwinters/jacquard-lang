@@ -514,7 +514,12 @@ slot in an `opclause` (§5, Handlers), since that slot is a kernel `name`, not
 a `pat` (docs/ast.md: `opclause = (hash op, pat* params, name resume, expr
 body)`). Writing `resume _` for a clause that never resumes, as the spec's
 own `abort` example already does, is an ordinary binder that happens to be
-unreferenceable, not a wildcard pattern match.
+unreferenceable, not a wildcard pattern match. The bootstrap `.jqd` notation
+cannot spell `_` as a symbol, so a stored or quoted clause writes the first of
+`unused-resume`, `unused-resume-2`, ... that the clause does not already
+mention. The hash addresses the continuation by position, so a stored
+declaration's identity matches its named twin; a quoted payload records the
+generated spelling.
 
 ## 5. The forms
 

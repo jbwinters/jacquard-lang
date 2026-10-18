@@ -1210,6 +1210,75 @@ let test_handler_print_hash_round_trip () =
     "atomic handler stays one body/clause brace group" true
     (String.starts_with ~prefix:"handle 1 {" printed)
 
+(* `resume _` lowers to the kernel name "_", which the .jqd notation cannot spell; its clause
+   prints a fresh name instead. Identity matches a named twin, and the fresh name avoids every
+   symbol the clause mentions. *)
+let test_wildcard_resume_carrier () =
+  let opclause_resume expression =
+    match (Kernel.expr_to_form expression).Form.args with
+    | _ :: _ :: [ Form.F { Form.args = [ _; _; Form.Sym name; _ ]; _ } ] -> name
+    | _ -> Alcotest.fail "expected a handle with one operation clause"
+  in
+  let carrier_round_trip label expression =
+    let printed = Printer.print (Kernel.expr_to_form expression) in
+    let reparsed = bootstrap printed in
+    Alcotest.(check bool)
+      (label ^ " carrier hash") true
+      (Hash.equal (hash_expr label expression) (hash_expr (label ^ " reparsed") reparsed));
+    printed
+  in
+  let op = "#" ^ Hash.to_hex (Hash.of_string "surface-wildcard-resume-op") ^ ":op" in
+  let wildcard = lower (Printf.sprintf "handle 1 { | return x -> x | %s(y) resume _ -> y }" op) in
+  let named = lower (Printf.sprintf "handle 1 { | return x -> x | %s(y) resume k -> y }" op) in
+  Alcotest.(check string)
+    "kernel keeps the wildcard" "_"
+    (match wildcard.Kernel.it with
+    | Kernel.Handle { ops = [ { resume; _ } ]; _ } -> resume
+    | _ -> Alcotest.fail "expected one operation clause");
+  Alcotest.(check string) "wildcard spelling" "unused-resume" (opclause_resume wildcard);
+  Alcotest.(check bool)
+    "wildcard hash equals the named twin" true
+    (Hash.equal (hash_expr "wildcard" wildcard) (hash_expr "named" named));
+  ignore (carrier_round_trip "wildcard" wildcard);
+  let mentioned =
+    match
+      (lower
+         (Printf.sprintf
+            "fn (unused-resume) -> handle 1 { | return x -> x | %s(y) resume _ -> unused-resume(y) \
+             }"
+            op))
+        .Kernel.it
+    with
+    | Kernel.Lam (_, handler) -> handler
+    | _ -> Alcotest.fail "expected a lambda around the handler"
+  in
+  Alcotest.(check string)
+    "fresh spelling avoids mentioned symbols" "unused-resume-2" (opclause_resume mentioned);
+  ignore
+    (carrier_round_trip "capture"
+       (lower
+          (Printf.sprintf
+             "fn (unused-resume) -> handle 1 { | return x -> x | %s(y) resume _ -> \
+              unused-resume(y) }"
+             op)));
+  Alcotest.(check string)
+    "surface printing keeps the wildcard"
+    (Printf.sprintf "handle 1 { | return x -> x | %s(y) resume _ -> y }" op)
+    (String.concat " " (String.split_on_char '\n' (print_expr wildcard))
+    |> String.split_on_char ' '
+    |> List.filter (( <> ) "")
+    |> String.concat " ");
+  let quoted = lower "quote { handle body() { | return x -> x | abort() resume _ -> 0 } }" in
+  let printed = carrier_round_trip "quoted" quoted in
+  Alcotest.(check bool)
+    "quoted payload spells the fresh name" true
+    (let needle = "(opclause abort () unused-resume (lit 0))" in
+     let n = String.length needle in
+     let rec scan i =
+       i + n <= String.length printed && (String.sub printed i n = needle || scan (i + 1))
+     in
+     scan 0)
+
 let suite =
   [
     Alcotest.test_case "handler clauses and bootstrap parity" `Quick
@@ -1237,4 +1306,5 @@ let suite =
     Alcotest.test_case "raw strict and recovering success" `Quick
       test_raw_strict_and_recovering_success;
     Alcotest.test_case "handler print/hash round trip" `Quick test_handler_print_hash_round_trip;
+    Alcotest.test_case "wildcard resume carrier" `Quick test_wildcard_resume_carrier;
   ]

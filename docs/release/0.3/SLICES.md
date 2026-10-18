@@ -783,3 +783,10 @@ and compatible); a bundle object with its opaque marker stripped is refused
 name and by explicit identity. The host codec documentation states that a
 user-defined opaque constructor is refused by the boundary value check, not by
 the raw encoder. The source inventory stays `1194 / 78 / 36`.
+
+A handler clause that discards its continuation with `resume _` no longer
+crashes `check`, `run` or `test` when its declaration is stored: the `.jqd`
+encoding spells the wildcard binder as the first of `unused-resume`,
+`unused-resume-2`, ... that the clause does not mention, and the declaration's
+identity equals its named twin. `warp.t` runs check, fmt and both Warp lanes
+on such a suite. The source inventory is now `1195 / 78 / 36`.
