@@ -34,17 +34,19 @@ A consumer builds values only through the owner's functions:
   $ jacquard project run demo
   0
   $ echo 'app.forged = ProbScore(500)' >> lib.jac
-  $ jacquard project check 2>&1 | grep -A1 'error'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out
+  exit=1
   $TESTCASE_ROOT/work/app/lib.jac:2:14-23: error[E1705]: A name is not visible in this project.
     Cause: `prob-score` is private to project `prob`
   $ echo 'app.go(x) = prob-score.value(prob.make(x))' > lib.jac
 
 An explicit identity is refused like a name (E1709):
 
-  $ H=$(cd ../prob && jacquard project interface | tr '\n' ' ' | grep -o 'hidden *#[0-9a-f]*' | head -1 | cut -d'#' -f2)
+  $ (cd ../prob && jacquard project interface) > pipe.out || echo "exit=$?"; H=$(tr '\n' ' ' < pipe.out | grep -o 'hidden *#[0-9a-f]*' | head -1 | cut -d'#' -f2)
   $ printf '(defterm ((binding app.forged () (ref #%s con))))\n' "$H" > forge.jqd
   $ sed -i 's/(units "lib.jac")/(units "lib.jac" "forge.jqd")/' project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E1709\].*'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1709\].*' < pipe.out
+  exit=1
   error[E1709]: An explicit identity is not visible in this project.
   $ sed -i 's/ "forge.jqd"//' project.jqd && rm forge.jqd
 
@@ -52,11 +54,12 @@ An opaque type exported without its constructors is sealed, not hidden by name,
 so it draws no W1703; a manifest cannot export a sealed constructor (E1736):
 
   $ cd ../prob
-  $ jacquard project check 2>&1 | grep -c W1703
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -c W1703 < pipe.out
   0
   [1]
   $ sed -i 's/(term prob.make)/(term prob.make) (con prob-score)/' project.jqd
-  $ jacquard project check 2>&1 | grep -A1 'error'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out
+  exit=1
   error[E1736]: A manifest exports a sealed constructor.
     Cause: project `prob` exports (con prob-score), a constructor of an opaque type, which stays sealed to its own project
   $ sed -i 's/ (con prob-score)//' project.jqd
@@ -67,16 +70,19 @@ namespace, and neither can an entry unit (E1737):
   $ cd ../app && jacquard project pin > /dev/null
   $ sed -i 's/ (namespace app)//' project.jqd
   $ echo 'type ProbScore = | ProbScore(value: Int)' >> lib.jac
-  $ jacquard project check 2>&1 | grep -A1 'error'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out
+  exit=1
   $TESTCASE_ROOT/work/app/lib.jac:2:1-41: error[E1737]: A project declares a type or effect inside another project's namespace.
     Cause: type `prob-score` ($TESTCASE_ROOT/work/app/lib.jac) is inside namespace `prob`, which project `prob` owns
   $ echo 'opaque type ProbScore = | ProbScore(value: Int)' > lib.jac
-  $ jacquard project check 2>&1 | grep -o 'error\[E1737\].*'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1737\].*' < pipe.out
+  exit=1
   error[E1737]: A project declares a type or effect inside another project's namespace.
   $ echo 'app.go(x) = prob-score.value(prob.make(x))' > lib.jac
   $ sed -i 's/(name "app")/(name "app") (namespace app)/' project.jqd
   $ printf 'type ProbFake = | ProbFake\napp.go(-5)\n' > demo.jac
-  $ jacquard project check 2>&1 | grep -A1 'error'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out
+  exit=1
   $TESTCASE_ROOT/work/app/demo.jac:1:1-27: error[E1737]: A project declares a type or effect inside another project's namespace.
     Cause: type `prob-fake` ($TESTCASE_ROOT/work/app/demo.jac) is inside namespace `prob`, which project `prob` owns
 
@@ -86,7 +92,7 @@ that the constructors are hidden by name only (W1703):
   $ cd ../prob
   $ sed -i 's/^opaque type/type/' p.jac
   $ sed -i 's/(term prob-score.value)/(term prob-score.value) (term prob-score.with-value)/' project.jqd
-  $ jacquard project check 2>&1 | grep -A1 'warning'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'warning' < pipe.out
   warning[W1703]: A transparent type is exported without its constructors.
     Cause: type `prob-score` is exported without its constructors, which hides them by name only
   --
@@ -110,13 +116,15 @@ of the same name is (E1737):
   > M
   $ echo 'type GovernanceVersion = | GovernanceV0' > lib.jac
   $ jacquard project pin > /dev/null
-  $ jacquard project check | tail -1
+  $ jacquard project check > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   library: 1 declarations checked
   $ echo 'type GovernanceVersion = | GovernanceV1' > lib.jac
-  $ jacquard project check 2>&1 | grep -o 'error\[E1737\].*'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1737\].*' < pipe.out
+  exit=1
   error[E1737]: A project declares a type or effect inside another project's namespace.
   $ echo 'once effect GovernanceAsk where { ask : () -> Int }' > lib.jac
-  $ jacquard project check 2>&1 | grep -A1 'error\[E1737\]' | sed 's/^.*error/error/'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error\[E1737\]' < pipe.out | sed 's/^.*error/error/'
+  exit=1
   error[E1737]: A project declares a type or effect inside another project's namespace.
     Cause: effect `governance-ask` ($TESTCASE_ROOT/app2/lib.jac) is inside namespace `governance`, which project `governance` owns
 
@@ -128,7 +136,8 @@ Each file `jacquard tiers` loads is its own defining scope (E0315):
   > S
   $ echo '(defterm ((binding tier-forged () (var tier-heads))))' > consumer.jqd
   $ jacquard tiers owner.jqd > /dev/null
-  $ jacquard tiers owner.jqd consumer.jqd 2>&1 | grep -A1 'error\[E0315\]' | sed -E 's/[0-9a-f]{64}/HASH/; s/^.*error/error/'
+  $ jacquard tiers owner.jqd consumer.jqd > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error\[E0315\]' < pipe.out | sed -E 's/[0-9a-f]{64}/HASH/; s/^.*error/error/'
+  exit=1
   error[E0315]: A sealed constructor is used outside its defining scope.
     Cause: constructor `tier-heads` (HASH) belongs to the opaque type `tier-coin`, which this source does not declare
 
@@ -144,7 +153,7 @@ unprefixed type to the bundle's own root:
   $ jacquard project bundle -o ../ent.bundle > /dev/null && jacquard project run --bundle ../ent.bundle demo
   1
   2
-  $ jacquard project test --bundle ../ent.bundle suite 2>&1 | tail -1
+  $ jacquard project test --bundle ../ent.bundle suite > pipe.out 2>&1 || echo "exit=$?"; tail -1 < pipe.out
   1 passed, 0 failed, 0 skipped, 0 refused
 
 A root without a namespace owns its opaque types:
@@ -168,7 +177,7 @@ never caches a posterior that holds an opaque value:
   >   (clause (pcon false) (var dd-tails)))
   > JACQUARD
   $ sed 's/(lit 0.5)/(lit 0.75)/' coin-a.jqd > coin-b.jqd
-  $ jacquard dist-diff coin-a.jqd coin-b.jqd --tolerance 0.001 --cache-dir cache 2>/dev/null | sort
+  $ jacquard dist-diff coin-a.jqd coin-b.jqd --tolerance 0.001 --cache-dir cache 2>/dev/null > pipe.out || echo "exit=$?"; sort < pipe.out
   P(<opaque dd-coin>): 0.500000 -> 0.250000 (delta -0.250000)
   P(<opaque dd-coin>): 0.500000 -> 0.750000 (delta +0.250000)
   $ ls cache 2>/dev/null | wc -l
@@ -191,15 +200,18 @@ still compile after re-pinning; only the added export is compatible:
   $ jacquard project pin > /dev/null && jacquard project run demo
   <opaque mig-coin>
   $ sed -i 's/^opaque type/type/' ../lib/m.jac
-  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*' < pipe.out
+  exit=1
   error[E1710]: A dependency's pin does not match its context identity.
   changed: interface; breaking
   $ cp ../lib/m.orig ../lib/m.jac && sed -i 's/MigTails/MigOther/g' ../lib/m.jac
-  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*' < pipe.out
+  exit=1
   error[E1710]: A dependency's pin does not match its context identity.
   changed: interface; breaking
   $ cp ../lib/m.orig ../lib/m.jac && printf 'mig.tails = MigTails\n' >> ../lib/m.jac && sed -i 's/(term mig.flip)/(term mig.flip) (term mig.tails)/' ../lib/project.jqd
-  $ jacquard project check 2>&1 | grep -o 'error\[E1710\].*\|(changed: .*)'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|(changed: .*)' < pipe.out
+  exit=1
   error[E1710]: A dependency's pin does not match its context identity.
   (changed: interface; compatible term mig.tails: added)
   $ jacquard project pin > /dev/null && jacquard project check > /dev/null && echo re-pinned
@@ -216,7 +228,8 @@ it is refused before anything is imported (E1726):
   1
   $ sed -i 's/ (opaque)//' ../lib.bundle/objects/*.jqd
   $ sed -i 's|(path "../lib")|(bundle "../lib.bundle")|' project.jqd
-  $ jacquard project pin 2>&1 | grep -o 'error\[E1726\].*\|hashes to'
+  $ jacquard project pin > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1726\].*\|hashes to' < pipe.out
+  exit=1
   error[E1726]: A bundle object's hash does not match.
   hashes to
 
@@ -226,9 +239,11 @@ own included, by name or by an explicit identity assembled as code:
   $ cd ../lib
   $ printf '(project-v1 (name "mlib") (requires (core "0.2")) (namespace mig) (units "m.jac") (exports (type mig-coin) (term mig.heads) (term mig.flip)) (entries (run dyn (units "dyn.jac") (grants eval))))' > project.jqd
   $ echo '`op:eval-code`(quote { MigTails })' > dyn.jac
-  $ jacquard project run dyn --allow eval 2>&1 | grep -o 'uses constructor `[a-z-]*` of the opaque type `[a-z-]*`'
+  $ jacquard project run dyn --allow eval > pipe.out 2>&1 || echo "exit=$?"; grep -o 'uses constructor `[a-z-]*` of the opaque type `[a-z-]*`' < pipe.out
+  exit=2
   uses constructor `mig-tails` of the opaque type `mig-coin`
-  $ H=$(jacquard project hash | grep ' mig-tails ' | cut -d' ' -f3)
+  $ jacquard project hash > pipe.out || echo "exit=$?"; H=$(grep ' mig-tails ' < pipe.out | cut -d' ' -f3)
   $ printf '`op:eval-code`(quote { #%s:con })\n' "$H" > dyn.jac
-  $ jacquard project run dyn --allow eval 2>&1 | grep -o 'uses constructor `[a-z-]*` of the opaque type `[a-z-]*`'
+  $ jacquard project run dyn --allow eval > pipe.out 2>&1 || echo "exit=$?"; grep -o 'uses constructor `[a-z-]*` of the opaque type `[a-z-]*`' < pipe.out
+  exit=2
   uses constructor `mig-tails` of the opaque type `mig-coin`

@@ -246,6 +246,7 @@
   (setenv JACQUARD %{bin:jacquard} (run %{test})))
  (deps
   %{bin:jacquard}
+  (glob_files cli/*.t)
   (glob_files_rec ../corpus/*.jqd)
   (glob_files_rec ../corpus/*.jac)
   (source_tree ../corpus/valid)

@@ -71,9 +71,9 @@ Origin provenance (PV.1): stamped at add, displayed by diff, absent cleanly.
   ok
   $ jacquard store add prov-b fav2.jqd --origin agent:jacquard-demo-5
   ok
-  $ jacquard diff prov-a prov-b | head -1
+  $ jacquard diff prov-a prov-b > pipe.out || echo "exit=$?"; head -1 < pipe.out
   changed  fav [agent:jacquard-demo-5]
-  $ jacquard diff prov-b prov-a | head -1
+  $ jacquard diff prov-b prov-a > pipe.out || echo "exit=$?"; head -1 < pipe.out
   changed  fav
 
 The sidecar never breaks the identity self-check (the reopen-with-sidecar unit
@@ -83,7 +83,7 @@ the diff shows add+remove):
   $ ls prov-b/objects/*.origin | wc -l
   1
   $ jacquard store rename prov-b fav favourite
-  $ jacquard diff prov-a prov-b | head -1
+  $ jacquard diff prov-a prov-b > pipe.out || echo "exit=$?"; head -1 < pipe.out
   added    favourite
 
 Scheduler-private constructor hashes cannot be named through the CLI or smuggled

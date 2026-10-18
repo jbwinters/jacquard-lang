@@ -32,7 +32,8 @@ and root seed in the hermetic cache identity.
     Cause: --schedules requires --seed so every interleaving is reproducible
     Next step: add an explicit --seed S
   [1]
-  $ jacquard test seeded-schedules.jac --schedules 3 --seed nope --no-cache 2>&1 | head -2
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed nope --no-cache > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  exit=124
   Usage: jacquard test [--help] [OPTION]… [FILES]…
   jacquard: option '--seed': invalid value 'nope', expected an integer
   $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --no-cache
@@ -42,20 +43,20 @@ and root seed in the hermetic cache identity.
   $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --no-cache > schedule-b.txt
   $ diff schedule-a.txt schedule-b.txt && echo identical
   identical
-  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | tail -1
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 1 ran
-  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | tail -1
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 1 hit, 0 ran
-  $ jacquard test seeded-schedules.jac --schedules 3 --seed 74 --cache-dir schedule-cache | tail -1
+  $ jacquard test seeded-schedules.jac --schedules 3 --seed 74 --cache-dir schedule-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 1 ran
-  $ jacquard test seeded-schedules.jac --schedules 4 --seed 73 --cache-dir schedule-cache | tail -1
+  $ jacquard test seeded-schedules.jac --schedules 4 --seed 73 --cache-dir schedule-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 1 ran
   $ sed 's/seeded-case/renamed-case/' seeded-schedules.jac > renamed-schedules.jac
-  $ jacquard test renamed-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache | grep -E '^(PASS|cache:)'
+  $ jacquard test renamed-schedules.jac --schedules 3 --seed 73 --cache-dir schedule-cache > pipe.out || echo "exit=$?"; grep -E '^(PASS|cache:)' < pipe.out
   PASS renamed-case/seeded pass (schedules: 3, seed 73) [cached]
   cache: 1 hit, 0 ran
   $ sed 's/seeded pass/changed display/' seeded-schedules.jac > changed-display.jac
-  $ jacquard test changed-display.jac --schedules 3 --seed 73 --cache-dir schedule-cache | grep -E '^(PASS|cache:)'
+  $ jacquard test changed-display.jac --schedules 3 --seed 73 --cache-dir schedule-cache > pipe.out || echo "exit=$?"; grep -E '^(PASS|cache:)' < pipe.out
   PASS seeded-case/changed display (schedules: 3, seed 73)
   cache: 0 hit, 1 ran
 
@@ -159,7 +160,7 @@ refuses without grants. Zero-check warning and failure detail render inline.
 
 The world lane runs under its grants (and is never cached):
 
-  $ jacquard test suite.jqd --seed 7 --cache-dir wcache --allow fs --allow clock --allow console --allow net | grep needs-world
+  $ jacquard test suite.jqd --seed 7 --cache-dir wcache --allow fs --allow clock --allow console --allow net > pipe.out || echo "exit=$?"; grep needs-world < pipe.out
   PASS needs-world/touches fs (1 check)
   $ ls wcache | wc -l
   5
@@ -170,7 +171,7 @@ metadata law keeps hashes identical, so the second run is a full hit.
   $ cat >> suite.jqd <<'JACQUARD'
   > ; a trailing comment: meta only, no hash changes anywhere
   > JACQUARD
-  $ jacquard test suite.jqd --seed 7 --cache-dir wcache | tail -2
+  $ jacquard test suite.jqd --seed 7 --cache-dir wcache > pipe.out || echo "exit=$?"; tail -2 < pipe.out
   5 passed, 0 failed, 0 skipped, 1 refused
   cache: 5 hit, 0 ran
 
@@ -195,22 +196,22 @@ DOC-MANDATED CACHE TEST 3 — the cache is copy-portable because keys are
 content: a copied directory in a fresh tree yields a full-hit run.
 
   $ mkdir fresh-tree && cp -r wcache fresh-tree/moved-cache && cp suite.jqd fresh-tree/
-  $ cd fresh-tree && jacquard test suite.jqd --seed 7 --cache-dir moved-cache | tail -1 && cd ..
+  $ cd fresh-tree && { jacquard test suite.jqd --seed 7 --cache-dir moved-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out; rm pipe.out; } && cd ..
   cache: 5 hit, 0 ran
 
 --no-cache bypasses; a corrupted entry is ignored and rerun, not fatal:
 
-  $ jacquard test suite.jqd --seed 7 --no-cache | tail -1
+  $ jacquard test suite.jqd --seed 7 --no-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   5 passed, 0 failed, 0 skipped, 1 refused
   $ for f in wcache/*.jqd; do echo garbage > $f; done
-  $ jacquard test suite.jqd --seed 7 --cache-dir wcache | tail -1
+  $ jacquard test suite.jqd --seed 7 --cache-dir wcache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 5 ran
 
 Coverage (W6.8): the complement of what tests executed, definition-level, from
 the hash discipline alone — and a fully-cached run reports the same complement
 because entries record their coverage sets.
 
-  $ jacquard test suite.jqd --seed 7 --cache-dir wcache --coverage | grep -E "coverage:|test-looking" | sed 's/[0-9][0-9]*/N/g'
+  $ jacquard test suite.jqd --seed 7 --cache-dir wcache --coverage > pipe.out || echo "exit=$?"; grep -E "coverage:|test-looking" < pipe.out | sed 's/[0-9][0-9]*/N/g'
   coverage: N of N definitions executed
     uncovered test-looking-name
   $ jacquard test suite.jqd --seed 7 --no-cache --coverage > cold.txt
@@ -249,9 +250,9 @@ zero new machinery.
   >           (lam ((pvar e)) (var e)))
   >         (app (var check.eq) (var body) (lit "pinned") (var text.eq) (var text.show) (lit "served"))))))))
   > JACQUARD
-  $ jacquard test fixture-suite.jqd --seed 7 --cache-dir fcache | tail -1
+  $ jacquard test fixture-suite.jqd --seed 7 --cache-dir fcache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 1 ran
-  $ jacquard test fixture-suite.jqd --seed 7 --cache-dir fcache | tail -1
+  $ jacquard test fixture-suite.jqd --seed 7 --cache-dir fcache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 1 hit, 0 ran
 
 Edit ONE response text in the fixture: the test re-keys and reruns (and now

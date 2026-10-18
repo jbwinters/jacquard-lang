@@ -82,11 +82,11 @@ The Warp suites with sampled properties (the exhaustive lane reruns them with
 exhaustive oracle and budget-monotonicity properties, and the notebook suite
 with its fresh-evaluator comparisons and cache/history invariants.
 
-  $ JACQUARD=jac sh "$A/run.sh" dice-coach test 2>&1 | tail -1
+  $ JACQUARD=jac sh "$A/run.sh" dice-coach test > pipe.out 2>&1 || echo "exit=$?"; tail -1 < pipe.out
   25 passed, 0 failed, 0 skipped, 0 refused
-  $ JACQUARD=jac sh "$A/run.sh" rota-optimizer test 2>&1 | tail -1
+  $ JACQUARD=jac sh "$A/run.sh" rota-optimizer test > pipe.out 2>&1 || echo "exit=$?"; tail -1 < pipe.out
   17 passed, 0 failed, 0 skipped, 0 refused
-  $ JACQUARD=jac sh "$A/run.sh" formula-notebook test 2>&1 | tail -1
+  $ JACQUARD=jac sh "$A/run.sh" formula-notebook test > pipe.out 2>&1 || echo "exit=$?"; tail -1 < pipe.out
   18 passed, 0 failed, 0 skipped, 0 refused
 
 The applications read and update their records through the generated D36 field
@@ -110,10 +110,13 @@ assembled from:
 
   $ same() { # project entry files...
   >   p=$1; e=$2; shift 2; cat "$@" > assembled.jac
-  >   jac hash assembled.jac | grep ':' | sed 's/^[0-9]*://' | sort -u > concatenated.txt
-  >   { jac project hash --project "$A/$p" $e; [ -f "$A/$p/model.jac" ] && [ "$p" != rota-optimizer ] \
-  >       && [ "$p" != formula-notebook ] && jac project hash --project "$A/shared"; } \
-  >     | cut -d' ' -f2- | sort -u > composed.txt
+  >   jac hash assembled.jac > hash.out || echo "exit=$?" >&2
+  >   grep ':' < hash.out | sed 's/^[0-9]*://' | sort -u > concatenated.txt
+  >   { jac project hash --project "$A/$p" $e || echo "exit=$?" >&2
+  >     if [ -f "$A/$p/model.jac" ] && [ "$p" != rota-optimizer ] && [ "$p" != formula-notebook ]; then
+  >       jac project hash --project "$A/shared" || echo "exit=$?" >&2
+  >     fi; } > composed.out
+  >   cut -d' ' -f2- < composed.out | sort -u > composed.txt
   >   cmp -s concatenated.txt composed.txt && echo "identical: $p $e ($(wc -l < composed.txt) bindings)"; }
   $ same dice-coach demo "$A/shared/display.jac" "$A/dice-coach/model.jac" "$A/dice-coach/demo.jac"
   identical: dice-coach demo (31 bindings)
@@ -129,14 +132,17 @@ by name, by hash, and through eval:
 
   $ cp "$A/dice-coach/demo.jac" demo.bak
   $ echo 'display.floor-between(1.5, 0, 2)' > "$A/dice-coach/demo.jac"
-  $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1705\].*' | head -1
+  $ jac project run --project "$A/dice-coach" demo > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1705\].*' < pipe.out | head -1
+  exit=1
   error[E1705]: A name is not visible in this project.
-  $ H=$(jac project hash --project "$A/shared" | grep ' display.floor-between ' | cut -d' ' -f3)
+  $ jac project hash --project "$A/shared" > pipe.out || echo "exit=$?"; H=$(grep ' display.floor-between ' < pipe.out | cut -d' ' -f3)
   $ printf '#%s:term(1, 2, 3)\n' "$H" > "$A/dice-coach/demo.jac"
-  $ jac project run --project "$A/dice-coach" demo 2>&1 | grep -o 'error\[E1709\]' | head -1
+  $ jac project run --project "$A/dice-coach" demo > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1709\]' < pipe.out | head -1
+  exit=1
   error[E1709]
   $ echo '`op:eval-code`(quote { display.floor-between(1.5, 0, 2) })' > "$A/dice-coach/demo.jac"
-  $ jac project run --project "$A/dice-coach" demo --allow eval 2>&1 | grep -o 'E1705' | head -1
+  $ jac project run --project "$A/dice-coach" demo --allow eval > pipe.out 2>&1 || echo "exit=$?"; grep -o 'E1705' < pipe.out | head -1
+  exit=2
   E1705
   $ cp demo.bak "$A/dice-coach/demo.jac"
 

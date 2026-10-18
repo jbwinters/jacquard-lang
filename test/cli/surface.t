@@ -11,7 +11,7 @@ public pure demo and the bare-top-level-expression demo both execute directly.
   42
   $ jac check ../../demos/basics/surface-fact.jac
   ok
-  $ jac hash ../../demos/basics/surface-expression.jac | sed 's/[0-9a-f]\{64\}/HASH/'
+  $ jac hash ../../demos/basics/surface-expression.jac > pipe.out || echo "exit=$?"; sed 's/[0-9a-f]\{64\}/HASH/' < pipe.out
   0 HASH
 
 D40 executes every bare top-level expression in document order while declarations before, between,
@@ -96,10 +96,12 @@ The editor recovery report of a damaged file applies the same rules: a collision
 and a use of an accessor whose declaration failed is a silent consequence, not a second E0301.
 
   $ printf 'type Pair = | Pair(left: Int, right: Int)\npair.left(p) = 0\nx = (\n' > damaged-collision.jac
-  $ jac check damaged-collision.jac 2>&1 | grep -o 'error\[E1241\]\|error\[E0301\]'
+  $ jac check damaged-collision.jac > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1241\]\|error\[E0301\]' < pipe.out
+  exit=1
   error[E1241]
   $ printf 'type Pair = | Pair(left: Int, left: Int)\nuse = pair.left(Pair(1, 2))\nx = (\n' > damaged-duplicate.jac
-  $ jac check damaged-duplicate.jac 2>&1 | grep -o 'error\[E1239\]\|error\[E0301\]'
+  $ jac check damaged-duplicate.jac > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1239\]\|error\[E0301\]' < pipe.out
+  exit=1
   error[E1239]
 
 SX.24 labeled constructor patterns select only the fields a branch needs. Selection order is free,
@@ -138,7 +140,7 @@ partial selection of the same constructor is consequently redundant.
   >   | Packet(right: _) -> 2
   > }
   > EOF
-  $ jac check labeled-redundant.jac 2>&1 | grep 'warning\[W0801\]'
+  $ jac check labeled-redundant.jac > pipe.out 2>&1 || echo "exit=$?"; grep 'warning\[W0801\]' < pipe.out
   labeled-redundant.jac:4:3-26: warning[W0801]: This match clause is redundant
 
 Resolution expands labels in declaration order. The resulting canonical object is exactly the
@@ -255,11 +257,11 @@ by `check` gives the same verdict as `check` on the original.
   $ jac fmt nested.jac > nested-formatted.jac 2> nested.err
   $ grep 'warning\[W1203\]' nested.err
   nested.jac:1:7-48: warning[W1203]: Match scrutinee is difficult to review
-  $ jac check nested.jac 2>&1 | grep -c 'W1203'
+  $ jac check nested.jac > pipe.out 2>&1 || echo "exit=$?"; grep -c 'W1203' < pipe.out
   1
-  $ jac check nested-formatted.jac 2>&1 | grep -c 'W1203'
+  $ jac check nested-formatted.jac > pipe.out 2>&1 || echo "exit=$?"; grep -c 'W1203' < pipe.out
   1
-  $ jac fmt nested-formatted.jac 2> /dev/null | diff - nested-formatted.jac && echo stable
+  $ jac fmt nested-formatted.jac 2> /dev/null > pipe.out || echo "exit=$?"; diff pipe.out nested-formatted.jac && echo stable
   stable
   $ jac hash nested.jac > nested.hash 2> /dev/null
   $ jac hash nested-formatted.jac > nested-formatted.hash 2> /dev/null
@@ -297,12 +299,12 @@ formatted file still parses, keeps every comment, is stable, and hashes as befor
                with a: 3)
   $ jac check trailing-formatted.jac
   ok
-  $ jac fmt trailing-formatted.jac | cmp - trailing-formatted.jac && echo stable
+  $ jac fmt trailing-formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out trailing-formatted.jac && echo stable
   stable
   $ grep -c -- '-- \(first\|last\|note\)' trailing-formatted.jac
   3
   $ jac hash trailing.jac > trailing.hash
-  $ jac hash trailing-formatted.jac | cmp - trailing.hash && echo same-hash
+  $ jac hash trailing-formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out trailing.hash && echo same-hash
   same-hash
 
 A comment after a definition's `=` starts the body on the next line and leaves the parameters on
@@ -320,10 +322,10 @@ and the comment stays a surface comment.
     -- even header
     if eq(n, 0) then True else odd(sub(n, 1))
   odd(n) = if eq(n, 0) then False else even(sub(n, 1))
-  $ jac fmt header-formatted.jac | cmp - header-formatted.jac && echo stable
+  $ jac fmt header-formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out header-formatted.jac && echo stable
   stable
   $ jac hash header.jac > header.hash
-  $ jac hash header-formatted.jac | cmp - header.hash && echo same-hash
+  $ jac hash header-formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out header.hash && echo same-hash
   same-hash
 
 Parser recovery always makes progress. An invalid token or a stray `|` inside an effect body used
@@ -363,7 +365,7 @@ must exceed the canonical width.
   wide-declaration.jac:1:6-100: warning[W1204]: Declaration header exceeds the canonical formatter width
   $ head -1 wide-declaration-formatted.jac | awk '{ print length }'
   101
-  $ jac fmt wide-declaration-formatted.jac 2> /dev/null | cmp wide-declaration-formatted.jac -
+  $ jac fmt wide-declaration-formatted.jac 2> /dev/null > pipe.out || echo "exit=$?"; cmp wide-declaration-formatted.jac - < pipe.out
 
 Quantified-variable prefixes have no legal continuation point in 0.3. W1205 makes a pathological
 prefix visible without rejecting or rewriting a valid program.
@@ -375,7 +377,7 @@ prefix visible without rejecting or rewriting a valid program.
   $ jac fmt wide-forall.jac > wide-forall-formatted.jac 2> wide-forall.err
   $ grep 'warning\[W1205\]' wide-forall.err
   wide-forall.jac:1:5-164: warning[W1205]: Quantifier prefix exceeds line width
-  $ jac fmt wide-forall-formatted.jac 2> /dev/null | cmp wide-forall-formatted.jac -
+  $ jac fmt wide-forall-formatted.jac 2> /dev/null > pipe.out || echo "exit=$?"; cmp wide-forall-formatted.jac - < pipe.out
 
 DX.3 keeps realistic nested quotes, matches, handlers, conditionals, and blocks stable under
 formatting and canonical identity. Explicit operation namespace intent survives the formatter.
@@ -426,7 +428,7 @@ are quiet; semantic edits localize in surface notation. Explicit syntax handles 
   > EOF
   $ jac diff old.jac same.jac
   no semantic changes
-  $ jac diff old.jac changed.jac | grep -A2 'at answer'
+  $ jac diff old.jac changed.jac > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
     at answer/defterm[0]/group[0]/binding[2]/lit[0]:
       - 1
       + 2
@@ -460,7 +462,7 @@ addition or removal, not a change against the builtin marker; source-local depen
   > add(x, y) = y
   > uses-add(x) = add(x, 1)
   > EOF
-  $ jac diff add-dependent-old.jac add-dependent-new.jac | grep -E '^(changed|  dependents:)'
+  $ jac diff add-dependent-old.jac add-dependent-new.jac > pipe.out || echo "exit=$?"; grep -E '^(changed|  dependents:)' < pipe.out
   changed  add
     dependents: uses-add
   changed  uses-add
@@ -495,14 +497,14 @@ Store diff keeps its established bootstrap default and offers explicit surface r
   ok
   $ jac store add new-store new.jqd
   ok
-  $ jac diff old-store new-store --syntax surface | grep -A2 'at answer'
+  $ jac diff old-store new-store --syntax surface > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
     at answer/defterm[0]/group[0]/binding[2]/lit[0]:
       - 1
       + 2
 
 Bootstrap formatting and execution remain byte-for-byte on the old route.
 
-  $ jac diff old.jqd new.jqd | grep -A2 'at answer'
+  $ jac diff old.jqd new.jqd > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
     at answer/defterm[0]/group[0]/binding[2]/lit[0]:
       - 1
       + 2

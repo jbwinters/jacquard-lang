@@ -13,14 +13,14 @@ program and the two engines agree.
   > (int.between?(1, 1, 5), int.between?(5, 1, 5), int.between?(0, 1, 5), int.between?(6, 1, 5))
   > (real.between?(2.0, 1.0, 2.0), real.between?(2.5, 1.0, 2.0))
   > J
-  $ jacquard run predicates.jac | tee interpreted.out
+  $ jacquard run predicates.jac > pipe.out || echo "exit=$?"; tee interpreted.out < pipe.out
   (true, true, false)
   (false, true, false)
   (true, false, true)
   (true, false, false)
   (true, true, false, false)
   (true, false)
-  $ jacquard build predicates.jac -o predicates > /dev/null && ./predicates | cmp - interpreted.out && echo same
+  $ jacquard build predicates.jac -o predicates > /dev/null && ./predicates > native.out || echo "exit=$?"; cmp native.out interpreted.out && echo same
   same
 
 The rota optimizer's input validation, shift comparison and independent

@@ -792,3 +792,11 @@ identity equals its named twin. A handler inside `quote` must name its
 continuation (new E1245): quoted code is name-addressed data, and a generated
 name could capture a spliced reference. `warp.t` runs check, run, fmt and both
 Warp lanes on such a suite and pins the quoted refusal. The source inventory is now `1195 / 78 / 36`.
+
+Cram transcripts no longer hide a tool's exit status behind a pipeline. Every
+command that piped `jacquard`, `jac`, a demo script or a built native program
+into an excerpting filter now writes the output to a file, prints `exit=N`
+when the tool fails, and excerpts the file; 142 intentional refusals and usage
+errors are now pinned in their transcripts. The new `cram-status` law
+(`test/test_cram_status.ml`, three cases) fails on any such pipeline in
+`test/cli/*.t`. The source inventory is now `1198 / 78 / 36`.

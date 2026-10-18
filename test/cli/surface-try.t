@@ -47,7 +47,7 @@ formatter keeps the `try` spelling:
   > J
   $ jacquard run twins.jac
   (ok(41), err("not a number"), err("under 18"))
-  $ jacquard hash twins.jac | grep admit | awk '{print $2}' | uniq | wc -l
+  $ jacquard hash twins.jac > pipe.out || echo "exit=$?"; grep admit < pipe.out | awk '{print $2}' | uniq | wc -l
   1
   $ jacquard fmt twins.jac > formatted.jac
   $ sed -n '/^admit(/,/^$/p' formatted.jac
@@ -56,7 +56,7 @@ formatter keeps the `try` spelling:
                let m = try adult(n)
                Ok(int.add(m, 1))}
   
-  $ jacquard fmt formatted.jac | cmp - formatted.jac && echo stable
+  $ jacquard fmt formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out formatted.jac && echo stable
   stable
   $ jacquard export twins.jac -o twins.jqd && grep -c "try" twins.jqd
   0
@@ -137,7 +137,8 @@ The error type is preserved exactly; there is no implicit conversion:
   >   Err("text")
   > }
   > J
-  $ jacquard check mismatch.jac 2>&1 | head -2
+  $ jacquard check mismatch.jac > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  exit=1
   mismatch.jac:2:3-21: error[E0801]: Types do not agree
     Cause: match clause result: expected result text a, got result int a (type mismatch)
 
@@ -170,13 +171,16 @@ identity (SX.31), so a file that declares its own `Err` cannot capture it:
 `try` is only a block item, never the last one, and never on `let rec`:
 
   $ printf 'f(x) = g(try x)\n' > expr.jac
-  $ jacquard check expr.jac 2>&1 | grep E1242
+  $ jacquard check expr.jac > pipe.out 2>&1 || echo "exit=$?"; grep E1242 < pipe.out
+  exit=1
   expr.jac:1:10-13: error[E1242]: `try` is used outside a block item
   $ printf 'f(x) = {\n  try x\n}\n' > tail.jac
-  $ jacquard check tail.jac 2>&1 | head -3
+  $ jacquard check tail.jac > pipe.out 2>&1 || echo "exit=$?"; head -3 < pipe.out
+  exit=1
   tail.jac:2:3-8: error[E1243]: A block ends in `try`.
     Cause: A block cannot end in `try`: the value of the final item is already the block's Result; write the expression itself.
     Next step: Write the final expression itself; its Result is already the block's value.
   $ printf 'f(x) = {\n  let rec h(y) = try x\n  x\n}\n' > rec.jac
-  $ jacquard check rec.jac 2>&1 | grep E1244
+  $ jacquard check rec.jac > pipe.out 2>&1 || echo "exit=$?"; grep E1244 < pipe.out
+  exit=1
   rec.jac:2:18-21: error[E1244]: A recursive local binding uses `try`

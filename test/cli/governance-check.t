@@ -39,7 +39,7 @@ The accepted grammar has exact recursive layer cardinality: direct dry and live
 have no layer records; one and two forwarding handlers report the forwards
 followed by the live leaf, inner-to-outer.
 
-  $ for f in workspace-check-dry.jqd workspace-check-zero-layer.jqd workspace-check-v1.jqd workspace-check-two-layer.jqd; do jac governance check ../../corpus/governance/$f | awk -v file=$f '/^layer / { n++ } END { print file, n + 0 }'; done
+  $ for f in workspace-check-dry.jqd workspace-check-zero-layer.jqd workspace-check-v1.jqd workspace-check-two-layer.jqd; do jac governance check ../../corpus/governance/$f > pipe.out || echo "exit=$?"; awk -v file=$f '/^layer / { n++ } END { print file, n + 0 }' < pipe.out; done
   workspace-check-dry.jqd 0
   workspace-check-zero-layer.jqd 0
   workspace-check-v1.jqd 2

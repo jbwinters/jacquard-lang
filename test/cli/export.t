@@ -19,9 +19,9 @@ create a bootstrap twin; explicit export is the evidence/debug boundary.
   42
 The command and top-level help state the explicit workflow.
 
-  $ jacquard --help=plain | grep '^       export '
+  $ jacquard --help=plain > pipe.out || echo "exit=$?"; grep '^       export ' < pipe.out
          export [OPTION]… INPUT.jac
-  $ jacquard export --help=plain | grep 'atomically and never replaces'
+  $ jacquard export --help=plain > pipe.out || echo "exit=$?"; grep 'atomically and never replaces' < pipe.out
          atomically and never replaces an existing path.
 
 Repeated exports are byte-identical and reparsed member hashes equal the

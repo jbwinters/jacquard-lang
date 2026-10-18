@@ -100,7 +100,7 @@ The legacy operation is unchanged: an empty line and end of input both read as
   > JACQUARD
   $ printf 'x\n\n' | jacquard run legacy.jac --allow console
   ("x", "", "")
-  $ jacquard hash ../../prelude/03-effects.jqd | grep -E ':(console|print|read-line) '
+  $ jacquard hash ../../prelude/03-effects.jqd > pipe.out || echo "exit=$?"; grep -E ':(console|print|read-line) ' < pipe.out
   5:console 73e8a208eb7fadc43e3bd7aef1474884cf99ce86f8108ddf0e3baff0a74b3fc9
   5:print 28570e6bcdeb8646a90b31971204be7007f658bee65154b96e587c47a6585d5e
   5:read-line cb5c1dabdfcf64756fdda61747f5e4c067e7f50923648b4e820b09048f8a952d
@@ -110,7 +110,8 @@ grant that covers them; a handler written in the public syntax discharges
 ConsoleInput with no grant at all, and `console.scripted-input` is the library's
 scripted boundary (one shared line list, as real standard input is):
 
-  $ jacquard run entries.jac < /dev/null 2>&1 | grep -E 'Cause|Next step'
+  $ jacquard run entries.jac < /dev/null > pipe.out 2>&1 || echo "exit=$?"; grep -E 'Cause|Next step' < pipe.out
+  exit=3
     Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `loop`).
     Next step: grant it with --allow console, or handle the effect in the program
     Cause: This program requires console-input [world/low] — read process terminal input with an explicit end-of-input result, which is not granted (performed via `loop`).
@@ -154,7 +155,8 @@ operation:
   >   | next-line() resume k -> list.append(k(None), k(Some("again")))
   > }
   > JACQUARD
-  $ jacquard run twice.jac 2>&1 | head -1
+  $ jacquard run twice.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=1
   twice.jac:3:50-66: error[E0816]: A once resumption may be consumed twice on one execution path.
 
 The infer effect (SL.10): stub completions behind the grant; ungranted refuses:
@@ -181,7 +183,7 @@ full hit, and the cache entry is a printed form jacquard fmt can read:
   "<stub completion for: write a haiku>"
   $ grep -c hit cache2.log
   1
-  $ jacquard fmt icache/*.jqd | head -2
+  $ jacquard fmt icache/*.jqd > pipe.out || echo "exit=$?"; head -2 < pipe.out
   (infer-cache-entry
     (prompt "write a haiku")
 

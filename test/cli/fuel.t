@@ -27,7 +27,8 @@ A finite program completes at exactly its cost and not one unit below it:
   $ jacquard run --fuel 113 ../../demos/basics/surface-fact.jac
   120
   fuel: 113 of 113 unit(s) used (fuel-v1)
-  $ jacquard run --fuel 112 ../../demos/basics/surface-fact.jac 2>&1 | head -1
+  $ jacquard run --fuel 112 ../../demos/basics/surface-fact.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=2
   error[E0919]: Computation fuel was exhausted
   $ jacquard run ../../demos/basics/surface-fact.jac
   120
@@ -44,7 +45,8 @@ become one failed task that the scope could absorb; the whole run stops:
   >   async.await(quick)
   > })
   > J
-  $ jacquard run --fuel 5000 tasks.jac 2>&1 | head -1
+  $ jacquard run --fuel 5000 tasks.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=2
   error[E0919]: Computation fuel was exhausted
 
 Exhaustion can land anywhere in a scheduled run, including while the scheduler
@@ -105,7 +107,8 @@ stops at the budget instead of running for minutes:
   > 
   > `op:eval-code`(plan)
   > J
-  $ timeout 60 jacquard run --allow eval --fuel 100000 types.jac 2>&1 | head -1
+  $ timeout 60 jacquard run --allow eval --fuel 100000 types.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=2
   error[E0919]: Computation fuel was exhausted
 
 Rendering a type for a diagnostic is metered as well: a type error whose type
@@ -115,7 +118,8 @@ is exponentially large stops at the budget instead of rendering it:
   > ps = ", ".join("f%d" % i for i in range(n + 1))
   > body = "\n".join("    let _ = f%d((f%d, f%d))" % (i, i + 1, i + 1) for i in range(n))
   > print("plan = quote {\n  add(fn (%s) -> {\n%s\n    0\n  }, 1)\n}\n\n`op:eval-code`(plan)" % (ps, body))' > typerror.jac
-  $ timeout 60 jacquard run --allow eval --fuel 100000 typerror.jac 2>&1 | head -1
+  $ timeout 60 jacquard run --allow eval --fuel 100000 typerror.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=2
   error[E0919]: Computation fuel was exhausted
 
 So is match exhaustiveness checking, which can explore exponentially many
@@ -128,7 +132,8 @@ constructor combinations:
   >         pats = ["_"] * n; pats[i] = v
   >         arms.append("    | (" + ", ".join(pats) + ") -> 0")
   > print("plan = quote {\n  match (" + ", ".join(["True"] * n) + ") {\n" + "\n".join(arms) + "\n  }\n}\n\n`op:eval-code`(plan)")' > coverage.jac
-  $ timeout 60 jacquard run --allow eval --fuel 100000 coverage.jac 2>&1 | head -1
+  $ timeout 60 jacquard run --allow eval --fuel 100000 coverage.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=2
   error[E0919]: Computation fuel was exhausted
 
 and the effect-linearity analysis compares shared match scrutinees without
@@ -137,7 +142,7 @@ expanding them (this program never finished before):
   $ python3 -c 'n = 40
   > binds = "\n".join("      let t%d = Fork(t%d, t%d)" % (i, i - 1, i - 1) for i in range(1, n + 1))
   > print("type Shape = | Tip | Fork(lhs: Shape, rhs: Shape)\nonce effect Probe where { probe : () -> Int }\n\ndrive() = handle probe() {\n  | return v -> v\n  | probe() resume k -> {\n      let t0 = Tip\n" + binds + "\n      let a = match t%d { | _ -> 0 }\n      let b = match t%d { | _ -> 0 }\n      k(add(a, b))\n    }\n}\n\ndrive()" % (n, n))' > scrutinees.jac
-  $ timeout 60 jacquard run --fuel 100000 scrutinees.jac 2>&1 | head -1
+  $ timeout 60 jacquard run --fuel 100000 scrutinees.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
   0
 
 `jacquard test --fuel UNITS` gives each discovered test its own budget, drawn
@@ -161,7 +166,8 @@ unbounded run:
   [2]
   $ ls bounded | wc -l
   1
-  $ jacquard test suite.jac --fuel 5000 --cache-dir bounded | tail -2
+  $ jacquard test suite.jac --fuel 5000 --cache-dir bounded > pipe.out || echo "exit=$?"; tail -2 < pipe.out
+  exit=2
   1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
   cache: 1 hit, 0 ran
 Each test pays for the memoized terms it uses, whichever test forced them
@@ -174,10 +180,12 @@ first, so a verdict never depends on test order:
   > b-case = Case("b", fn () -> check.eq(add(heavy, countdown(500)), 0, int.eq, int.show, "b"))
   > J
   $ grep -v a-case shared.jac > b-only.jac
-  $ jacquard test shared.jac --fuel 50000 --no-cache | head -2
+  $ jacquard test shared.jac --fuel 50000 --no-cache > pipe.out || echo "exit=$?"; head -2 < pipe.out
+  exit=2
   PASS a-case/a (1 check)
   INCOMPLETE b-case: computation fuel exhausted (fuel-v1, 50000 unit(s))
-  $ jacquard test b-only.jac --fuel 50000 --no-cache | head -1
+  $ jacquard test b-only.jac --fuel 50000 --no-cache > pipe.out || echo "exit=$?"; head -1 < pipe.out
+  exit=2
   INCOMPLETE b-case: computation fuel exhausted (fuel-v1, 50000 unit(s))
 
 A group keeps the verdicts its children finished before one ran out, so a
@@ -223,7 +231,8 @@ would otherwise turn exhaustion into a failing verdict:
 
 Results cached under one budget never answer for another:
 
-  $ jacquard test suite.jac --fuel 6000 --cache-dir bounded | tail -1
+  $ jacquard test suite.jac --fuel 6000 --cache-dir bounded > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  exit=2
   cache: 0 hit, 1 ran
 
   $ cat > quick.jac <<'J'
@@ -231,11 +240,12 @@ Results cached under one budget never answer for another:
   > quick-case =
   >   Case("quick", fn () -> check.eq(twice(3), 6, int.eq, int.show, "twice"))
   > J
-  $ jacquard test quick.jac --cache-dir bounded | tail -1
+  $ jacquard test quick.jac --cache-dir bounded > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 1 ran
 
 A budget must be a non-negative number of units:
 
-  $ jacquard run --fuel=-1 spin.jac 2>&1 | head -2
+  $ jacquard run --fuel=-1 spin.jac > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  exit=124
   Usage: jacquard run [--help] [OPTION]… FILE
   jacquard: option '--fuel': expected a non-negative number of fuel units

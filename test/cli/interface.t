@@ -11,7 +11,7 @@ declarations. The manifest is the durable API carrier that HASH_V0 and positiona
   > once effect Sending where { send : (path: Text, body: Text) -> Text }
   > JACQUARD
   $ jacquard interface emit lib.jac -o lib.jqi
-  $ jacquard interface emit lib.jac | cmp - lib.jqi && echo deterministic
+  $ jacquard interface emit lib.jac > pipe.out || echo "exit=$?"; cmp pipe.out lib.jqi && echo deterministic
   deterministic
   $ head -2 lib.jqi
   (interface-v1
@@ -29,7 +29,8 @@ declarations. The manifest is the durable API carrier that HASH_V0 and positiona
 
 A manifest is never overwritten, and a malformed one is refused.
 
-  $ jacquard interface emit lib.jac -o lib.jqi 2>&1 | grep -o 'error\[E1301\]'
+  $ jacquard interface emit lib.jac -o lib.jqi > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1301\]' < pipe.out
+  exit=1
   error[E1301]
   $ printf '(interface-v9 (hash-algorithm "HASH_V0"))\n' > bad.jqi
   $ jacquard interface diff bad.jqi lib.jqi
@@ -76,20 +77,23 @@ than having its labels inferred.
   [1]
   $ jacquard export lib.jac -o lib.jqd
   $ jacquard run --store positional lib.jqd
-  $ jacquard interface verify lib.jqi positional 2>&1 | grep 'Cause:'
+  $ jacquard interface verify lib.jqi positional > pipe.out 2>&1 || echo "exit=$?"; grep 'Cause:' < pipe.out
+  exit=1
     Cause: positional: term pair.with-left carries no call-abi-v1 companion for labels (positional, left:)
     Cause: positional: term pair.with-right carries no call-abi-v1 companion for labels (positional, right:)
     Cause: positional: term resize carries no call-abi-v1 companion for labels (positional, scale:)
     Cause: positional: op send carries no call-abi-v1 companion for labels (path:, body:)
-  $ jacquard interface verify extended.jqi provider 2>&1 | grep 'Cause:'
+  $ jacquard interface verify extended.jqi provider > pipe.out 2>&1 || echo "exit=$?"; grep 'Cause:' < pipe.out
+  exit=1
     Cause: provider: term extra is not bound
-  $ jacquard interface verify lib.jqi nowhere 2>&1 | grep -o 'error\[E0606\]'; test ! -e nowhere && echo not-created
+  $ jacquard interface verify lib.jqi nowhere > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E0606\]' < pipe.out; test ! -e nowhere && echo not-created
+  exit=1
   error[E0606]
   not-created
 
 The command is part of the documented toolchain.
 
-  $ jacquard --help=plain | grep '^       interface '
+  $ jacquard --help=plain > pipe.out || echo "exit=$?"; grep '^       interface ' < pipe.out
          interface COMMAND …
 
 Application evidence: `emit` checks one file in a fresh session, so the one
@@ -99,7 +103,7 @@ deterministic interface in which its generated accessors are ordinary exports.
 
   $ A=../../demos/applications
   $ jacquard interface emit $A/rota-optimizer/model.jac -o rota.jqi
-  $ jacquard interface emit $A/rota-optimizer/model.jac | cmp - rota.jqi && echo deterministic
+  $ jacquard interface emit $A/rota-optimizer/model.jac > pipe.out || echo "exit=$?"; cmp pipe.out rota.jqi && echo deterministic
   deterministic
   $ grep -c '^(export' rota.jqi
   102

@@ -8,5 +8,5 @@ set so the dev gate enforces it.
   $ export JACQUARD_RUNTIME=../../runtime
   $ export CC=clang
   $ export JACQUARD=jacquard
-  $ sh ../../scripts/native-leak-check.sh ../../test/native-gauntlet/g*.jqd ../../corpus/valid/to-option.jqd ../../corpus/valid/safe-div.jqd ../../demos/basics/m1-choose.jqd 2>&1 | tail -1
+  $ sh ../../scripts/native-leak-check.sh ../../test/native-gauntlet/g*.jqd ../../corpus/valid/to-option.jqd ../../corpus/valid/safe-div.jqd ../../demos/basics/m1-choose.jqd > pipe.out 2>&1 || echo "exit=$?"; tail -1 < pipe.out
   native leak check: PASS

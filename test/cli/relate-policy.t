@@ -122,9 +122,9 @@ against the prepared program, not only the prelude.
   > 
   > add(1, 2)
   > EOF
-  $ send=$(jacquard hash declares.jac | awk '$1 == "0:probe.send" { print $2 }')
+  $ jacquard hash declares.jac > pipe.out || echo "exit=$?"; send=$(awk '$1 == "0:probe.send" { print $2 }' < pipe.out)
   $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=4096 interface=none\nunlisted=ignore\noperations=1\noperation=%s arguments=all result=compare output=ignore\n' "$send" > declares.policy
-  $ jacquard relate declares.jac --vary schedule=2 --seed 4 --policy declares.policy | sed 's/policy=[0-9a-f]*/policy=<identity>/'; echo "exit $?"
+  $ jacquard relate declares.jac --vary schedule=2 --seed 4 --policy declares.policy > pipe.out; status=$?; sed 's/policy=[0-9a-f]*/policy=<identity>/' < pipe.out; echo "exit $status"
   relate runs=2 seed=4 verdict=equal policy=<identity>
   exit 0
 
