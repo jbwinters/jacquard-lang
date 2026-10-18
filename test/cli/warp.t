@@ -265,3 +265,55 @@ fails honestly, since the body pins the old text).
   0 passed, 1 failed, 0 skipped, 0 refused
   cache: 0 hit, 1 ran
   [1]
+
+A handler may discard its continuation with `resume _`. Storing the lowered
+declaration spells that binder as a fresh `.jqd` name, so check, run, fmt and
+both Warp lanes accept it (the night-shift suite once crashed here).
+
+  $ cat > wildcard-resume.jac <<'JACQUARD'
+  > once effect Stop where {
+  >   halt : () -> Int
+  > }
+  > 
+  > stopped(thunk) =
+  >   handle thunk() {
+  >     | return x -> x
+  >     | halt() resume _ -> 7
+  >   }
+  > 
+  > wildcard-suite =
+  >   Group("wildcard", [
+  >     Case("resume _ aborts", fn () ->
+  >       check.eq(stopped(fn () -> add(halt(), 1)), 7, int.eq, int.show, "stopped"))
+  >   ])
+  > JACQUARD
+  $ jacquard check wildcard-resume.jac
+  ok
+  $ cat wildcard-resume.jac > wildcard-run.jac
+  $ echo 'stopped(fn () -> add(halt(), 1))' >> wildcard-run.jac
+  $ jacquard run wildcard-run.jac
+  7
+  $ jacquard fmt wildcard-resume.jac > formatted.jac
+  $ grep -c 'resume _' formatted.jac
+  2
+  $ jacquard test wildcard-resume.jac --no-cache
+  PASS wildcard-suite/wildcard/resume _ aborts (1 check)
+  1 passed, 0 failed, 0 skipped, 0 refused
+  $ jacquard test wildcard-resume.jac
+  PASS wildcard-suite/wildcard/resume _ aborts (1 check)
+  1 passed, 0 failed, 0 skipped, 0 refused
+  cache: 0 hit, 1 ran
+  $ jacquard test wildcard-resume.jac
+  PASS wildcard-suite/wildcard/resume _ aborts (1 check) [cached]
+  1 passed, 0 failed, 0 skipped, 0 refused
+  cache: 1 hit, 0 ran
+
+Quoted code is name-addressed data, so a quoted handler must name its
+continuation; a generated name could capture a spliced reference.
+
+  $ cat > wildcard-quoted.jac <<'JACQUARD'
+  > quoted = quote { handle 1 { | return x -> x | halt() resume _ -> 0 } }
+  > JACQUARD
+  $ jacquard check wildcard-quoted.jac > quoted.out 2>&1; status=$?; grep -o 'error\[E1245\]' quoted.out; echo "exit:$status"
+  error[E1245]
+  exit:1

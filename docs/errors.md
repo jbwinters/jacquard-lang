@@ -268,6 +268,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1242 | `try` is used inside an expression instead of as a block item | `f(try x)` |
 | E1243 | a block ends in `try` | `{ try parse(x) }` |
 | E1244 | `try` is used on a `let rec` local function binding | `let rec h(y) = try f(y)` |
+| E1245 | a handler clause inside quoted surface syntax discards its continuation with `resume _`; quoted code is name-addressed data, so the handler must name it | `quote { handle f() { \| return x -> x \| stop() resume _ -> 0 } }` |
 
 ### Surface warnings (W12xx)
 

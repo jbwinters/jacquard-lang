@@ -59,6 +59,11 @@ let diagnostic_spec = function
         "A named call argument or `with` field update cannot be quoted.",
         "Use positional arguments inside `quote`, or move the named call or field update outside \
          the quoted payload." )
+  | "E1245" ->
+      ( Diag.Surface,
+        "A wildcard continuation `resume _` cannot be quoted.",
+        "Name the continuation inside `quote`, for example `resume k`, or move the handler outside \
+         the quoted payload." )
   | "E1239" ->
       ( Diag.Surface,
         "A constructor declares the same field label twice.",
@@ -450,6 +455,13 @@ and lower_expr_node ?(quote_depth = 0) (expr : Surface_ast.expr) : (Kernel.expr,
       Ok Kernel.{ it = App (fn, left :: args); meta = Meta.with_surface_form "pipe" meta }
   | Surface_ast.Handle (body, ret, ops) ->
       let lower_op (op : Surface_ast.op_clause) =
+        let* () =
+          if quote_depth > 0 && String.equal op.oresume "_" then
+            error ~meta:op.ometa ~code:"E1245"
+              "quoted code is name-addressed data, so a generated continuation name could capture \
+               a spliced reference; a quoted handler must name its continuation"
+          else Ok ()
+        in
         let* params = map_results (lower_pat_at ~quote_depth) op.oparams in
         let* obody = lower_expr_node ~quote_depth op.obody in
         Ok

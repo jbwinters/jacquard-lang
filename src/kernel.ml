@@ -2,7 +2,8 @@
 
     Layer 1 is [Form.t] (any triple); layer 2 is this module: a triple that converts is a kernel
     form, one that does not is just data. [of_form]/[decl_of_form]/[expr_of_form] validate and build
-    the typed AST; [to_form] is the injective inverse, preserving whatever meta the AST holds.
+    the typed AST; [to_form] is the inverse, preserving whatever meta the AST holds. It is injective
+    except for a wildcard continuation [resume _], which it spells as a fresh name.
 
     Triple encodings, pinned (bootstrap notation in parens; `(...)` groups are [Form.t] values with
     the reserved head ["group"]):
@@ -711,7 +712,7 @@ let of_form (f : Form.t) : (top, Diag.t list) result =
   else Result.map (fun e -> Expr e) (expr_of_form f)
 
 (* ------------------------------------------------------------------ *)
-(* to_form: the injective inverse, meta-preserving where held.         *)
+(* to_form: the inverse, meta-preserving where held.                  *)
 (* ------------------------------------------------------------------ *)
 
 let form ?(meta = Meta.empty) head args = Form.form ~meta head args
@@ -719,6 +720,24 @@ let group forms = Form.F (form "group" (List.map (fun f -> Form.F f) forms))
 let lit_arg = function LInt i -> Form.Int i | LReal r -> Form.Real r | LText s -> Form.Text s
 let gref_arg = function Named s -> Form.Sym s | Hashed h -> Form.Hash h
 let refkind_sym = function Term -> "term" | Con -> "con" | Op -> "op"
+
+(* The surface wildcard continuation [resume _] lowers to the kernel name ["_"], which the
+   [.jqd] notation cannot spell. Its clause encodes it as the first of [unused-resume],
+   [unused-resume-2], ... that no symbol in the clause's parameters or body mentions, so the
+   binder captures nothing. Canonical identity is unchanged: the hasher addresses the resume
+   binder by position, never by name. Quoted payloads are name-addressed data that a runtime
+   splice could extend, so surface lowering refuses [resume _] inside [quote] (E1245). *)
+let wildcard_resume_symbol forms =
+  let rec mentions name (f : Form.t) =
+    List.exists
+      (function Form.Sym s -> String.equal s name | Form.F f -> mentions name f | _ -> false)
+      f.Form.args
+  in
+  let rec pick n =
+    let name = if n = 1 then "unused-resume" else Printf.sprintf "unused-resume-%d" n in
+    if List.exists (mentions name) forms then pick (n + 1) else name
+  in
+  pick 1
 
 let rec expr_to_form (e : expr) : Form.t =
   let meta = e.meta in
@@ -759,14 +778,15 @@ let rec expr_to_form (e : expr) : Form.t =
              (form ~meta:rmeta "ret" [ Form.F (pat_to_form rbinder); Form.F (expr_to_form rbody) ])
         :: List.map
              (fun { op; params; resume; obody; ometa } ->
+               let params = List.map pat_to_form params in
+               let obody = expr_to_form obody in
+               let resume =
+                 if String.equal resume "_" then wildcard_resume_symbol (obody :: params)
+                 else resume
+               in
                Form.F
                  (form ~meta:ometa "opclause"
-                    [
-                      gref_arg op;
-                      group (List.map pat_to_form params);
-                      Form.Sym resume;
-                      Form.F (expr_to_form obody);
-                    ]))
+                    [ gref_arg op; group params; Form.Sym resume; Form.F obody ]))
              ops)
   | Quote payload -> form ~meta "quote" [ Form.F payload ]
   | Unquote splice -> form ~meta "unquote" [ Form.F (expr_to_form splice) ]
