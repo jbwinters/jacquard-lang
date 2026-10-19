@@ -191,7 +191,7 @@ effect difference; an unmodeled operation is a missing world.
   2
   $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes; echo "exit=$?"
   error[E1012]: A behavior review's domain, field or world is invalid
-    Cause: missing world configuration: the old entry performs effects that no --handle models
+    Cause: missing world configuration: the old case performs effect `notify`, and not every one of its operations is --handle'd
     Next step: Declare each domain as a finite List or Distribution of the parameter's type, keep fields and handlers pure, and --handle every operation the entry performs.
   exit=3
 
@@ -350,3 +350,22 @@ The readable report keeps text literals intact.
   $ sed -n '/old:/p;/new:/p' marker.out | cut -c1-24
       old: "#1111111111111
       new: "#2222222222222
+
+Every operation of a performed effect must be modeled, and with an adapter the
+request records only the new version's own entry.
+
+  $ printf 'once effect Two where {\n  first : (Int) -> Int\n  second : (Int) -> Int\n}\n\nuse : (Int) ->{Two} Int\nuse(n) = first(n)\n' > two-old.jac
+  $ sed 's/use(n) = first(n)/use(n) = second(n)/' two-old.jac > two-new.jac
+  $ printf 'ints = [1]\nmodel(n) = n\n' > two-cases.jac
+  $ jacquard review run --old two-old.jac --new two-new.jac --cases two-cases.jac --entry use --domain ints --handle first=model > two.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 two.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: missing world configuration: the old case performs effect `two`, and not every one of its operations is --handle'd
+  $ printf 'f : (Int) ->{} Int\nf(n) = n\n' > ent-old.jac
+  $ printf 'compat : (Int) ->{} Int\ncompat(n) = add(n, 1)\n' > ent-new.jac
+  $ printf 'type Separator = | Separator\nf : (Int) ->{} Int\nf(n) = n\nints = [1]\n' > ent-cases.jac
+  $ jacquard review run --old ent-old.jac --new ent-new.jac --cases ent-cases.jac --entry f --adapter compat --domain ints -o ent.txt > ent.out 2>&1; echo "exit=$?"
+  exit=1
+  $ grep -o '^new source=[0-9a-f]* entry=[a-z0-9]*' ent.txt | sed 's/source=[0-9a-f]*/source=H/; s/entry=[0-9a-f]\{64\}/entry=H/'
+  new source=H entry=none

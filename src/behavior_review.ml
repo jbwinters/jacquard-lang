@@ -409,6 +409,43 @@ let prepare_version options side =
                   (side_name side))
             :: diagnostics)
     in
+    (* every operation of every effect left in the case's own row must be modeled: handling some of
+     an effect's operations can remove the whole effect from a handler's row, so the typing row
+     alone does not prove coverage *)
+    let* case_h = term_hash side final (driver_prefix ^ "case") in
+    let* () =
+      let row_effects =
+        match Types.repr (Check.term_scheme final.checker case_h).Types.ty with
+        | Types.TArrow (_, row, _) -> (Types.repr_row row).Types.effects
+        | _ -> []
+      in
+      let handled = List.map (fun o -> o.op_hash) operations in
+      let missing effect_id =
+        match Store.locate_internal final.store effect_id with
+        | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ename; ops; _ }; _ }; decl_hash; _ } ->
+            let covered =
+              List.filter_map
+                (fun op ->
+                  match Store.locate_internal final.store op with
+                  | Ok { Store.decl_hash = d; role = Store.Operation i; _ }
+                    when Hash.equal d decl_hash ->
+                      Some i
+                  | _ -> None)
+                handled
+            in
+            if List.for_all (fun i -> List.mem i covered) (List.init (List.length ops) Fun.id) then
+              None
+            else Some ename
+        | _ -> Some (Hash.to_hex effect_id)
+      in
+      match List.find_map missing row_effects with
+      | Some ename ->
+          refuse ~code:"E1012"
+            "missing world configuration: the %s case performs effect `%s`, and not every one of \
+             its operations is --handle'd"
+            (side_name side) ename
+      | None -> Ok ()
+    in
     let* typing = term_hash side final (driver_prefix ^ "typing") in
     let* () =
       if arrow_row_empty final.checker typing then Ok ()
@@ -429,7 +466,12 @@ let prepare_version options side =
         (Ok ())
         (List.init (List.length options.fields) Fun.id)
     in
-    Ok (final, kinds)
+    let alone_entry =
+      Option.map
+        (fun e -> e.Interface.hash)
+        (Interface.find (Frontend.Checked.interface alone.artifact) options.entry Resolve.KTerm)
+    in
+    Ok (final, kinds, alone_entry)
   in
   Ok (contract, finish)
 
@@ -556,13 +598,12 @@ type prepared = {
   interface_identity : Hash.t;
 }
 
-let evaluate options side (version, kinds) =
+let evaluate options side (version, kinds, named_entry) =
   let* _store, ctx =
     try Frontend.open_session ~prelude_dir:options.prelude_dir ~root:version.root
     with (Sys_error _ | Unix.Unix_error _) as error -> store_failure error
   in
   let* entry_hash = term_hash side version (target options side) in
-  let named_entry = Option.map (fun e -> e.Interface.hash) (export_of version options.entry) in
   let* contract = entry_contract side version (target options side) in
   let* domain_hashes =
     List.fold_right
@@ -1112,8 +1153,8 @@ let run options =
         (match options.adapter with Some a -> "adapter `" ^ a ^ "`" | None -> "entry")
         ns nl
   in
-  let* old_version, old_kinds = old_finish () in
-  let* new_version, new_kinds = new_finish () in
+  let* old_version, old_kinds, old_named = old_finish () in
+  let* new_version, new_kinds, new_named = new_finish () in
   let* () =
     if old_kinds = new_kinds then Ok ()
     else refuse ~code:"E1013" "a domain is a List in one version and a Distribution in the other"
@@ -1125,8 +1166,8 @@ let run options =
         refuse ~code:"E1015" "--sample needs every domain to be a Distribution"
     | _ -> Ok ()
   in
-  let* old_p = evaluate options Old (old_version, kinds) in
-  let* new_p = evaluate options New (new_version, kinds) in
+  let* old_p = evaluate options Old (old_version, kinds, old_named) in
+  let* new_p = evaluate options New (new_version, kinds, new_named) in
   let* () = check_policy options old_p new_p in
   let* () =
     if
@@ -1268,7 +1309,11 @@ let render review =
   line "  policy %s" (hex (Observation_policy.identity review.options.policy));
   let scope =
     match review.mode with
-    | Sampled { count; seed } -> Printf.sprintf "in %d sampled cases (seed %d)" count seed
+    | Sampled { count; seed } -> (
+        match review.selected with
+        | Some k ->
+            Printf.sprintf "sampled case %d alone of %d sampled cases (seed %d)" k count seed
+        | None -> Printf.sprintf "in %d sampled cases (seed %d)" count seed)
     | Exhaustive when Option.is_some review.selected ->
         Printf.sprintf "case %d alone of the %d declared cases" (Option.get review.selected)
           declared

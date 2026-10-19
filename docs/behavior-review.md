@@ -109,9 +109,10 @@ then runs `wrap(fn () -> entry(x1, ..., xn))` as a closure application, and
 the wrap must keep the entry's result type (E1012).
 Operations a wrap handles never reach the root, so they are not observed (OBS.1
 records root operations only). **Missing world configuration** is refused
-(E1012) statically: the effect row of the entry's (or adapter's) checked scheme,
-less the effects the wrap's scheme discharges, may contain only effects every
-one of whose operations is `--handle`d.
+(E1012) statically: the effect row of the case (the entry, or adapter, through
+any wrap) may contain only effects every one of whose operations is
+`--handle`d. Coverage is checked operation by operation, because handling some
+of an effect's operations can remove the whole effect from a handler's row.
 
 **Adapter.** `--adapter NAME` names a new-version term (in NEW or the cases
 file) whose entry contract equals the **old** entry's; the review then compares
@@ -191,7 +192,8 @@ no rendering says "agree" without its scope ("on the 16 declared cases", "in
 `--case K` runs only case K (both versions, full fuel N each). The request
 records the selection (`select case=K`), so its identity differs from the full
 review's, and every other declared case is `unrun`: the status is
-`exhaustive-incomplete`, never a claim about the whole domain. Because fuel is
+`exhaustive-incomplete` (or `sampled`, whose scope names the one case run),
+never a claim about the whole domain. Because fuel is
 shared across a version's cases, a case run alone may complete where it was
 `unrun` in the full review.
 
