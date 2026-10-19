@@ -57,11 +57,38 @@ let is_assignment word =
         (String.sub word 0 i)
   | _ -> false
 
+(* [close_paren s i] is the index just past the `)` closing a group opened before [i], skipping
+   quoted text and escapes and counting nested parentheses. *)
+let close_paren s i =
+  let n = String.length s in
+  let rec quote i q =
+    if i >= n then n
+    else if s.[i] = '\\' && q = '"' then quote (i + 2) q
+    else if s.[i] = q then i + 1
+    else quote (i + 1) q
+  in
+  let rec go i depth =
+    if i >= n then n
+    else
+      match s.[i] with
+      | '\\' -> go (i + 2) depth
+      | ('\'' | '"') as q -> go (quote (i + 1) q) depth
+      | '(' -> go (i + 1) (depth + 1)
+      | ')' -> if depth = 1 then i + 1 else go (i + 1) (depth - 1)
+      | _ -> go (i + 1) depth
+  in
+  go i 1
+
 (* [analyze script found] scans one shell script, adding to [found] the text of every pipeline
    stage that runs a tool and is not the pipeline's last stage. *)
 let rec analyze script (found : string list ref) =
   let tokens = lex script found in
-  ignore (parse_list tokens 0 [] found)
+  (* a stray `)`, `;;` or reserved word ends a list early; resume after it *)
+  let rec from i =
+    let j, _ = parse_list tokens i [] found in
+    if j < Array.length tokens then from (j + 1)
+  in
+  from 0
 
 and lex s found =
   let n = String.length s in
@@ -69,8 +96,11 @@ and lex s found =
   let word = Buffer.create 32 in
   let in_word = ref false in
   let heredocs = ref [] in
+  (* a redirection or here-string target is lexed like any word (its substitutions are
+     scanned) and then dropped *)
+  let drop = ref false in
   let flush () =
-    if !in_word then toks := Word (Buffer.contents word) :: !toks;
+    if !in_word then if !drop then drop := false else toks := Word (Buffer.contents word) :: !toks;
     Buffer.clear word;
     in_word := false
   in
@@ -173,13 +203,9 @@ and lex s found =
                  consumed := j + 1
              | None -> consumed := String.length sub
            else
-             let depth = ref 1 and j = ref 2 in
-             while !depth > 0 && !j < String.length sub do
-               (match sub.[!j] with '(' -> incr depth | ')' -> decr depth | _ -> ());
-               incr j
-             done;
-             analyze (String.sub sub 2 (max 0 (!j - 3))) sub_found;
-             consumed := !j);
+             let j = close_paren sub 2 in
+             analyze (String.sub sub 2 (max 0 (j - 3))) sub_found;
+             consumed := j);
           found := !sub_found @ !found;
           go (i + max 1 !consumed))
         else go (i + 1)
@@ -243,9 +269,9 @@ and lex s found =
             Buffer.clear word;
             in_word := false)
           else flush ();
-          if c = '<' && i + 2 < n && s.[i + 1] = '<' && s.[i + 2] = '<' then
-            let _, _, j = read_word_at (i + 3) in
-            go j
+          if c = '<' && i + 2 < n && s.[i + 1] = '<' && s.[i + 2] = '<' then (
+            drop := true;
+            go (i + 3))
           else if c = '<' && i + 1 < n && s.[i + 1] = '<' then (
             let strip_tabs = i + 2 < n && s.[i + 2] = '-' in
             let delim, quoted, j = read_word_at (if strip_tabs then i + 3 else i + 2) in
@@ -257,17 +283,17 @@ and lex s found =
               incr j
             done;
             if !j < n && s.[!j - 1] = '&' && s.[!j] >= '0' && s.[!j] <= '9' then go (!j + 1)
-            else
-              let _, _, k = read_word_at !j in
-              go k
+            else (
+              drop := true;
+              go !j)
       | '|' when i + 1 < n && s.[i + 1] = '|' -> op "||" (i + 2)
       | '|' when i + 1 < n && s.[i + 1] = '&' -> op "|" (i + 2)
       | '|' -> op "|" (i + 1)
       | '&' when i + 1 < n && s.[i + 1] = '&' -> op "&&" (i + 2)
       | '&' when i + 1 < n && s.[i + 1] = '>' ->
           flush ();
-          let _, _, j = read_word_at (i + 2) in
-          go j
+          drop := true;
+          go (i + 2)
       | ';' when i + 1 < n && s.[i + 1] = ';' -> op ";;" (i + 2)
       | (';' | '&' | '(' | ')') as c -> op (String.make 1 c) (i + 1)
       | c ->
@@ -275,6 +301,7 @@ and lex s found =
           go (i + 1)
   and op o i =
     flush ();
+    drop := false;
     toks := Op o :: !toks;
     go i
   in
@@ -361,6 +388,11 @@ and parse_stage toks i stops found =
     | Word "case" ->
         let k = skip_to j "in" in
         let rec items k tool =
+          let k = ref k in
+          while !k < n && (toks.(!k) = Op "\n" || toks.(!k) = Op ";") do
+            incr k
+          done;
+          let k = !k in
           if k >= n || toks.(k) = Word "esac" then (expect k "esac", tool)
           else
             (* a pattern list up to ")" then a list up to ";;" or "esac" *)
@@ -482,6 +514,11 @@ let test_detector_cases () =
       "cat <<'EOF' > /dev/null\nfixture\nEOF\njacquard run x.jac | head -1";
       "cat <<EOF > s.txt\n$(jac hash x | head -1)\nEOF";
       "case $x in a) jac run x | head -1 ;; esac";
+      "case $x in a) echo ;;\nesac\njac run x | head -1";
+      "echo ) ; jac run x | head -1";
+      ": > \"$(jac hash x | head -1)\"";
+      "cat <<<\"$(jac hash x | head -1)\"";
+      "cat <<EOF\n$(printf ')'; jac run x | head -1)\nEOF";
     ];
   List.iter
     (fun cmd -> Alcotest.(check bool) ("accepts: " ^ cmd) false (flagged cmd))
