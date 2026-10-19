@@ -55,6 +55,12 @@ type recorder
 val create : Observation_policy.t -> recorder
 (** [create policy] starts an empty, non-reentrant recorder under [policy]. *)
 
+val render_data : Observation.value -> string
+(** [render_data value] is the full data-v1 rendering of [value]: the {!Observation.render} spelling
+    with each constructor qualified by its identity ([Name#<hash>]), with no byte limit. Opaque
+    parts render as their markers, so callers that need a comparable rendering check them first. It
+    ticks computation fuel. *)
+
 val field_of_value : Observation_policy.t -> Observation.value -> field
 (** [field_of_value policy value] is the recorded field for a data value: [Unsupported] if it has an
     opaque part, else its data-v1 rendering (the {!Observation.render} spelling with each

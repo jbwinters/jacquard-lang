@@ -87,6 +87,10 @@ project shape from file names alone.
   by identity, compared arguments/results/output, exclusion as redaction,
   limits, interface pins) and policy-bound observation transcripts with
   equal/divergent/inconclusive comparison.
+- `behavior-review.md`: RW.8 `jacquard review run`, comparing two checked
+  versions of an entry over declared finite or sampled cases under an
+  observation policy, with grouped differences, deterministic witnesses and the
+  behavior-review request/report formats.
 - `computation-fuel.md`: RT.1 per-invocation computation budget, the versioned
   fuel-v1 cost model, and E0919 incomplete-run semantics.
 - `errors.md`: diagnostic code catalog.

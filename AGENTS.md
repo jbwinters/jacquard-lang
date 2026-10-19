@@ -165,6 +165,10 @@ When adding valid corpus files, regenerate the golden hashes with
   `test/test_project_manifest.ml`, `test/test_project_frontend.ml`,
   `test/cli/project-manifest.t`, `test/cli/project-local.t`,
   `test/cli/project-deps.t`, `test/cli/project-bundle.t`, `test/cli/project-guards.t`.
+- Behavior review (RW.8): `src/behavior_review.mli` (two checked versions of an
+  entry over declared List/Distribution domains, modeled root operations,
+  exact-conjunction grouping, request/report format 1), `jacquard review run`,
+  `docs/behavior-review.md`, `test/test_behavior_review.ml`, `test/cli/review.t`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

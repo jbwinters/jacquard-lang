@@ -1,0 +1,371 @@
+Behavior review (RW.8): two checked versions of an entry compared over
+declared finite cases (docs/behavior-review.md).
+
+  $ export JACQUARD_PRELUDE=$PWD/../../prelude
+
+The scheduling example of docs/designs/behavioral-change-review.md §6. The new
+policy holds a low-priority job when only one worker is up.
+
+  $ cat > old.jac <<'JACQUARD'
+  > type Worker = | W1 | W2 | W3
+  > type State = | Up | Down
+  > type Availability = | Availability(w1: State, w2: State, w3: State)
+  > type Priority = | High | Low
+  > type Assignment = | Dispatch Worker | Hold | Queue
+  > 
+  > up?(a, w) = match w {
+  >   | W1 -> match availability.w1(a) { | Up -> True | Down -> False }
+  >   | W2 -> match availability.w2(a) { | Up -> True | Down -> False }
+  >   | W3 -> match availability.w3(a) { | Up -> True | Down -> False }
+  > }
+  > 
+  > available(a) = list.filter([W1, W2, W3], fn (w) -> up?(a, w))
+  > 
+  > assign : (Priority, Availability) ->{} Assignment
+  > assign(job, a) = match available(a) {
+  >   | Nil -> Queue
+  >   | Cons(w, _) -> Dispatch(w)
+  > }
+  > JACQUARD
+  $ sed 's/^  | Nil -> Queue$/  | Nil -> Queue\n  | Cons(w, Nil) -> match job { | High -> Dispatch(w) | Low -> Hold }/' old.jac > new.jac
+  $ cat > cases.jac <<'JACQUARD'
+  > priorities = [High, Low]
+  > availabilities = [
+  >   Availability(Up, Up, Up), Availability(Up, Up, Down),
+  >   Availability(Up, Down, Up), Availability(Up, Down, Down),
+  >   Availability(Down, Up, Up), Availability(Down, Up, Down),
+  >   Availability(Down, Down, Up), Availability(Down, Down, Down)]
+  > count-up(job, a) = list.length(available(a))
+  > JACQUARD
+
+Cases are the product of the domains, the first parameter outermost. The
+condition is an exact conjunction over declared fields, and the witness is the
+first differing case: `Low` with only W1 up is case 11, the 12th of 16.
+
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --field count-up -o report.txt > report.out; echo "exit=$?"
+  exit=1
+  $ sed 1d report.out
+    old old.jac, new new.jac, entry assign
+    policy a9e4cff5d4dd7a3176a3a77a6ce702b85a224f49b7deb7af171f46e88f505afc
+  Status exhaustive-complete, on the 16 declared cases.
+    16 run: 13 agree, 3 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  
+  3 cases differ (decision):
+    when arg0 = low and count-up = 1
+    witness case 11 (12 of 16): low, availability(up, down, down)
+      old: dispatch(w1)
+      new: hold
+  
+  This review covers only the declared cases. It does not show that the versions are
+  equivalent anywhere else.
+
+The report data is deterministic: the same request writes the same bytes.
+
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --field count-up -o again.txt > /dev/null; echo "exit=$?"
+  exit=1
+  $ cmp report.txt again.txt && echo identical
+  identical
+  $ sed -n '/^status/,/^witness/p' report.txt
+  status exhaustive-complete mode exhaustive
+  counts cases=16 agree=13 differ=3 inconclusive=0 failed=0 unrun=0
+  group index=0 kind=decision cases=3 first=11 condition=2
+  atom path=arg0 value bytes=68
+  low#896ad3f49db0360fbfd9a2d397dcd505865f10555c0c695d4067330763479650
+  atom field=count-up value bytes=1
+  1
+  witness case=11
+
+Witness replay: `--case 11` runs only that case, and its two run transcripts are
+the report's witness blocks byte for byte.
+
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --case 11 -o case11.txt > case11.out; echo "exit=$?"
+  exit=1
+  $ sed -n 4,5p case11.out
+  Status exhaustive-incomplete, case 11 alone of the 16 declared cases.
+    1 run: 0 agree, 1 differ, 0 inconclusive, 0 failed in both, 15 unrun.
+  $ sed -n '/^old bytes/,$p' report.txt | sed -n '/^old bytes/,/^case /p' | sed '$d' > witness.blocks
+  $ sed -n '/^old bytes/,$p' case11.txt | sed -n '/^old bytes/,/^case /p' | sed '$d' > replay.blocks
+  $ cmp witness.blocks replay.blocks && echo replayed
+  replayed
+
+Versions that agree on every declared case exit 0, and the claim keeps its
+scope.
+
+  $ jacquard review run --old old.jac --new old.jac --cases cases.jac --entry assign --domain priorities --domain availabilities > same.out; echo "exit=$?"
+  exit=0
+  $ sed -n '4,5p;7p' same.out
+  Status exhaustive-complete, on the 16 declared cases.
+    16 run: 16 agree, 0 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  The versions agree on the 16 declared cases.
+
+A run budget leaves the remainder unrun: the review is incomplete, never
+called agreement.
+
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --max-cases 10 -o bounded.txt > bounded.out; echo "exit=$?"
+  exit=2
+  $ sed -n 4,5p bounded.out
+  Status exhaustive-incomplete, on the 16 declared cases.
+    10 run: 10 agree, 0 differ, 0 inconclusive, 0 failed in both, 6 unrun.
+  $ grep '^case index' bounded.txt
+  case index=10 to=15 verdict=unrun old=not-started new=not-started
+
+Sampling draws from Distribution domains with a seed and says so: a rare
+difference can be missed, and agreement is only "in N sampled cases".
+
+  $ cat >> cases.jac <<'JACQUARD'
+  > priority-model = Categorical([MkPair(High, 0.5), MkPair(Low, 0.5)])
+  > availability-model = Categorical([
+  >   MkPair(Availability(Up, Up, Up), 0.729), MkPair(Availability(Up, Up, Down), 0.081),
+  >   MkPair(Availability(Up, Down, Up), 0.081), MkPair(Availability(Up, Down, Down), 0.009),
+  >   MkPair(Availability(Down, Up, Up), 0.081), MkPair(Availability(Down, Up, Down), 0.009),
+  >   MkPair(Availability(Down, Down, Up), 0.009), MkPair(Availability(Down, Down, Down), 0.001)])
+  > JACQUARD
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priority-model --domain availability-model --sample 100 --seed 7 > sampled.out; echo "exit=$?"
+  exit=0
+  $ sed -n '4,5p;7p' sampled.out
+  Status sampled, in 100 sampled cases (seed 7).
+    100 run: 100 agree, 0 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  The versions agree in 100 sampled cases (seed 7).
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priority-model --domain availability-model --field count-up > exact.out; echo "exit=$?"
+  exit=1
+  $ sed -n '4,5p;8p' exact.out
+  Status exhaustive-complete, on the 16 declared cases.
+    16 run: 13 agree, 3 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+    when arg0 = low and count-up = 1
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --sample 5 --seed 7; echo "exit=$?"
+  error[E1015]: A behavior review's run options are invalid
+    Cause: --sample needs every domain to be a Distribution
+    Next step: Pass --sample N with --seed S over Distribution domains, keep N within --max-cases, and give positive --max-cases and --fuel.
+  exit=3
+  $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priority-model --domain availability-model --sample 5; echo "exit=$?"
+  error[E1015]: A behavior review's run options are invalid
+    Cause: --sample and --seed must be given together
+    Next step: Pass --sample N with --seed S over Distribution domains, keep N within --max-cases, and give positive --max-cases and --fuel.
+  exit=3
+
+Entry contracts: a reordered signature is refused unless a named adapter with
+the old entry's contract stands in for the new entry.
+
+  $ sed 's/^assign : (Priority, Availability) ->{} Assignment$/assign : (Availability, Priority) ->{} Assignment/; s/^assign(job, a) = /assign(a, job) = /' new.jac > swapped.jac
+  $ jacquard review run --old old.jac --new swapped.jac --cases cases.jac --entry assign --domain priorities --domain availabilities > swapped.out 2>&1; echo "exit=$?"
+  exit=3
+  $ sed 's/#[0-9a-f]\{64\}/#H/g' swapped.out
+  error[E1011]: The two versions' entry contracts differ
+    Cause: the old entry has signature (#H, #H) ->{} #H labels positional; the new entry has (#H, #H) ->{} #H labels positional
+    Next step: Compare entries with one signature and call labels, or name an --adapter.
+  $ printf 'assign-compat : (Priority, Availability) ->{} Assignment\nassign-compat(job, a) = assign(a, job)\n' >> swapped.jac
+  $ jacquard review run --old old.jac --new swapped.jac --cases cases.jac --entry assign --adapter assign-compat --domain priorities --domain availabilities > adapted.out; echo "exit=$?"
+  exit=1
+  $ sed -n '2p;5p' adapted.out
+    old old.jac, new swapped.jac, entry assign (adapter assign-compat)
+    16 run: 13 agree, 3 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+
+Effects: operations the entry performs are modeled at the root by pure terms,
+so the policy observes them. Equal results with different effects are an
+effect difference; an unmodeled operation is a missing world.
+
+  $ cat > notify-old.jac <<'JACQUARD'
+  > once effect Notify where {
+  >   notify : (Text) -> ()
+  > }
+  > 
+  > route : (Int) ->{Notify} Int
+  > route(n) = {
+  >   notify("routed")
+  >   n
+  > }
+  > JACQUARD
+  $ sed 's/notify("routed")/notify("queued")/' notify-old.jac > notify-new.jac
+  $ printf 'sizes = [1, 2]\nack(t) = ()\nquiet(thunk) = handle thunk() { | return v -> v | notify(t) resume k -> k(()) }\n' > notify-cases.jac
+  $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes --handle notify=ack -o effects.txt > effects.out; echo "exit=$?"
+  exit=1
+  $ sed -n 5,11p effects.out
+    2 run: 0 agree, 2 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  
+  2 cases differ (effect):
+    no agreeing case to exclude: the condition is empty
+    witness case 0 (1 of 2): 1
+      old: 1 (1 observed operation)
+      new: 1 (1 observed operation)
+  $ grep -c '^event index=0' effects.txt
+  2
+  $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes; echo "exit=$?"
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: missing world configuration: the old case performs effect `notify`, and not every one of its operations is --handle'd
+    Next step: Declare each domain as a finite List or Distribution of the parameter's type, keep fields and handlers pure, and --handle every operation the entry performs.
+  exit=3
+
+A wrap handles the operation inside the case, where the root never sees it.
+
+  $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes --wrap quiet > wrapped.out; echo "exit=$?"
+  exit=0
+  $ sed -n 5p wrapped.out
+    2 run: 2 agree, 0 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+
+Failures are findings, attributed per version.
+
+  $ printf 'limits = [1, 2, 3]\nscale : (Int) ->{} Int\nscale(n) = div(12, n)\n' > scale-old.jac
+  $ sed 's/div(12, n)/div(12, sub(n, 2))/' scale-old.jac > scale-new.jac
+  $ printf 'probe = limits\n' > scale-cases.jac
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases scale-cases.jac --entry scale --domain probe -o failure.txt > failure.out; echo "exit=$?"
+  exit=1
+  $ sed -n 4p failure.out
+  Status failed, on the 3 declared cases.
+  $ grep '^case index' failure.txt
+  case index=0 verdict=differ:decision old=complete new=complete
+  case index=1 verdict=differ:failure old=complete new=failed:uncoded
+  case index=2 verdict=differ:decision old=complete new=complete
+
+Refusals happen before anything runs (exit 3): domains that differ between
+versions, a cases file that redeclares a version name, and a pinned policy.
+
+  $ sed 's/limits = \[1, 2, 3\]/limits = [1, 0, 3]/' scale-new.jac > scale-other.jac
+  $ jacquard review run --old scale-old.jac --new scale-other.jac --cases scale-cases.jac --entry scale --domain probe; echo "exit=$?"
+  error[E1013]: The two versions' review domains differ
+    Cause: the two versions' domain values differ
+    Next step: Declare the same domain values in both versions, over unchanged types.
+  exit=3
+  $ printf 'limits = [4]\n' > clash-cases.jac
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases clash-cases.jac --entry scale --domain limits > clash.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 clash.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the old version does not check together with the cases file
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=4096 interface=%064d\nunlisted=record arguments=all result=ignore output=compare\noperations=0\n' 0 > pinned.policy
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases scale-cases.jac --entry scale --domain probe --policy pinned.policy > pinned.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 pinned.out
+  error[E1014]: The observation policy cannot apply to both versions
+    Cause: the policy is pinned to an interface; a review compares two versions, whose manifests differ
+
+Fields are evaluated before any case runs, so a field that is not total refuses
+the review with nothing run; budgets must be positive; an operation is modeled
+once; and the `review-driver-` prefix is reserved for the generated driver.
+
+  $ printf 'probe = limits\nspin(x) = spin(x)\n' > spin-cases.jac
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases spin-cases.jac --entry scale --domain probe --field spin --fuel 5000 > spin.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 spin.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: field `spin` failed: error[E0919]: Computation fuel was exhausted
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases scale-cases.jac --entry scale --domain probe --max-cases 0 > zero.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 zero.out
+  error[E1015]: A behavior review's run options are invalid
+    Cause: --max-cases must be positive, got 0
+  $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes --handle notify=ack --handle notify=ack > twice.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 twice.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: --handle models `notify` more than once
+  $ printf 'review-driver-own = 1\n' >> scale-old.jac
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases scale-cases.jac --entry scale --domain probe > reserved.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 reserved.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: `review-driver-own` uses the `review-driver-` prefix, which is reserved for the review
+
+A version's own operation is modeled even when the prelude has one of the same
+name, and preparation problems are refusals, never crashes: a value too large
+for the fuel allowance, a uniform range too large to enumerate, and two
+distributions whose merged supports agree but whose values differ.
+
+  $ sed 's/notify/emit/g' notify-old.jac > emit-old.jac
+  $ sed 's/notify/emit/g' notify-new.jac > emit-new.jac
+  $ printf 'sizes = [1, 2]\nack(t) = ()\n' > emit-cases.jac
+  $ jacquard review run --old emit-old.jac --new emit-new.jac --cases emit-cases.jac --entry route --domain sizes --handle emit=ack > emit.out; echo "exit=$?"
+  exit=1
+  $ sed -n 5p emit.out
+    2 run: 0 agree, 2 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  $ printf 'texts = ["%s"]\n' "$(head -c 4000 /dev/zero | tr '\0' a)" > big-cases.jac
+  $ printf 'echo : (Text) ->{} Text\necho(t) = t\n' > echo.jac
+  $ jacquard review run --old echo.jac --new echo.jac --cases big-cases.jac --entry echo --domain texts --fuel 50 > big.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 big.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: domain `texts` contains a value too large to render within the fuel allowance (E0919)
+  $ printf 'wide = UniformInt(0, 4611686018427387903)\n' > wide-cases.jac
+  $ printf 'same : (Int) ->{} Int\nsame(n) = n\n' > same.jac
+  $ jacquard review run --old same.jac --new same.jac --cases wide-cases.jac --entry same --domain wide > wide.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 wide.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: domain `wide`: a uniform range above 10,000 values cannot be enumerated
+  $ printf 'ones = version-ones\n' > ones-cases.jac
+  $ printf 'same : (Int) ->{} Int\nsame(n) = n\nversion-ones = Categorical([MkPair(1, 0.5), MkPair(1, 0.5)])\n' > ones-old.jac
+  $ printf 'same : (Int) ->{} Int\nsame(n) = n\nversion-ones = Categorical([MkPair(1, 1.0)])\n' > ones-new.jac
+  $ jacquard review run --old ones-old.jac --new ones-new.jac --cases ones-cases.jac --entry same --domain ones > ones.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 ones.out
+  error[E1013]: The two versions' review domains differ
+    Cause: the two versions' domain values differ
+
+The generated driver refers to everything by identity, so user declarations
+cannot capture it: a wrap must keep the entry's result type, a user
+constructor named like a prelude one is harmless, and an escaped entry name
+works. The entry must belong to each version, and the cases file cannot rebind
+a version's type.
+
+  $ printf 'text-of : (Int) ->{} Text\ntext-of(n) = "old"\n' > text-old.jac
+  $ printf 'text-of : (Int) ->{} Text\ntext-of(n) = "new"\n' > text-new.jac
+  $ printf 'ints = [1]\nconstant(thunk) = { let _ = thunk(); 42 }\n' > retype-cases.jac
+  $ jacquard review run --old text-old.jac --new text-new.jac --cases retype-cases.jac --entry text-of --domain ints --wrap constant > retype.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 retype.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: the old version's domains, fields, handlers or wrap do not fit the entry's parameters
+  $ printf 'type Other = | Categorical Int | Cons Int | Nil\nsame : (Int) ->{} Int\nsame(n) = n\n' > shadow.jac
+  $ printf 'ints = [1]\n' > ints-cases.jac
+  $ jacquard review run --old shadow.jac --new shadow.jac --cases ints-cases.jac --entry same --domain ints > shadow.out; echo "exit=$?"
+  exit=0
+  $ sed -n 4p shadow.out
+  Status exhaustive-complete, on the 1 declared case.
+  $ printf '`term:if` : (Int) ->{} Int\n`term:if`(n) = n\n' > escaped.jac
+  $ jacquard review run --old escaped.jac --new escaped.jac --cases ints-cases.jac --entry if --domain ints > escaped.out; echo "exit=$?"
+  exit=0
+  $ sed -n 4p escaped.out
+  Status exhaustive-complete, on the 1 declared case.
+  $ printf 'constant = 1\n' > bare-old.jac
+  $ printf 'constant = 2\n' > bare-new.jac
+  $ printf 'ints = [1]\nf(x) = x\n' > f-cases.jac
+  $ jacquard review run --old bare-old.jac --new bare-new.jac --cases f-cases.jac --entry f --domain ints > bare.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 bare.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the old version has no term named `f`
+  $ printf 'type Thing = | Thing Int\nsame : (Int) ->{} Int\nsame(n) = n\n' > thing.jac
+  $ printf 'ints = [1]\ntype Thing = | Thing Text\n' > rebind-cases.jac
+  $ jacquard review run --old thing.jac --new thing.jac --cases rebind-cases.jac --entry same --domain ints > rebind.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 rebind.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the cases file redeclares the old version's `thing`
+
+The readable report keeps text literals intact.
+
+  $ printf 'marker : (Int) ->{} Text\nmarker(n) = "#%s"\n' "$(head -c 64 /dev/zero | tr '\0' 1)" > marker-old.jac
+  $ printf 'marker : (Int) ->{} Text\nmarker(n) = "#%s"\n' "$(head -c 64 /dev/zero | tr '\0' 2)" > marker-new.jac
+  $ jacquard review run --old marker-old.jac --new marker-new.jac --cases ints-cases.jac --entry marker --domain ints > marker.out; echo "exit=$?"
+  exit=1
+  $ sed -n '/old:/p;/new:/p' marker.out | cut -c1-24
+      old: "#1111111111111
+      new: "#2222222222222
+
+Every operation of a performed effect must be modeled, and with an adapter the
+request records only the new version's own entry.
+
+  $ printf 'once effect Two where {\n  first : (Int) -> Int\n  second : (Int) -> Int\n}\n\nuse : (Int) ->{Two} Int\nuse(n) = first(n)\n' > two-old.jac
+  $ sed 's/use(n) = first(n)/use(n) = second(n)/' two-old.jac > two-new.jac
+  $ printf 'ints = [1]\nmodel(n) = n\n' > two-cases.jac
+  $ jacquard review run --old two-old.jac --new two-new.jac --cases two-cases.jac --entry use --domain ints --handle first=model > two.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 two.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: missing world configuration: the old case performs effect `two`, and not every one of its operations is --handle'd
+  $ printf 'f : (Int) ->{} Int\nf(n) = n\n' > ent-old.jac
+  $ printf 'compat : (Int) ->{} Int\ncompat(n) = add(n, 1)\n' > ent-new.jac
+  $ printf 'type Separator = | Separator\nf : (Int) ->{} Int\nf(n) = n\nints = [1]\n' > ent-cases.jac
+  $ jacquard review run --old ent-old.jac --new ent-new.jac --cases ent-cases.jac --entry f --adapter compat --domain ints -o ent.txt > ent.out 2>&1; echo "exit=$?"
+  exit=1
+  $ grep -o '^new source=[0-9a-f]* entry=[a-z0-9]*' ent.txt | sed 's/source=[0-9a-f]*/source=H/; s/entry=[0-9a-f]\{64\}/entry=H/'
+  new source=H entry=none

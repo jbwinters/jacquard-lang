@@ -311,6 +311,9 @@ let test_runtime_executor_inventory () =
       ("warp.ml", 1);
       (* a bundle run executes the run steps the verified bundle record names (author-trusted) *)
       ("main.ml", 1);
+      (* a behavior review runs the entry, domain, field and model terms its CLI caller names, from
+         the review's own private scratch stores, from the CLI, not from a builtin *)
+      ("behavior_review.ml", 1);
     ]
   in
   (* a record field [it = Ref (_, Term)] builds a reference; [with it = ...] only rebuilds one *)
