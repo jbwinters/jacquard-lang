@@ -42,7 +42,8 @@ across its distinct live-seed and dry-seed samplers.
   $ cat > infer-dependent.jqd <<'EOF'
   > (app (var complete) (app (var mk-prompt) (lit "question") (var none)))
   > EOF
-  $ jacquard relate infer-dependent.jqd --vary grant=infer --seed 42 2>&1 | grep -E 'Runs 1 and 2|stub completion|dry-run completion'
+  $ jacquard relate infer-dependent.jqd --vary grant=infer --seed 42 > pipe.out 2>&1 || echo "exit=$?"; grep -E 'Runs 1 and 2|stub completion|dry-run completion' < pipe.out
+  exit=1
     Cause: Runs 1 and 2 diverged with value-divergence:
                - "\"<stub completion for: question>\"\n"
                + "\"<dry-run completion>\"\n"

@@ -29,9 +29,9 @@ update of a parametric field falls out of the twin:
   (snap(10, 2, 30, 4, 5), snap(10, 2, 30, 4, 5), pair(2.5, "a"))
   $ jacquard build twins.jac -o twins > /dev/null && ./twins
   (snap(10, 2, 30, 4, 5), snap(10, 2, 30, 4, 5), pair(2.5, "a"))
-  $ jacquard hash twins.jac | grep ':refresh' | awk '{print $2}' | uniq | wc -l
+  $ jacquard hash twins.jac > pipe.out || echo "exit=$?"; grep ':refresh' < pipe.out | awk '{print $2}' | uniq | wc -l
   1
-  $ jacquard check --print-sigs twins.jac | grep widen
+  $ jacquard check --print-sigs twins.jac > pipe.out || echo "exit=$?"; grep widen < pipe.out
   widen : forall a b. (Pair b a) ->{} Pair Real a
 
 The formatter keeps the `with` spelling, one field per line once the form
@@ -55,9 +55,9 @@ wraps, and never rewrites a setter into a `with` update or back:
     )
   
   hit(s) = snap.with-hits(s, hits: add(snap.hits(s), 1))
-  $ jacquard fmt formatted.jac | cmp - formatted.jac && echo stable
+  $ jacquard fmt formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out formatted.jac && echo stable
   stable
-  $ jacquard hash layout.jac > before.txt && jacquard hash formatted.jac | cmp - before.txt && echo same
+  $ jacquard hash layout.jac > before.txt || echo "exit=$?"; jacquard hash formatted.jac > pipe.out || echo "exit=$?"; cmp pipe.out before.txt && echo same
   same
   $ jacquard export twins.jac -o twins.jqd && grep -c ' with ' twins.jqd
   0
@@ -91,14 +91,16 @@ Unknown and repeated labels are the labeled-pattern errors, at the label:
   > type Snap = | Snap(cells: Int, hits: Int)
   > unknown(s) = Snap(s with cels: 1)
   > J
-  $ jacquard check labels.jac 2>&1 | head -2
+  $ jacquard check labels.jac > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  exit=1
   labels.jac:2:26-33: error[E0305]: This constructor has no field with the selected label.
     Cause: Field `cels` is not declared by this constructor.
   $ cat > repeated.jac <<'J'
   > type Snap = | Snap(cells: Int, hits: Int)
   > twice(s) = Snap(s with cells: 1, cells: 2)
   > J
-  $ jacquard check repeated.jac 2>&1 | head -2
+  $ jacquard check repeated.jac > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  exit=1
   repeated.jac:2:34-42: error[E0306]: A labeled constructor pattern selects one field more than once.
     Cause: Field `cells` is selected more than once in this pattern.
 
@@ -110,7 +112,8 @@ setter:
   > type Shape = | Circle(name: Text, radius: Int) | Square(name: Text, side: Int)
   > rename(s) = Circle(s with name: "c")
   > J
-  $ jacquard check shape.jac 2>&1 | head -3
+  $ jacquard check shape.jac > pipe.out 2>&1 || echo "exit=$?"; head -3 < pipe.out
+  exit=1
   shape.jac:2:13-37: error[E0813]: This match is not exhaustive
     Cause: this match is not exhaustive: it misses square(_, _); a `with` update rebuilds only the constructor it names; use `shape.with-name` for a total update
     Next step: Use `shape.with-name` for a total update, or write a match with a clause for every constructor.
@@ -125,7 +128,8 @@ follows it; anything else is a syntax error:
   > none(s) = Snap(s with)
   > piped(s) = s |> Snap(s with cells: 1)
   > J
-  $ jacquard check syntax.jac 2>&1 | grep -E '^syntax|Cause'
+  $ jacquard check syntax.jac > pipe.out 2>&1 || echo "exit=$?"; grep -E '^syntax|Cause' < pipe.out
+  exit=1
   syntax.jac:2:20-24: error[E1220]: Surface syntax is invalid
     Cause: a `with` field update takes exactly one value before `with`: write `Ctor(value with label: expression, ...)`
   syntax.jac:3:34-35: error[E1220]: Surface syntax is invalid

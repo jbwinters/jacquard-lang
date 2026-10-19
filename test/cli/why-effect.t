@@ -33,7 +33,7 @@ deterministic and never claims execution provenance.
 Net and Secret both select fetch, while the exact released hash is equivalent
 to its blessed display name.
 
-  $ for effect in Net Secret; do jac why-effect "$effect" --source ../../corpus/governance/workspace-why-effect-direct.jqd --output-format json-v1 | grep -o '"operation":{"name":"workspace.fetch"' | wc -l | tr -d ' '; done
+  $ for effect in Net Secret; do jac why-effect "$effect" --source ../../corpus/governance/workspace-why-effect-direct.jqd --output-format json-v1 > pipe.out || echo "exit=$?"; grep -o '"operation":{"name":"workspace.fetch"' < pipe.out | wc -l | tr -d ' '; done
   3
   3
   $ jac why-effect 8ec13169c7181851364e55353232af8e3c7f5ee4a010fa3067fcf2058dd5ed84 --source ../../corpus/governance/workspace-why-effect-direct.jqd --output-format json-v1 > fs-hash.json
@@ -45,22 +45,22 @@ The source identity graph follows a GroupRef wrapper. Fully verified source
 with no matching application succeeds with a deterministic empty list; direct
 dry roots are also zero-chain.
 
-  $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-wrapper.jqd | sed -n '2p'
+  $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-wrapper.jqd > pipe.out || echo "exit=$?"; sed -n '2p' < pipe.out
   facade Workspace #d5831f495fdb26e05d53d886786f07230f7bb808ac4933ab32e0a9238c89f9d0 operations=workspace.read-file #632071e3399c913a672c4bea7d4a8b394e64a9a517552eb296db824222fe2da1,workspace.write-file #73140dde8e33c268fa589d9bfaeb28b156af2da52b22779257b2d3e9b696b03c,workspace.fetch #f6536683575508ddcc2d5a6509df832e92897cbef2caf34219f993a110079b01
-  $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-wrapper.jqd | grep '^chain ' | grep 'workspace-why-effect-wrapper' | grep 'workspace-why-effect-helper' >/dev/null
-  $ for source in workspace-check-zero-layer.jqd workspace-check-dry.jqd workspace-why-effect-dry-ambiguous.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 | grep -o '"chains":\[\]' | wc -l | tr -d ' '; done
+  $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-wrapper.jqd > pipe.out || echo "exit=$?"; grep '^chain ' < pipe.out | grep 'workspace-why-effect-wrapper' | grep 'workspace-why-effect-helper' >/dev/null
+  $ for source in workspace-check-zero-layer.jqd workspace-check-dry.jqd workspace-why-effect-dry-ambiguous.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 > pipe.out || echo "exit=$?"; grep -o '"chains":\[\]' < pipe.out | wc -l | tr -d ' '; done
   1
   1
   1
-  $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-forwarded.jqd | grep '^chain ' | grep -o 'layer=workspace[^ ]*\|live=workspace[^ ]*'
+  $ jac why-effect Fs --source ../../corpus/governance/workspace-why-effect-forwarded.jqd > pipe.out || echo "exit=$?"; grep '^chain ' < pipe.out | grep -o 'layer=workspace[^ ]*\|live=workspace[^ ]*'
   layer=workspace.forward-layer
   layer=workspace.forward-layer
   live=workspace.live-layer
-  $ for source in workspace-why-effect-unquote.jqd workspace-why-effect-direct-lambda.jqd workspace-why-effect-inert.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 | grep -o '"operation":{"name":"workspace.read-file"' | wc -l | tr -d ' '; done
+  $ for source in workspace-why-effect-unquote.jqd workspace-why-effect-direct-lambda.jqd workspace-why-effect-inert.jqd; do jac why-effect Fs --source ../../corpus/governance/$source --output-format json-v1 > pipe.out || echo "exit=$?"; grep -o '"operation":{"name":"workspace.read-file"' < pipe.out | wc -l | tr -d ' '; done
   3
   3
   0
-  $ for source in workspace-why-effect-ref-chain.jqd workspace-why-effect-scc.jqd; do jac why-effect Fs --source ../../corpus/governance/$source | grep '^chain ' | sed 's/ operation=.*//' | awk -F' -> ' '{ print NF }'; done
+  $ for source in workspace-why-effect-ref-chain.jqd workspace-why-effect-scc.jqd; do jac why-effect Fs --source ../../corpus/governance/$source > pipe.out || echo "exit=$?"; grep '^chain ' < pipe.out | sed 's/ operation=.*//' | awk -F' -> ' '{ print NF }'; done
   3
   3
 

@@ -13,7 +13,7 @@ apart a sealed value itself.
 Each library's suite passes, NaN and out-of-range probabilities included:
 
   $ for lib in prob nel req; do
-  >   jac project test --project "$A/$lib" --seed 42 --no-cache 2>&1 | tail -1
+  >   jac project test --project "$A/$lib" --seed 42 --no-cache > pipe.out 2>&1 || echo "exit=$?"; tail -1 < pipe.out
   > done
   6 passed, 0 failed, 0 skipped, 0 refused
   4 passed, 0 failed, 0 skipped, 0 refused
@@ -53,7 +53,8 @@ type (E1736), so the redacted line above is the only view a client gets:
 
   $ cp "$A/prob/project.jqd" prob.bak
   $ sed -i 's/(type prob-value)/(type prob-value) (con prob-value)/' "$A/prob/project.jqd"
-  $ jac project check --project "$A/prob" 2>&1 | grep -o 'error\[E1736\].*' | head -1
+  $ jac project check --project "$A/prob" > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1736\].*' < pipe.out | head -1
+  exit=1
   error[E1736]: A manifest exports a sealed constructor.
   $ cp prob.bak "$A/prob/project.jqd"
 
@@ -63,11 +64,13 @@ ReqInvalid reasons, which `req` does export, stay open to it:
 
   $ cp "$A/client/client.jac" client.bak
   $ echo 'client.forge() = ProbValue(2.0)' >> "$A/client/client.jac"
-  $ jac project check --project "$A/client" 2>&1 | grep -o 'error\[E1705\].*' | head -1
+  $ jac project check --project "$A/client" > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1705\].*' < pipe.out | head -1
+  exit=1
   error[E1705]: A name is not visible in this project.
   $ cp client.bak "$A/client/client.jac"
   $ echo 'client.peek(r) = match r { | ReqValid(name, _, _) -> name }' >> "$A/client/client.jac"
-  $ jac project check --project "$A/client" 2>&1 | grep -o 'error\[E1705\].*' | head -1
+  $ jac project check --project "$A/client" > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1705\].*' < pipe.out | head -1
+  exit=1
   error[E1705]: A name is not visible in this project.
   $ cp client.bak "$A/client/client.jac"
   $ echo 'client.why() = req.reason(BadEmail("x"))' >> "$A/client/client.jac"

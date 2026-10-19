@@ -35,7 +35,7 @@ observation, not consequence).
 
   $ printf 'fixture-content' > fixture.txt
   $ printf '(app (var read) (lit "fixture.txt"))\n' > reader.jqd
-  $ jacquard run reader.jqd --dry-run | head -1
+  $ jacquard run reader.jqd --dry-run > pipe.out || echo "exit=$?"; head -1 < pipe.out
   "fixture-content"
 
 A manifest that includes eval refuses --dry-run: eval'd code runs at root
@@ -68,7 +68,7 @@ the dry handlers (no world mutation).
   >       (clause (ptuple (pwild) (pvar log)) (var log))))
   >   (lam ((pwild)) (quote (log))))
   > JACQUARD
-  $ jacquard run mklog.jqd | sed -e 's/^(quote //' -e 's/)$//' > trace.jqd
+  $ jacquard run mklog.jqd > pipe.out || echo "exit=$?"; sed -e 's/^(quote //' -e 's/)$//' > trace.jqd < pipe.out
 
 A status-SENSITIVE program: it retries against a fallback host when step1
 fails. Straight replay reproduces the recorded world. A fork at op 1 sends the
@@ -101,13 +101,13 @@ Both futures of a binary counterfactual, tabulated (the M1 Choose demo as a
 debugger feature — one fork per answer; --to 1 sends everything past the fork
 to the live-dry world so the futures are distinguishable):
 
-  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 200 "up")' --to 1 | tail -1
+  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 200 "up")' --to 1 > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   "<live-after-log>"
-  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 503 "down")' --to 1 | tail -1
+  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 503 "down")' --to 1 > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   "<live-after-log>"
-  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 200 "up")' --to 1 --compare | grep op2
+  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 200 "up")' --to 1 --compare > pipe.out || echo "exit=$?"; grep op2 < pipe.out
     op2: identical request
-  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 503 "down")' --to 1 --compare | grep -c fallback
+  $ jacquard replay trace.jqd prog.jqd --fork '1=(response 503 "down")' --to 1 --compare > pipe.out || echo "exit=$?"; grep -c fallback < pipe.out
   1
 
 Scrubbing: --to N serves the log through op N, then the dry world takes over.
@@ -144,19 +144,20 @@ RESULT TYPES differ refuse before any probability is compared:
   >   (clause (pcon true) (lit 1))
   >   (clause (pcon false) (lit 3)))
   > JACQUARD
-  $ jacquard dist-diff coins-a.jqd coin-support.jqd --tolerance 0.001 2>/dev/null | sort
+  $ jacquard dist-diff coins-a.jqd coin-support.jqd --tolerance 0.001 2>/dev/null > pipe.out || echo "exit=$?"; sort < pipe.out
   support gained: 3
   support lost:   0
   support lost:   2
   $ printf '(match (app (var sample) (app (var bernoulli) (lit 0.5))) (clause (pcon true) (lit "yes")) (clause (pcon false) (lit "no")))\n' > texty.jqd
-  $ jacquard dist-diff coins-a.jqd texty.jqd 2>&1 | head -1
+  $ jacquard dist-diff coins-a.jqd texty.jqd > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
+  exit=1
   error[E0801]: Compared model result types do not agree
 
 Enumerations cache by content hash: the second identical diff is a full hit,
 and a sweep value equal to the reference REUSES its cache entry (content
 addressing, not bookkeeping).
 
-  $ jacquard dist-diff coins-a.jqd coins-b.jqd --tolerance 0.001 2>&1 >/dev/null | grep -c cached
+  $ jacquard dist-diff coins-a.jqd coins-b.jqd --tolerance 0.001 > /dev/null 2> pipe.out || echo "exit=$?"; grep -c cached < pipe.out
   2
   $ jacquard dist-diff coins-a.jqd coins-b.jqd --tolerance 0.001 --sweep prior=0.5,0.9 2>/dev/null
   -- sweep prior=0.5 --
@@ -185,7 +186,7 @@ ET.3: the writer verifies the currently published predecessor before appending,
 then prints the new head for independent publication. The offline review surface
 reconstructs that exact head from canonical AuditEntry bytes.
 
-  $ genesis=$(jacquard audit genesis | awk '{print $2}')
+  $ jacquard audit genesis > pipe.out || echo "exit=$?"; genesis=$(awk '{print $2}' < pipe.out)
   $ echo "$genesis"
   e30304e99930d8bf631a0b1f364b6d91f6dc798a14c7c0a554ff994ff14ab937
   $ jacquard audit append absent.audit missing-entry.jqd --previous "$genesis"
@@ -212,9 +213,9 @@ reconstructs that exact head from canonical AuditEntry bytes.
   $ cat > completed.jqd <<'ENTRY'
   > (audit-entry-v2 (completed-v2 (governance-v0) (lit 2) (hash #aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa) (lit "live") (governance-outcome-summary-v0 (governance-v0) (lit "succeeded") (hash #dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd) (lit "receipt-7"))))
   > ENTRY
-  $ head1=$(jacquard audit append chain.audit evaluated.jqd --previous "$genesis" | awk '{print $2}')
-  $ head2=$(jacquard audit append chain.audit consented.jqd --previous "$head1" | awk '{print $2}')
-  $ head3=$(jacquard audit append chain.audit completed.jqd --previous "$head2" | awk '{print $2}')
+  $ jacquard audit append chain.audit evaluated.jqd --previous "$genesis" > pipe.out || echo "exit=$?"; head1=$(awk '{print $2}' < pipe.out)
+  $ jacquard audit append chain.audit consented.jqd --previous "$head1" > pipe.out || echo "exit=$?"; head2=$(awk '{print $2}' < pipe.out)
+  $ jacquard audit append chain.audit completed.jqd --previous "$head2" > pipe.out || echo "exit=$?"; head3=$(awk '{print $2}' < pipe.out)
   $ printf '%s\n%s\n%s\n' "$head1" "$head2" "$head3"
   41c700d5824d94358009d9f8ac319cfb861ea0f94b4f4212871f55806fbaac26
   241f4d0d0c8bcdf104c25a51ab22398ddcb1dac9e1643794eeb4cebddf6cf50c

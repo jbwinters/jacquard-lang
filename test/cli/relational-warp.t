@@ -51,7 +51,7 @@ scripted rehearsal twin with the same elaborated row.
 VarySchedule owns its declared count; the ordinary Case schedule option does
 not form a second cross-product.
 
-  $ jacquard test relational-passing.jac --seed 73 --schedules 2 --no-cache | grep schedule-decl
+  $ jacquard test relational-passing.jac --seed 73 --schedules 2 --no-cache > pipe.out || echo "exit=$?"; grep schedule-decl < pipe.out
   PASS schedule-decl/schedule-free answer (same under schedule: 3 runs, seed 73)
 
 VaryValue sampling is reproducible from the suite seed. Exhaustive mode uses
@@ -71,16 +71,16 @@ Relational entries use the ordinary hermetic cache shape. The variation count
 and suite/leaf seeds are key material; --no-cache bypasses lookup and storage.
 
   $ rm -rf relational-cache
-  $ jacquard test relational-passing.jac --seed 73 --cache-dir relational-cache | tail -1
+  $ jacquard test relational-passing.jac --seed 73 --cache-dir relational-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 3 ran
-  $ jacquard test relational-passing.jac --seed 73 --cache-dir relational-cache | tail -1
+  $ jacquard test relational-passing.jac --seed 73 --cache-dir relational-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 3 hit, 0 ran
   $ sed 's/VarySchedule(3/VarySchedule(4/' relational-passing.jac > relational-count.jac
-  $ jacquard test relational-count.jac --seed 73 --cache-dir relational-cache | tail -1
+  $ jacquard test relational-count.jac --seed 73 --cache-dir relational-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 2 hit, 1 ran
-  $ jacquard test relational-passing.jac --seed 74 --cache-dir relational-cache | tail -1
+  $ jacquard test relational-passing.jac --seed 74 --cache-dir relational-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 3 ran
-  $ jacquard test relational-passing.jac --seed 73 --no-cache | tail -1
+  $ jacquard test relational-passing.jac --seed 73 --no-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   3 passed, 0 failed, 0 skipped, 0 refused
 
 Every variation pins a first RW.2 result divergence. The schedule fixture uses

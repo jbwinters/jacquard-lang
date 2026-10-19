@@ -107,11 +107,13 @@ validated Hash boundary.
   $ cat > opaque-hash-ref.jqd <<'EOF_JQD'
   > (ref #d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db con)
   > EOF_JQD
-  $ jacquard check opaque-hash-ref.jqd 2>&1 | sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/'
+  $ jacquard check opaque-hash-ref.jqd > pipe.out 2>&1 || echo "exit=$?"; sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/' < pipe.out
+  exit=1
   opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: A referenced declaration has the wrong kind or is unavailable
     Cause: E0601: The content store does not contain the requested hash. (unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db)
     Next step: Use an available declaration of the required kind.
-  $ jacquard build opaque-hash-ref.jqd -o opaque-native 2>&1 | sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/'
+  $ jacquard build opaque-hash-ref.jqd -o opaque-native > pipe.out 2>&1 || echo "exit=$?"; sed 's/opaque-hash-ref.jqd:[0-9]*:[0-9]*-[0-9]*/opaque-hash-ref.jqd:LINE:SPAN/' < pipe.out
+  exit=1
   opaque-hash-ref.jqd:LINE:SPAN: error[E0805]: A referenced declaration has the wrong kind or is unavailable
     Cause: E0601: The content store does not contain the requested hash. (unknown hash d48426af83dd64417666d11346b732136f39950871f9c4708e947515f9eda3db)
     Next step: Use an available declaration of the required kind.
@@ -438,7 +440,8 @@ reachable from the surface:
   >   (let nonrec (pwild) (app (var tick)) (lit 7)))))
   > (var poked)
   > EOF_JQD
-  $ jacquard build iso.jqd -o nope 2>&1 | tail -3
+  $ jacquard build iso.jqd -o nope > pipe.out 2>&1 || echo "exit=$?"; tail -3 < pipe.out
+  exit=1
   iso.jqd:2:11-3:49: error[E0815]: A top-level definition performs effects
     Cause: top-level definition `poked` performs the `ticker` effect while being defined
     Next step: Wrap the body in a lambda and perform the effect when called.

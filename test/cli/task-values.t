@@ -24,7 +24,8 @@ checker path.
   $ cat > private-task.jqd <<'EOF'
   > (ref #9b4eaa5e872fa3f768c71fc4cba4d3262a9ebf8a719f0cfb78f22fa9eade4310 con)
   > EOF
-  $ jacquard run private-task.jqd 2>&1 | sed 's/private-task.jqd:[0-9]*:[0-9]*-[0-9]*/private-task.jqd:LINE:SPAN/'
+  $ jacquard run private-task.jqd > pipe.out 2>&1 || echo "exit=$?"; sed 's/private-task.jqd:[0-9]*:[0-9]*-[0-9]*/private-task.jqd:LINE:SPAN/' < pipe.out
+  exit=1
   private-task.jqd:LINE:SPAN: error[E0907]: A scoped task or channel handle is invalid
     Cause: the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard code
     Next step: Use the trusted scheduler operation that creates this opaque scoped handle.
@@ -34,7 +35,8 @@ SC.14 applies the same sealed boundary to ChannelHandle.
   $ cat > private-channel.jqd <<'EOF'
   > (ref #dc7a12f5fc0476b674d52535e9895220edf41f2a017b1dd97fc078950a3dbb36 con)
   > EOF
-  $ jacquard run private-channel.jqd 2>&1 | sed 's/private-channel.jqd:[0-9]*:[0-9]*-[0-9]*/private-channel.jqd:LINE:SPAN/'
+  $ jacquard run private-channel.jqd > pipe.out 2>&1 || echo "exit=$?"; sed 's/private-channel.jqd:[0-9]*:[0-9]*-[0-9]*/private-channel.jqd:LINE:SPAN/' < pipe.out
+  exit=1
   private-channel.jqd:LINE:SPAN: error[E0907]: A scoped task or channel handle is invalid
     Cause: the opaque scoped-handle carrier is scheduler-private and cannot be constructed by Jacquard code
     Next step: Use the trusted scheduler operation that creates this opaque scoped handle.
@@ -66,7 +68,7 @@ runtime.
   $ cat > channel-open.jqd <<'EOF'
   > (app (var channel.open) (lit 0))
   > EOF
-  $ jacquard build channel-open.jqd -o channel-native 2>&1 | sed 's/channel-open.jqd:[0-9]*:[0-9]*-[0-9]*/channel-open.jqd:LINE:SPAN/'; echo "exit $?"
+  $ jacquard build channel-open.jqd -o channel-native > pipe.out 2>&1; status=$?; sed 's/channel-open.jqd:[0-9]*:[0-9]*-[0-9]*/channel-open.jqd:LINE:SPAN/' < pipe.out; echo "exit $status"
   native: compiled 1 unit(s)
   exit 0
   $ ./channel-native 2>&1; echo "exit $?"

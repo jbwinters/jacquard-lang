@@ -132,6 +132,7 @@ Startup configuration failures happen before any frame is written.
     Cause: store nowhere does not exist
     Next step: Pass the path to an existing Jacquard store.
   [1]
-  $ jacquard host worker 2>&1 | head -2
+  $ jacquard host worker > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  exit=124
   Usage: jacquard host worker [--help] [--diagnostic-format=FORMAT]
          [--fuel=UNITS] --store=DIR [OPTION]…

@@ -57,5 +57,5 @@ support points:
 
   $ awk '/^; --- demo driver ---$/ { exit } { print }' ../../demos/tooling/repair.jqd > repair-defs.jqd
   $ cat repair-defs.jqd ../../demos/tooling/repair-warp-tests.jqd > repair-suite.jqd
-  $ jac test repair-suite.jqd --exhaustive --no-cache | grep repair-prior-support
+  $ jac test repair-suite.jqd --exhaustive --no-cache > pipe.out || echo "exit=$?"; grep repair-prior-support < pipe.out
   PASS repair-prior-support/sampled patches stay one edit away (verified exhaustively (9 cases))

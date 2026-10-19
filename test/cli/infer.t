@@ -34,7 +34,8 @@ A different seed differs:
 
 The seed is required (decision D4):
 
-  $ jac infer lw ../../demos/inference/m3-two-coins.jac 2>&1 | grep -c 'required'
+  $ jac infer lw ../../demos/inference/m3-two-coins.jac > pipe.out 2>&1 || echo "exit=$?"; grep -c 'required' < pipe.out
+  exit=124
   1
 
 The bootstrap model remains an equivalent inference carrier.

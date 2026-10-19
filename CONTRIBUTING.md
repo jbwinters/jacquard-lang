@@ -51,6 +51,11 @@ milestones; release docs and current issues define active work. The spec
       and in CI.
 - [ ] New behavior has tests in the same PR; bug fixes add a regression test
       first.
+- [ ] A cram transcript records only a command line's last status, so never
+      pipe a `jacquard`/`jac` invocation or script into a filter. Write the
+      output to a file and pin the status, then excerpt:
+      `jacquard run x.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out`.
+      The `cram-status` law in `test/test_cram_status.ml` enforces this.
 - [ ] Public functions in touched modules have doc comments stating contract
       and failure modes.
 - [ ] No compiler warnings; `opam exec -- dune fmt` is clean and

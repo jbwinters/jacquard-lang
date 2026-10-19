@@ -37,11 +37,11 @@ probabilistic handler, then proves the safety property over all 18 worlds.
 Stormglass compares naive and resilient checkout policies under the exact same
 27-world service forecast. Pin the headline posteriors, then the Warp evidence.
 
-  $ jac run "$D/stormglass/model.jac" | head -2
+  $ jac run "$D/stormglass/model.jac" > pipe.out || echo "exit=$?"; head -2 < pipe.out
   cons(mk-pair("clear", 0.72675), cons(mk-pair("choppy", 0.17632), cons(mk-pair("blackout", 0.09693), nil)))
   cons(mk-pair("clear", 0.72675), cons(mk-pair("choppy", 0.25325), cons(mk-pair("blackout", 0.020000000000000004), nil)))
 
-  $ JACQUARD=jac sh "$D/stormglass/run.sh" | sed -n '/^== Warp/,$p'
+  $ JACQUARD=jac sh "$D/stormglass/run.sh" > pipe.out || echo "exit=$?"; sed -n '/^== Warp/,$p' < pipe.out
   == Warp: cases plus sampled properties ==
   PASS stormglass-suite/stormglass/sunny day is deterministic to the millisecond (2 checks)
   PASS stormglass-suite/stormglass/shipping outage: resilient ships anyway, naive gives up (2 checks)

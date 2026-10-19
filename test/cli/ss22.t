@@ -39,14 +39,16 @@ Static diagnostics reject the first non-Text argument on both source routes.
   $ cat > bad.jac <<'EOF'
   > text.join("ok", 1, "unreached")
   > EOF
-  $ jacquard run bad.jac 2>&1 | sed 's/bad.jac:[0-9]*:[0-9]*-[0-9]*/bad.jac:LINE:SPAN/'
+  $ jacquard run bad.jac > pipe.out 2>&1 || echo "exit=$?"; sed 's/bad.jac:[0-9]*:[0-9]*-[0-9]*/bad.jac:LINE:SPAN/' < pipe.out
+  exit=1
   bad.jac:LINE:SPAN: error[E0801]: Types do not agree
     Cause: variadic argument: expected text, got int (type mismatch)
     Next step: the expected side comes from the surrounding context; make both sides agree
   $ cat > bad.jqd <<'EOF'
   > (app (var text.join) (lit "ok") (lit 1) (lit "unreached"))
   > EOF
-  $ jacquard build bad.jqd -o bad-native 2>&1 | sed 's/bad.jqd:[0-9]*:[0-9]*-[0-9]*/bad.jqd:LINE:SPAN/'
+  $ jacquard build bad.jqd -o bad-native > pipe.out 2>&1 || echo "exit=$?"; sed 's/bad.jqd:[0-9]*:[0-9]*-[0-9]*/bad.jqd:LINE:SPAN/' < pipe.out
+  exit=1
   bad.jqd:LINE:SPAN: error[E0801]: Types do not agree
     Cause: variadic argument: expected text, got int (type mismatch)
     Next step: the expected side comes from the surrounding context; make both sides agree

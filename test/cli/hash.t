@@ -7,7 +7,7 @@ corpus goldens; here we check the shape and determinism.
   > (defterm ((binding one () (lit 1))))
   > (lit 2)
   > EOF
-  $ jacquard hash one.jqd | sed 's/[0-9a-f]\{64\}/HASH/'
+  $ jacquard hash one.jqd > pipe.out || echo "exit=$?"; sed 's/[0-9a-f]\{64\}/HASH/' < pipe.out
   0 HASH
   0:one HASH
   1 HASH

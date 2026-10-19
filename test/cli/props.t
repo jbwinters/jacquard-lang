@@ -112,14 +112,14 @@ Normal and exhaustive property proofs have separate cache keys; the pure unit
 case is shared, both reruns are full hits, and exhaustive property entries
 render explicitly as cached proofs.
 
-  $ jac test governance-policy-laws.jqd --seed 145 --cache-dir gm4-cache | tail -1
+  $ jac test governance-policy-laws.jqd --seed 145 --cache-dir gm4-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 10 ran
-  $ jac test governance-policy-laws.jqd --seed 145 --cache-dir gm4-cache | tail -1
+  $ jac test governance-policy-laws.jqd --seed 145 --cache-dir gm4-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 10 hit, 0 ran
-  $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache | tail -2
+  $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache > pipe.out || echo "exit=$?"; tail -2 < pipe.out
   10 passed, 0 failed, 0 skipped, 0 refused
   cache: 1 hit, 9 ran
-  $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache | grep 'cached proof' | wc -l
+  $ jac test governance-policy-laws.jqd --exhaustive --cache-dir gm4-cache > pipe.out || echo "exit=$?"; grep 'cached proof' < pipe.out | wc -l
   9
 
 Mutation evidence: invert only the first monotonic ordering operator in a
@@ -127,7 +127,8 @@ scratch copy.  Warp finds a concrete policy/risk counterexample, including the
 canonical policy hash; the committed fixture is never modified.
 
   $ sed '0,/(var int.lte?)/s//(var int.gte?)/' governance-policy-laws.jqd > gm4-risk-mutant.jqd
-  $ jac test gm4-risk-mutant.jqd --exhaustive --no-cache 2>&1 | grep -A2 '^FAIL gm4-risk-monotonicity'
+  $ jac test gm4-risk-mutant.jqd --exhaustive --no-cache > pipe.out 2>&1 || echo "exit=$?"; grep -A2 '^FAIL gm4-risk-monotonicity' < pipe.out
+  exit=1
   FAIL gm4-risk-monotonicity/risk monotonicity (prop: falsified exhaustively)
     - risk monotonicity: policy={auto=Low,ask=Low,min-confidence=0.0,hash=4495856b093db12ce1add61c7aa1a3ace0a69223f11f3dca17176a18bcbcbe6e}, lhs={risk=Low,confidence=0.0,verdict=Allow}, rhs={risk=Medium,confidence=0.0,verdict=Block}
   9 passed, 1 failed, 0 skipped, 0 refused
@@ -136,7 +137,8 @@ Independently invert the new minimum-confidence ordering.  Warp finds the
 boundary where the lower threshold allows and the higher threshold asks.
 
   $ sed '/(app (var int.lte?) (var loose-threshold-index)/s/int.lte?/int.gte?/' governance-policy-laws.jqd > gm4-confidence-mutant.jqd
-  $ jac test gm4-confidence-mutant.jqd --exhaustive --no-cache 2>&1 | grep -A1 '^FAIL gm4-confidence-threshold-tightening'
+  $ jac test gm4-confidence-mutant.jqd --exhaustive --no-cache > pipe.out 2>&1 || echo "exit=$?"; grep -A1 '^FAIL gm4-confidence-threshold-tightening' < pipe.out
+  exit=1
   FAIL gm4-confidence-threshold-tightening/confidence threshold tightening (prop: falsified exhaustively)
     - confidence threshold tightening: tight=policy={auto=Low,ask=High,min-confidence=0.0,hash=3c364878390289d3d83a5162d876945b9285139665b54098adf587d9855e329e},loose=policy={auto=Low,ask=High,min-confidence=0.25,hash=e6869e7318d2ffa8ef842c28b54f5185f195d4220c5a2d8cafac6c7086acf900},risk=Low,confidence=0.0,tight-verdict=Allow,loose-verdict=Ask
 
@@ -144,7 +146,8 @@ The doc's whole argument in one run: needle PASSES sampling (seed-lucky above)
 but exhaustive mode explores every support element and finds 777 — same Prop
 bytes, different handler.
 
-  $ jacquard test props.jqd --exhaustive --no-cache | grep needle
+  $ jacquard test props.jqd --exhaustive --no-cache > pipe.out || echo "exit=$?"; grep needle < pipe.out
+  exit=1
   FAIL needle/avoids 777 (prop: falsified exhaustively)
 
 Exceeding the branch budget is a clean catalogued refusal, never a partial
@@ -174,9 +177,9 @@ pass posing as a proof:
 An exhaustive PASS is a proof for that content hash: the cache entry renders
 distinctly and skips re-proving.
 
-  $ jacquard test small.jqd --exhaustive --cache-dir pc | grep coin-ok
+  $ jacquard test small.jqd --exhaustive --cache-dir pc > pipe.out || echo "exit=$?"; grep coin-ok < pipe.out
   PASS coin-ok/boolean coin (verified exhaustively (2 cases))
-  $ jacquard test small.jqd --exhaustive --cache-dir pc | grep coin-ok
+  $ jacquard test small.jqd --exhaustive --cache-dir pc > pipe.out || echo "exit=$?"; grep coin-ok < pipe.out
   PASS coin-ok/boolean coin (verified exhaustively (2 cases)) [cached proof]
 
 W6.9: two formulations of the same model agree pointwise at 1e-9 — the

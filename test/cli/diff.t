@@ -25,7 +25,7 @@ A literal edit localizes to the changed leaf and lists dependents:
   > EOF_JQD
   $ jacquard store add c lib2.jqd
   ok
-  $ jacquard diff a c | grep -E 'changed|lit'
+  $ jacquard diff a c > pipe.out || echo "exit=$?"; grep -E 'changed|lit' < pipe.out
   changed  pick
     at pick/defterm[0]/group[0]/binding[2]/lam[1]/match[1]/clause[1]/lit[0]:
 

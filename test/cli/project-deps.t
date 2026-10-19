@@ -33,21 +33,22 @@ Two libraries each keep a private `helper`; an application uses both.
 An unpinned dependency is refused until `project pin` records its context
 identity; `--dry-run` writes nothing:
 
-  $ jacquard project check 2>&1 | grep -A1 'E1711' | head -2
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1711' < pipe.out | head -2
+  exit=1
   error[E1711]: A dependency is unpinned.
     Cause: dependency app -> a is unpinned; run jacquard project pin
-  $ jacquard project pin --dry-run | hashes
+  $ jacquard project pin --dry-run > pipe.out || echo "exit=$?"; hashes < pipe.out
   a: unpinned -> HASH
   b: unpinned -> HASH
   $ grep -c '(pin' project.jqd
   0
   [1]
-  $ jacquard project pin | hashes
+  $ jacquard project pin > pipe.out || echo "exit=$?"; hashes < pipe.out
   a: unpinned -> HASH
   b: unpinned -> HASH
   $ grep -c '(pin' project.jqd
   1
-  $ jacquard project check | tail -2
+  $ jacquard project check > pipe.out || echo "exit=$?"; tail -2 < pipe.out
   library: 1 declarations checked
   entry demo (run): checked; requires nothing
   $ jacquard project run demo
@@ -57,14 +58,14 @@ The pin commits to semantics only: the dependency's name and metadata, and the
 order of the consumer's dependencies, change nothing:
 
   $ sed -i 's/(name "liba")/(name "renamed") (metadata (note "x"))/' ../liba/project.jqd
-  $ jacquard project pin --dry-run | hashes
+  $ jacquard project pin --dry-run > pipe.out || echo "exit=$?"; hashes < pipe.out
   a: HASH (unchanged)
   b: HASH (unchanged)
 
 A provider's interface covers its export projection: the abstract type's
 constructor is a hidden member, and the private helper is absent:
 
-  $ jacquard project interface --project ../liba | hashes | grep -v -e '^(prelude' -e '^$'
+  $ jacquard project interface --project ../liba > pipe.out || echo "exit=$?"; hashes < pipe.out | grep -v -e '^(prelude' -e '^$'
   context HASH
   (interface-v1
     (hash-algorithm "HASH_V0"))
@@ -87,20 +88,26 @@ constructor is a hidden member, and the private helper is absent:
 Private names, private hashes, and both inside eval payloads are refused, as is
 the constructor of an abstract exported type:
 
-  $ echo 'liba.helper(1, by: 2)' > demo.jac && jacquard project run demo 2>&1 | grep -A1 'error' | head -2
+  $ echo 'liba.helper(1, by: 2)' > demo.jac; jacquard project run demo > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out | head -2
+  exit=1
   $TESTCASE_ROOT/work/app/demo.jac:1:1-12: error[E1705]: A name is not visible in this project.
     Cause: `liba.helper` is private to project `liba`
-  $ echo 'libb.helper(1)' > demo.jac && jacquard project run demo 2>&1 | grep -o 'error\[E1705\]'
+  $ echo 'libb.helper(1)' > demo.jac; jacquard project run demo > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1705\]' < pipe.out
+  exit=1
   error[E1705]
-  $ H=$(jacquard hash ../liba/a.jac | grep ':liba.helper ' | cut -d' ' -f2)
-  $ printf '#%s:term(1, 2)\n' "$H" > demo.jac && jacquard project run demo 2>&1 | grep -A1 'error' | hashes
+  $ jacquard hash ../liba/a.jac > pipe.out || echo "exit=$?"; H=$(grep ':liba.helper ' < pipe.out | cut -d' ' -f2)
+  $ printf '#%s:term(1, 2)\n' "$H" > demo.jac; jacquard project run demo > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out | hashes
+  exit=1
   $TESTCASE_ROOT/work/app/demo.jac:1:1-77: error[E1709]: An explicit identity is not visible in this project.
     Cause: hash HASH is not visible in project `app`: it belongs to project `liba`, which does not export it to this project
-  $ echo '`op:eval-code`(quote { liba.helper(1, 2) })' > demo.jac && jacquard project run demo --allow eval 2>&1 | grep -o 'E1705'
+  $ echo '`op:eval-code`(quote { liba.helper(1, 2) })' > demo.jac; jacquard project run demo --allow eval > pipe.out 2>&1 || echo "exit=$?"; grep -o 'E1705' < pipe.out
+  exit=2
   E1705
-  $ printf '`op:eval-code`(quote { #%s:term(1, 2) })\n' "$H" > demo.jac && jacquard project run demo --allow eval 2>&1 | grep -o 'E1709'
+  $ printf '`op:eval-code`(quote { #%s:term(1, 2) })\n' "$H" > demo.jac; jacquard project run demo --allow eval > pipe.out 2>&1 || echo "exit=$?"; grep -o 'E1709' < pipe.out
+  exit=2
   E1709
-  $ echo 'LibaBox(1)' > demo.jac && jacquard project run demo 2>&1 | grep -A1 'error'
+  $ echo 'LibaBox(1)' > demo.jac; jacquard project run demo > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error' < pipe.out
+  exit=1
   $TESTCASE_ROOT/work/app/demo.jac:1:1-8: error[E1705]: A name is not visible in this project.
     Cause: `liba-box` is private to project `liba`
   $ echo 'app.go(1)' > demo.jac
@@ -110,11 +117,13 @@ identity); a private label edit changes only the companions:
 
   $ cp ../liba/a.jac a.bak
   $ sed -i 's/by: 100/by: 200/' ../liba/a.jac
-  $ jacquard project check 2>&1 | grep -A1 'E1710' | hashes
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1710' < pipe.out | hashes
+  exit=1
   error[E1710]: A dependency's pin does not match its context identity.
     Cause: dependency app -> a is pinned to HASH but its context identity is HASH (changed: interface; breaking   term liba.shout: identity HASH -> HASH)
   $ cp a.bak ../liba/a.jac && sed -i 's/by: amount/plus: amount/; s/by: 100/plus: 100/' ../liba/a.jac
-  $ jacquard project check 2>&1 | grep -A1 'E1710' | hashes
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1710' < pipe.out | hashes
+  exit=1
   error[E1710]: A dependency's pin does not match its context identity.
     Cause: dependency app -> a is pinned to HASH but its context identity is HASH (changed: companions; interface unchanged)
   $ cp a.bak ../liba/a.jac && jacquard project check > /dev/null && echo clean
@@ -129,13 +138,15 @@ A dependency's own pins are verified transitively and cannot be overridden:
   $ echo 'libc.big(x) = liba.shout(x)' > ../libc/c.jac
   $ (cd ../libc && jacquard project pin > /dev/null)
   $ sed -i 's|(dep (as b) (path "../libb")|(dep (as c) (path "../libc")) (dep (as b) (path "../libb")|' project.jqd
-  $ jacquard project pin --dep c | hashes
+  $ jacquard project pin --dep c > pipe.out || echo "exit=$?"; hashes < pipe.out
   c: unpinned -> HASH
   $ sed -i 's/by: 100/by: 300/' ../liba/a.jac
-  $ jacquard project check 2>&1 | grep -o 'error\[E17..\].*' | sort -u
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E17..\].*' < pipe.out | sort -u
+  exit=1
   error[E1710]: A dependency's pin does not match its context identity.
   error[E1712]: A transitive dependency's pin does not match its context identity.
-  $ jacquard project check 2>&1 | grep 'app -> c -> a' | cut -c1-40
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep 'app -> c -> a' < pipe.out | cut -c1-40
+  exit=1
     Cause: dependency app -> c -> a is pin
   $ cp a.bak ../liba/a.jac
 
@@ -144,7 +155,8 @@ of a dependency:
 
   $ mkdir ../app2 && echo 'liba.shout(1)' > ../app2/demo.jac
   $ printf '(project-v1 (name "app2") (requires (core "0.2")) (namespace app2) (deps (dep (as c) (path "../libc"))) (entries (run demo (units "demo.jac"))))' > ../app2/project.jqd
-  $ (cd ../app2 && jacquard project pin > /dev/null && jacquard project run demo 2>&1 | grep -A1 error)
+  $ (cd ../app2 && jacquard project pin > /dev/null && jacquard project run demo 2>&1) > pipe.out || echo "exit=$?"; grep -A1 error < pipe.out
+  exit=1
   $TESTCASE_ROOT/work/app2/demo.jac:1:1-11: error[E1705]: A name is not visible in this project.
     Cause: `liba.shout` belongs to project `liba`, which `app2` does not depend on directly
   $ echo 'app.go(1)' > demo.jac
@@ -152,7 +164,8 @@ of a dependency:
 Export selectors name the project's own definitions:
 
   $ sed -i 's/(term libb.twice)/(term libb.twice) (term libb.nothing)/' ../libb/project.jqd
-  $ jacquard project check 2>&1 | grep -A1 'E1717'
+  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1717' < pipe.out
+  exit=1
   error[E1717]: An export selector names nothing the project defines.
     Cause: project `libb` exports (term libb.nothing), which its own units do not define
   $ sed -i 's/ (term libb.nothing)//' ../libb/project.jqd
@@ -163,7 +176,8 @@ namespace but not from collisions:
   $ cp ../libb/b.jac b.bak && cp ../libb/project.jqd bm.bak
   $ echo 'type LibbBox = | LibaBox(size: Int)' >> ../libb/b.jac
   $ sed -i 's/(term libb.twice)/(term libb.twice) (type libb-box) (con liba-box)/; s/(type liba-box)/(type liba-box) (con liba-box)/' ../libb/project.jqd ../liba/project.jqd
-  $ jacquard project pin > /dev/null 2>&1; jacquard project check 2>&1 | grep -A1 'E1731' | hashes
+  $ jacquard project pin > /dev/null 2>&1; jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1731' < pipe.out | hashes
+  exit=1
   error[E1731]: Two visible constructors share a name.
     Cause: constructor `liba-box` of type `liba-box` of project `liba` and constructor `liba-box` of type `libb-box` of project `libb` are both visible in project `app`
   $ cp b.bak ../libb/b.jac && cp bm.bak ../libb/project.jqd && sed -i 's/(type liba-box) (con liba-box)/(type liba-box)/' ../liba/project.jqd
@@ -174,20 +188,24 @@ and one namespace at two context identities:
   $ mkdir -p ../g/x ../g/y && cd ../g
   $ printf '(project-v1 (name "x") (requires (core "0.2")) (namespace x) (deps (dep (as y) (path "../y") (pin #%s))))' $(printf '0%.0s' $(seq 64)) > x/project.jqd
   $ printf '(project-v1 (name "y") (requires (core "0.2")) (namespace y) (deps (dep (as x) (path "../x") (pin #%s))))' $(printf '0%.0s' $(seq 64)) > y/project.jqd
-  $ jacquard project check --project x 2>&1 | grep -A1 'E1713'
+  $ jacquard project check --project x > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1713' < pipe.out
+  exit=1
   error[E1713]: The project graph has a dependency cycle.
     Cause: dependency cycle: x -> y -> x
   $ sed -i 's/(namespace y)/(namespace x-y)/; s/ (deps.*))$/)/' y/project.jqd
-  $ jacquard project check --project x 2>&1 | grep -A1 'E1707'
+  $ jacquard project check --project x > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1707' < pipe.out
+  exit=1
   error[E1707]: Two projects' namespaces overlap.
     Cause: namespace `x` is a boundary-prefix of namespace `x-y` in one project graph
   $ sed -i 's/ (namespace x-y)//' y/project.jqd
-  $ jacquard project check --project x 2>&1 | grep -A1 'E1708' | sed 's|(.*project.jqd)|(PATH)|'
+  $ jacquard project check --project x > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1708' < pipe.out | sed 's|(.*project.jqd)|(PATH)|'
+  exit=1
   error[E1708]: A depended-on project has no namespace.
     Cause: dependency x -> y (PATH) declares no namespace; a project that others depend on must declare one
   $ cd ../app && cp -r ../liba ../liba2 && sed -i 's/by: 100/by: 7/' ../liba2/a.jac
   $ sed -i 's|(dep (as b) (path "../libb")|(dep (as a2) (path "../liba2")) (dep (as b) (path "../libb")|' project.jqd
-  $ jacquard project pin 2>&1 | grep -A1 'E1714' | sed -E 's/[^ ]*work/W/g; s/[0-9a-f]{64}/HASH/g'
+  $ jacquard project pin > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1714' < pipe.out | sed -E 's/[^ ]*work/W/g; s/[0-9a-f]{64}/HASH/g'
+  exit=1
   error[E1714]: One namespace appears at two context identities.
     Cause: namespace `liba` appears at two context identities: W/liba (HASH) and W/liba2 (HASH)
 
@@ -200,6 +218,7 @@ one identical body with different labels conflict when composed together:
   $ printf '(project-v1 (name "l2") (requires (core "0.2")) (namespace l2) (units "f.jac") (exports (term l2.f)))' > ../l2/project.jqd
   $ echo 'l2.f(x, plus: amount) = int.add(x, amount)' > ../l2/f.jac
   $ printf '(project-v1 (name "both") (requires (core "0.2")) (deps (dep (as a) (path "../l1")) (dep (as b) (path "../l2"))))' > ../both/project.jqd
-  $ jacquard project pin --project ../both 2>&1 | grep -A1 'E1719' | hashes | cut -c1-70
+  $ jacquard project pin --project ../both > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1719' < pipe.out | hashes | cut -c1-70
+  exit=1
   error[E1719]: A call-ABI companion conflicts across the project graph.
     Cause: project `l2` conflicts with the graph: callable HASH is alrea

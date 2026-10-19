@@ -87,7 +87,7 @@ Record/replay captures the scripted fetch; strict replay can render drift.
   >       (clause (ptuple (pvar result) (pvar log)) (var log))))
   >   (lam ((pwild)) (quote (log))))
   > JACQUARD
-  $ jacquard run mklog.jqd | sed -e 's/^(quote //' -e 's/)$//' > trace.jqd
+  $ jacquard run mklog.jqd > pipe.out || echo "exit=$?"; sed -e 's/^(quote //' -e 's/)$//' > trace.jqd < pipe.out
   $ cat > replay-prog.jqd <<'JACQUARD'
   > (match (app (var fetch) (app (var mk-request) (lit "http://registry/publish") (lit "cfg")))
   >   (clause (pcon mk-response (pwild) (pvar receipt)) (var receipt)))
@@ -132,7 +132,7 @@ refuses it, and semantic diff localizes the escalation.
   $ for f in "$JACQUARD_PRELUDE"/*.jqd; do jacquard store add escalated "$f" >/dev/null; done
   $ jacquard store add escalated workflow-escalated.jqd
   ok
-  $ jacquard diff approved escalated | grep -E 'changed|receipt.txt'
+  $ jacquard diff approved escalated > pipe.out || echo "exit=$?"; grep -E 'changed|receipt.txt' < pipe.out
   changed  escrow.workflow
       - (app (ref #543ff548b2d3f4fd32f78e8634a32d4d6217ad569816b8da33cac31686d9a43a op) (lit "receipt.txt") (var receipt))
       + (app (ref #543ff548b2d3f4fd32f78e8634a32d4d6217ad569816b8da33cac31686d9a43a op) (lit "receipt.txt") (var receipt))
@@ -144,5 +144,5 @@ Approval is by exact member hash; a semantic edit invalidates it.
   $ awk '/0:escrow.workflow/ {print "workflow-hash:", $2}' workflow.hash
   workflow-hash: 885689aad7921df4a5f3fb2eeda074792e09d1b20a189605987ab0e8898409cd
   $ sed 's/(lit "receipt.txt")/(lit "receipt-v2.txt")/' workflow.jqd > workflow-changed.jqd
-  $ jacquard hash workflow-changed.jqd | awk '/0:escrow.workflow/ {print "changed-hash:", $2}'
+  $ jacquard hash workflow-changed.jqd > pipe.out || echo "exit=$?"; awk '/0:escrow.workflow/ {print "changed-hash:", $2}' < pipe.out
   changed-hash: 9a3a94589e7f1e658f02e2aac2aceca65c66f756c7358d9898abd537b0075dfe

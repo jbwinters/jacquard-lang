@@ -11,7 +11,7 @@ checkout.
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude
   $ export JACQUARD_RUNTIME=$PWD/../../runtime
-  $ (cd /tmp && jacquard --version | cut -d' ' -f1)
+  $ (cd /tmp && jacquard --version) > pipe.out || echo "exit=$?"; cut -d' ' -f1 < pipe.out
   0.3.0
   $ mkdir demos && cp -RL ../../demos/applications ../../demos/lib demos/ && chmod -R u+w demos
   $ P=$PWD/demos/applications/rota-optimizer
@@ -25,7 +25,7 @@ Task 2, from an unrelated directory:
 
 Task 3:
 
-  $ jacquard project test --project "$P" --seed 42 --no-cache | tail -1
+  $ jacquard project test --project "$P" --seed 42 --no-cache > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   17 passed, 0 failed, 0 skipped, 0 refused
 
 Task 4:
@@ -42,11 +42,12 @@ diagnostic says:
 
   $ cp "$P/fixtures.jac" fixtures.good
   $ sed -i 's/text.concat(rota.day-name(day), /text.concat(day, /' "$P/fixtures.jac"
-  $ jacquard project check --project "$P" 2>&1 | grep -o 'fixtures.jac:[0-9]*:[0-9-]*: error\[E0801\].*\|Cause: .*' | head -2
+  $ jacquard project check --project "$P" > pipe.out 2>&1 || echo "exit=$?"; grep -o 'fixtures.jac:[0-9]*:[0-9-]*: error\[E0801\].*\|Cause: .*' < pipe.out | head -2
+  exit=1
   fixtures.jac:26:30-33: error[E0801]: Types do not agree
   Cause: argument: expected text, got int (type mismatch)
   $ cp fixtures.good "$P/fixtures.jac"
-  $ jacquard project check --project "$P" | tail -5
+  $ jacquard project check --project "$P" > pipe.out || echo "exit=$?"; tail -5 < pipe.out
   library: 107 declarations checked
   entry demo (run): checked; requires console
   entry interactive (run): checked; requires console

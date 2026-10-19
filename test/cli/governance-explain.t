@@ -45,7 +45,7 @@ classification; it deliberately contains no simulator or provenance guesses.
 Denied and escalated Decisions do not acquire a driver by inference. This
 canonical denied package therefore renders the non-action state explicitly.
 
-  $ jac governance explain "$proposal" --bundle governance-explain-denied-v1.jqd | grep -E '^(decision-kind|attempt-state|attempt-id|driver |receipt-id)'
+  $ jac governance explain "$proposal" --bundle governance-explain-denied-v1.jqd > pipe.out || echo "exit=$?"; grep -E '^(decision-kind|attempt-state|attempt-id|driver |receipt-id)' < pipe.out
   decision-kind denied
   attempt-state not-attempted
   attempt-id not-attempted
