@@ -81,8 +81,8 @@ the report's witness blocks byte for byte.
   $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --case 11 -o case11.txt > case11.out; echo "exit=$?"
   exit=1
   $ sed -n 4,5p case11.out
-  Status exhaustive-complete, on the one selected case.
-    1 run: 0 agree, 1 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  Status exhaustive-incomplete, case 11 alone of the 16 declared cases.
+    1 run: 0 agree, 1 differ, 0 inconclusive, 0 failed in both, 15 unrun.
   $ sed -n '/^old bytes/,$p' report.txt | sed -n '/^old bytes/,/^case /p' | sed '$d' > witness.blocks
   $ sed -n '/^old bytes/,$p' case11.txt | sed -n '/^old bytes/,/^case /p' | sed '$d' > replay.blocks
   $ cmp witness.blocks replay.blocks && echo replayed
@@ -133,14 +133,14 @@ difference can be missed, and agreement is only "in N sampled cases".
     16 run: 13 agree, 3 differ, 0 inconclusive, 0 failed in both, 0 unrun.
     when arg0 = low and count-up = 1
   $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priorities --domain availabilities --sample 5 --seed 7; echo "exit=$?"
-  error[E1015]: A behavior review's sampling options are invalid
+  error[E1015]: A behavior review's run options are invalid
     Cause: --sample needs every domain to be a Distribution
-    Next step: Pass --sample N with --seed S, sample only Distribution domains, keep N within --max-cases.
+    Next step: Pass --sample N with --seed S over Distribution domains, keep N within --max-cases, and give positive --max-cases and --fuel.
   exit=3
   $ jacquard review run --old old.jac --new new.jac --cases cases.jac --entry assign --domain priority-model --domain availability-model --sample 5; echo "exit=$?"
-  error[E1015]: A behavior review's sampling options are invalid
+  error[E1015]: A behavior review's run options are invalid
     Cause: --sample and --seed must be given together
-    Next step: Pass --sample N with --seed S, sample only Distribution domains, keep N within --max-cases.
+    Next step: Pass --sample N with --seed S over Distribution domains, keep N within --max-cases, and give positive --max-cases and --fuel.
   exit=3
 
 Entry contracts: a reordered signature is refused unless a named adapter with
@@ -237,3 +237,65 @@ versions, a cases file that redeclares a version name, and a pinned policy.
   $ head -2 pinned.out
   error[E1014]: The observation policy cannot apply to both versions
     Cause: the policy is pinned to an interface; a review compares two versions, whose manifests differ
+
+Fields are evaluated before any case runs, so a field that is not total refuses
+the review with nothing run; budgets must be positive; an operation is modeled
+once; and the `review-driver-` prefix is reserved for the generated driver.
+
+  $ printf 'probe = limits\nspin(x) = spin(x)\n' > spin-cases.jac
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases spin-cases.jac --entry scale --domain probe --field spin --fuel 5000 > spin.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 spin.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: field `spin` failed: error[E0919]: Computation fuel was exhausted
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases scale-cases.jac --entry scale --domain probe --max-cases 0 > zero.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 zero.out
+  error[E1015]: A behavior review's run options are invalid
+    Cause: --max-cases must be positive, got 0
+  $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes --handle notify=ack --handle notify=ack > twice.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 twice.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: --handle models `notify` more than once
+  $ printf 'review-driver-own = 1\n' >> scale-old.jac
+  $ jacquard review run --old scale-old.jac --new scale-new.jac --cases scale-cases.jac --entry scale --domain probe > reserved.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 reserved.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the old version declares `review-driver-own`; the `review-driver-` prefix is reserved for the review
+
+A version's own operation is modeled even when the prelude has one of the same
+name, and preparation problems are refusals, never crashes: a value too large
+for the fuel allowance, a uniform range too large to enumerate, and two
+distributions whose merged supports agree but whose values differ.
+
+  $ sed 's/notify/emit/g' notify-old.jac > emit-old.jac
+  $ sed 's/notify/emit/g' notify-new.jac > emit-new.jac
+  $ printf 'sizes = [1, 2]\nack(t) = ()\n' > emit-cases.jac
+  $ jacquard review run --old emit-old.jac --new emit-new.jac --cases emit-cases.jac --entry route --domain sizes --handle emit=ack > emit.out; echo "exit=$?"
+  exit=1
+  $ sed -n 5p emit.out
+    2 run: 0 agree, 2 differ, 0 inconclusive, 0 failed in both, 0 unrun.
+  $ printf 'texts = ["%s"]\n' "$(head -c 4000 /dev/zero | tr '\0' a)" > big-cases.jac
+  $ printf 'echo : (Text) ->{} Text\necho(t) = t\n' > echo.jac
+  $ jacquard review run --old echo.jac --new echo.jac --cases big-cases.jac --entry echo --domain texts --fuel 50 > big.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 big.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: domain `texts` contains a value too large to render within the fuel allowance (E0919)
+  $ printf 'wide = UniformInt(0, 4611686018427387903)\n' > wide-cases.jac
+  $ printf 'same : (Int) ->{} Int\nsame(n) = n\n' > same.jac
+  $ jacquard review run --old same.jac --new same.jac --cases wide-cases.jac --entry same --domain wide > wide.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 wide.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: domain `wide`: a uniform range above 10,000 values cannot be enumerated
+  $ printf 'ones = version-ones\n' > ones-cases.jac
+  $ printf 'same : (Int) ->{} Int\nsame(n) = n\nversion-ones = Categorical([MkPair(1, 0.5), MkPair(1, 0.5)])\n' > ones-old.jac
+  $ printf 'same : (Int) ->{} Int\nsame(n) = n\nversion-ones = Categorical([MkPair(1, 1.0)])\n' > ones-new.jac
+  $ jacquard review run --old ones-old.jac --new ones-new.jac --cases ones-cases.jac --entry same --domain ones > ones.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 ones.out
+  error[E1013]: The two versions' review domains differ
+    Cause: the two versions' domain values differ

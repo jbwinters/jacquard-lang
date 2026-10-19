@@ -222,7 +222,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1012 | a review domain is not a finite List or Distribution of its parameter's type, is empty, has invalid weights or unsupported values, a field or handler is impure or fails, or the case needs an operation no `--handle` models | `--domain sizes` where the entry performs `notify` without `--handle notify=ack` |
 | E1013 | the two versions' review domains are not equal | a domain names a version term whose values changed |
 | E1014 | the observation policy cannot apply to both versions: it is pinned to an interface, or lists an operation one version lacks | `--policy` with `interface=<hash>` |
-| E1015 | `--sample` without `--seed` (or the reverse), sampling a List domain, or a sample count outside 1..`--max-cases` | `--sample 5` alone |
+| E1015 | `--sample` without `--seed` (or the reverse), sampling a List domain, a sample count outside 1..`--max-cases`, or a non-positive `--max-cases` or `--fuel` | `--sample 5` alone |
 
 ## Native compilation (E11xx)
 

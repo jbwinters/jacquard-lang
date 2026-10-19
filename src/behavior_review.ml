@@ -11,7 +11,7 @@ let summary = function
   | "E1012" -> "A behavior review's domain, field or world is invalid"
   | "E1013" -> "The two versions' review domains differ"
   | "E1014" -> "The observation policy cannot apply to both versions"
-  | "E1015" -> "A behavior review's sampling options are invalid"
+  | "E1015" -> "A behavior review's run options are invalid"
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown behavior review code " ^ code))
 
 let next_step = function
@@ -25,7 +25,8 @@ let next_step = function
   | "E1013" -> "Declare the same domain values in both versions, over unchanged types."
   | "E1014" -> "List only operations both versions declare, and do not pin an interface."
   | "E1015" ->
-      "Pass --sample N with --seed S, sample only Distribution domains, keep N within --max-cases."
+      "Pass --sample N with --seed S over Distribution domains, keep N within --max-cases, and \
+       give positive --max-cases and --fuel."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown behavior review code " ^ code))
 
 let diagnostic ~code cause =
@@ -74,7 +75,7 @@ let letters index =
   in
   go index ""
 
-let param index = "x-" ^ letters index
+let param index = driver_prefix ^ "x-" ^ letters index
 
 type operation_info = { op_name : string; arity : int }
 
@@ -92,9 +93,11 @@ let generate_driver options side ~kinds ~operations =
   (match options.wrap with
   | Some wrap -> add "%scase(%s) = %s(fn () -> %s(%s))\n" driver_prefix args wrap target args
   | None -> add "%scase(%s) = %s(%s)\n" driver_prefix args target args);
-  add "%slist-elem(xs, x) = match xs { | Nil -> x | Cons(y, _) -> y }\n" driver_prefix;
-  add "%sdist-elem(d, x) = match d { | Categorical(Cons(MkPair(y, _), _)) -> y | _ -> x }\n"
-    driver_prefix;
+  let l = driver_prefix in
+  add "%slist-elem(%sxs, %sx) = match %sxs { | Nil -> %sx | Cons(%sy, _) -> %sy }\n" l l l l l l l;
+  add
+    "%sdist-elem(%sd, %sx) = match %sd { | Categorical(Cons(MkPair(%sy, _), _)) -> %sy | _ -> %sx }\n"
+    l l l l l l l;
   let typing body =
     let lets =
       List.mapi
@@ -109,14 +112,19 @@ let generate_driver options side ~kinds ~operations =
   (* the static world: the case under a handler for exactly the modeled operations; its row must
      be empty, so the entry needs no effect the review does not model *)
   (match operations with
-  | [] -> add "%sworld(thunk) = thunk()\n" driver_prefix
+  | [] -> add "%sworld(%sthunk) = %sthunk()\n" driver_prefix driver_prefix driver_prefix
   | ops ->
-      add "%sworld(thunk) =\n  handle thunk() {\n    | return v -> v\n" driver_prefix;
+      let l = driver_prefix in
+      add "%sworld(%sthunk) =\n  handle %sthunk() {\n    | return %sv -> %sv\n" l l l l l;
       List.iteri
         (fun i ({ op_name; arity }, (_, term)) ->
-          let ps = List.init arity (fun j -> Printf.sprintf "p-%s-%s" (letters i) (letters j)) in
+          let ps =
+            List.init arity (fun j ->
+                Printf.sprintf "%sp-%s-%s" driver_prefix (letters i) (letters j))
+          in
           let ps = String.concat ", " ps in
-          add "    | %s(%s) resume k -> k(%s(%s))\n" op_name ps term ps)
+          add "    | %s(%s) resume %sk -> %sk(%s(%s))\n" op_name ps driver_prefix driver_prefix term
+            ps)
         (List.combine ops options.handles);
       add "  }\n");
   add "%styping%s" driver_prefix
@@ -207,10 +215,15 @@ let operation_arity checker op =
       | _ -> None)
   | Error _ -> None
 
-let lookup_operation store name =
-  match Prelude_identity.lookup_kind store name Resolve.KOp with
-  | Some { Resolve.hash; _ } -> Some hash
-  | None -> None
+(* an operation name resolves as the version's source does: its own declaration first, then the
+   prelude *)
+let lookup_operation version name =
+  match Interface.find (Frontend.Checked.interface version.artifact) name Resolve.KOp with
+  | Some export -> Some export.Interface.hash
+  | None -> (
+      match Prelude_identity.lookup_kind version.store name Resolve.KOp with
+      | Some { Resolve.hash; _ } -> Some hash
+      | None -> None)
 
 (* --- entry contract --- *)
 
@@ -247,6 +260,14 @@ let prepare_version options side =
   in
   let version_tops = Frontend.Checked.tops alone.artifact in
   let version_names = List.concat_map introduced version_tops in
+  let* () =
+    match List.find_opt (String.starts_with ~prefix:driver_prefix) version_names with
+    | Some name ->
+        refuse ~code:"E1010"
+          "the %s version declares `%s`; the `%s` prefix is reserved for the review"
+          (side_name side) name driver_prefix
+    | None -> Ok ()
+  in
   let assembled = source ^ "\n" ^ options.cases_source in
   let assembled_file = file ^ "+" ^ Filename.basename options.cases_file in
   let* with_cases =
@@ -295,7 +316,7 @@ let prepare_version options side =
     List.fold_right
       (fun (op_name, term) acc ->
         let* acc = acc in
-        match lookup_operation with_cases.store op_name with
+        match lookup_operation with_cases op_name with
         | None -> refuse ~code:"E1012" "--handle names `%s`, which is not an operation" op_name
         | Some op -> (
             let* term_h = term_hash side with_cases term in
@@ -370,10 +391,18 @@ let rec unsupported_kind = function
   | Observation.Opaque kind -> Some kind
 
 let data_of value =
-  let observed = Observation.of_value value in
-  match unsupported_kind observed with
-  | Some kind -> Error kind
-  | None -> Ok (observed, Observation_transcript.render_data observed)
+  match
+    let observed = Observation.of_value value in
+    match unsupported_kind observed with
+    | Some kind -> Error (`Unsupported kind)
+    | None -> Ok (observed, Observation_transcript.render_data observed)
+  with
+  | result -> result
+  | exception Fuel_meter.Exceeded -> Error `Exhausted
+
+let describe_data_error = function
+  | `Unsupported kind -> Printf.sprintf "an unsupported %s value" kind
+  | `Exhausted -> "a value too large to render within the fuel allowance (E0919)"
 
 type element = {
   value : Value.t;
@@ -406,6 +435,8 @@ let domain_elements ctx kind name value =
     | Distribution_domain -> (
         match Infer_dist.dist_of_value ctx value with
         | Error error -> Error (runtime_cause error)
+        | Ok (Infer_dist.UniformInt (lo, hi)) when hi >= lo && (hi - lo < 0 || hi - lo >= 10_000) ->
+            Error "a uniform range above 10,000 values cannot be enumerated"
         | Ok d -> (
             match Infer_dist.support ctx d with
             | Error error -> Error (runtime_cause error)
@@ -428,8 +459,8 @@ let domain_elements ctx kind name value =
         | [] -> Ok (List.rev acc)
         | (value, weight) :: rest -> (
             match data_of value with
-            | Error kind ->
-                refuse ~code:"E1012" "domain `%s` contains an unsupported %s value" name kind
+            | Error error ->
+                refuse ~code:"E1012" "domain `%s` contains %s" name (describe_data_error error)
             | Ok (observed, data) -> render ({ value; observed; data; weight } :: acc) rest)
       in
       let* rendered = render [] raw in
@@ -449,8 +480,11 @@ type prepared = {
   field_fns : Value.t list;
   handler_fns : (Hash.t * Value.t) list;
   domain_values : element list list;
+  domain_renderings : string list;  (** each domain value's own data-v1 rendering *)
   contract : string * string * Hash.t;
   entry_hash : Hash.t;
+  named_entry : Hash.t option;
+      (** the version's own [--entry] term, also when an adapter stands in *)
   domain_hashes : Hash.t list;
   field_hashes : Hash.t list;
   handle_hashes : (Hash.t * Hash.t) list;
@@ -464,6 +498,7 @@ let evaluate options side (version, kinds) =
     with (Sys_error _ | Unix.Unix_error _) as error -> store_failure error
   in
   let* entry_hash = term_hash side version (target options side) in
+  let named_entry = Option.map (fun e -> e.Interface.hash) (export_of version options.entry) in
   let* contract = entry_contract side version (target options side) in
   let* domain_hashes =
     List.fold_right
@@ -485,7 +520,7 @@ let evaluate options side (version, kinds) =
     List.fold_right
       (fun (op, term) acc ->
         let* acc = acc in
-        match lookup_operation version.store op with
+        match lookup_operation version op with
         | None -> refuse ~code:"E1012" "--handle names `%s`, which is not an operation" op
         | Some op_h ->
             let* t = term_hash side version term in
@@ -540,13 +575,19 @@ let evaluate options side (version, kinds) =
           let* acc = acc in
           let* v = value_of h in
           let* elements = domain_elements ctx kind name v in
-          Ok (elements :: acc))
+          let* rendering =
+            match data_of v with
+            | Ok (_, data) -> Ok data
+            | Error error ->
+                refuse ~code:"E1012" "domain `%s` contains %s" name (describe_data_error error)
+          in
+          Ok ((elements, rendering) :: acc))
         (List.combine (List.combine options.domains kinds) domain_hashes)
         (Ok [])
     in
-    Ok (case_fn, field_fns, handler_fns, domain_values)
+    Ok (case_fn, field_fns, handler_fns, List.map fst domain_values, List.map snd domain_values)
   in
-  let* case_fn, field_fns, handler_fns, domain_values = prepared in
+  let* case_fn, field_fns, handler_fns, domain_values, domain_renderings = prepared in
   Ok
     {
       version;
@@ -555,8 +596,10 @@ let evaluate options side (version, kinds) =
       field_fns;
       handler_fns;
       domain_values;
+      domain_renderings;
       contract;
       entry_hash;
+      named_entry;
       domain_hashes;
       field_hashes;
       handle_hashes;
@@ -614,16 +657,16 @@ let state_name = function
 
 type run = { state : run_state; transcript : Observation_transcript.transcript option }
 
-let run_cases options (p : prepared) (cases : int list list) =
+let run_cases options (p : prepared) (cases : int list list) ~runnable =
   Eval.with_invocation ~coverage:false ~fuel:options.fuel p.ctx @@ fun _ ->
   List.iter
     (fun (op, handler) ->
       Eval.register_root_handler p.ctx op (fun args -> Eval.call p.ctx handler args))
     p.handler_fns;
   let stopped = ref false in
-  List.map
-    (fun indices ->
-      if !stopped then { state = Not_started; transcript = None }
+  List.mapi
+    (fun i indices ->
+      if !stopped || not (runnable i) then { state = Not_started; transcript = None }
       else
         let args =
           List.map2 (fun elements i -> (List.nth elements i).value) p.domain_values indices
@@ -747,12 +790,12 @@ type review = {
   groups : group list;
   domains : element list list;
   options : options;
-  only_case : bool;
+  selected : int option;
 }
 
 let hex = Hash.to_hex
 
-let request_bytes options ~(old_p : prepared) ~(new_p : prepared) ~kinds ~mode =
+let request_bytes options ~(old_p : prepared) ~(new_p : prepared) ~kinds ~mode ~selected =
   let buf = Buffer.create 1024 in
   let line fmt =
     Printf.ksprintf
@@ -775,7 +818,8 @@ let request_bytes options ~(old_p : prepared) ~(new_p : prepared) ~kinds ~mode =
     (hex old_p.entry_hash) (hex old_contract) (hex old_p.interface_identity);
   line "new source=%s entry=%s contract=%s interface=%s adapter=%s"
     (hex (Hash.of_string options.new_source))
-    (hex new_p.entry_hash) (hex new_contract) (hex new_p.interface_identity)
+    (match new_p.named_entry with Some h -> hex h | None -> "none")
+    (hex new_contract) (hex new_p.interface_identity)
     (match options.adapter with None -> "none" | Some _ -> hex new_p.entry_hash);
   line "cases source=%s" (hex (Hash.of_string options.cases_source));
   List.iteri
@@ -797,6 +841,7 @@ let request_bytes options ~(old_p : prepared) ~(new_p : prepared) ~kinds ~mode =
     | _ -> "none");
   line "policy %s" (hex (Observation_policy.identity options.policy));
   line "budget fuel-model=%s fuel=%d max-cases=%d" Eval.fuel_model options.fuel options.max_cases;
+  line "select %s" (match selected with None -> "all" | Some k -> Printf.sprintf "case=%d" k);
   (match mode with
   | Exhaustive -> line "mode exhaustive"
   | Sampled { count; seed } -> line "mode sampled count=%d seed=%d" count seed);
@@ -957,8 +1002,8 @@ let field_values options (old_p : prepared) cases =
             | Error error -> refuse ~code:"E1012" "field `%s` failed: %s" name (runtime_cause error)
             | Ok v -> (
                 match data_of v with
-                | Error kind ->
-                    refuse ~code:"E1012" "field `%s` returned an unsupported %s value" name kind
+                | Error error ->
+                    refuse ~code:"E1012" "field `%s` returned %s" name (describe_data_error error)
                 | Ok (_, data) -> Ok ((name, data) :: acc)))
           (List.combine options.fields old_p.field_fns)
           (Ok [])
@@ -967,6 +1012,19 @@ let field_values options (old_p : prepared) cases =
     cases (Ok [])
 
 let run options =
+  let* () =
+    if options.max_cases < 1 then
+      refuse ~code:"E1015" "--max-cases must be positive, got %d" options.max_cases
+    else if options.fuel < 1 then
+      refuse ~code:"E1015" "--fuel must be positive, got %d" options.fuel
+    else Ok ()
+  in
+  let* () =
+    let ops = List.map fst options.handles in
+    match List.find_opt (fun op -> List.length (List.filter (String.equal op) ops) > 1) ops with
+    | Some op -> refuse ~code:"E1012" "--handle models `%s` more than once" op
+    | None -> Ok ()
+  in
   let* () =
     match options.sample with
     | Some (count, _) when count < 1 || count > options.max_cases ->
@@ -1007,7 +1065,10 @@ let run options =
   let* new_p = evaluate options New (new_version, kinds) in
   let* () = check_policy options old_p new_p in
   let* () =
-    if domains_equal old_p.domain_values new_p.domain_values then Ok ()
+    if
+      domains_equal old_p.domain_values new_p.domain_values
+      && List.equal String.equal old_p.domain_renderings new_p.domain_renderings
+    then Ok ()
     else refuse ~code:"E1013" "the two versions' domain values differ"
   in
   let sizes = List.map List.length old_p.domain_values in
@@ -1035,29 +1096,23 @@ let run options =
         refuse ~code:"E1012" "--case %d is not a case of this review (%d cases)" k
           (List.length declared)
   in
-  let cases, case_numbers =
-    match selected with Some k -> ([ List.nth declared k ], [ k ]) | None -> (declared, numbered)
-  in
-  let budget = match selected with Some _ -> 1 | None -> options.max_cases in
-  let runnable = List.filteri (fun i _ -> i < budget) cases in
-  let pad runs =
-    runs
-    @ List.init
-        (List.length cases - List.length runs)
-        (fun _ -> { state = Not_started; transcript = None })
-  in
-  let old_runs = pad (run_cases options old_p runnable) in
-  let new_runs = pad (run_cases options new_p runnable) in
-  let verdicts = List.map2 pair_verdict old_runs new_runs in
-  let analyzed =
+  let cases, case_numbers = (declared, numbered) in
+  (* a --case selection runs only that case; every other declared case stays unrun *)
+  let runnable i = match selected with Some k -> i = k | None -> i < options.max_cases in
+  let runnable_cases =
     List.filter_map
-      (fun ((indices, n), v) -> if v = Unrun then None else Some (n, indices))
-      (List.combine (List.combine cases case_numbers) verdicts)
+      (fun (i, c) -> if runnable i then Some (i, c) else None)
+      (List.combine case_numbers cases)
   in
-  let* fields = field_values options old_p (List.map snd analyzed) in
-  let field_table = List.combine (List.map fst analyzed) fields in
+  (* fields are pure and evaluated before any case runs, so a field that is not total over the
+     cases to run refuses the review before anything runs *)
+  let* fields = field_values options old_p (List.map snd runnable_cases) in
+  let field_table = List.combine (List.map fst runnable_cases) fields in
+  let old_runs = run_cases options old_p cases ~runnable in
+  let new_runs = run_cases options new_p cases ~runnable in
+  let verdicts = List.map2 pair_verdict old_runs new_runs in
   let atoms_of n =
-    let indices = List.nth cases (List.length (List.filter (fun m -> m < n) case_numbers)) in
+    let indices = List.nth cases n in
     List.concat
       (List.mapi
          (fun k i ->
@@ -1069,7 +1124,7 @@ let run options =
         (Option.value (List.assoc_opt n field_table) ~default:[])
   in
   let groups = groups ~atoms_of ~verdicts:(List.combine case_numbers verdicts) in
-  let request = request_bytes options ~old_p ~new_p ~kinds ~mode in
+  let request = request_bytes options ~old_p ~new_p ~kinds ~mode ~selected in
   Ok
     {
       request;
@@ -1085,7 +1140,7 @@ let run options =
       groups;
       domains = old_p.domain_values;
       options;
-      only_case = selected <> None;
+      selected;
     }
 
 (* --- the readable report --- *)
@@ -1143,15 +1198,15 @@ let render review =
   let scope =
     match review.mode with
     | Sampled { count; seed } -> Printf.sprintf "in %d sampled cases (seed %d)" count seed
-    | Exhaustive when review.only_case -> "on the one selected case"
+    | Exhaustive when Option.is_some review.selected ->
+        Printf.sprintf "case %d alone of the %d declared cases" (Option.get review.selected)
+          declared
     | Exhaustive -> Printf.sprintf "on the %d declared cases" declared
   in
   line "Status %s, %s." review.status scope;
   line "  %d run: %d agree, %d differ, %d inconclusive, %d failed in both, %d unrun."
     (total - unrun) agree differ inconclusive failed unrun;
-  let case_word n =
-    Printf.sprintf "case %d (%d of %d)" n (n + 1) (if review.only_case then declared else total)
-  in
+  let case_word n = Printf.sprintf "case %d (%d of %d)" n (n + 1) total in
   let case_at n =
     List.nth review.cases (List.length (List.filter (fun m -> m < n) review.case_numbers))
   in

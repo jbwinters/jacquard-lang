@@ -40,7 +40,9 @@ newline, then the cases file's bytes, in a fresh private scratch store
 (`Frontend` preparation of a single source, as `jacquard test` assembles suites).
 The cases file may name the version's types, constructors and terms. It must not
 declare a name that the version declares, and must not contain top-level
-expressions; either is E1010. Nothing is installed in a user store.
+expressions; either is E1010. The review appends a generated driver whose
+names all start with the reserved prefix `review-driver-`; neither file may
+declare such a name (E1010). Nothing is installed in a user store.
 
 **Entry.** `--entry NAME` names a term both versions define, with n ≥ 1
 parameters (D5 uncurried). `--domain NAME` is given exactly n times, in
@@ -62,8 +64,9 @@ weight, a uniform range above 10,000 values, or a value containing a secret,
 closure, continuation, operation, task, channel, hash, code value or other
 kind outside Int, Real, Text, constructors (including Bool and lists) and
 tuples is E1012. The two versions' domains must be equal: element by element, data-v1
-renderings (constructors qualified by identity) and weights are byte-equal, and
-for a distribution the distribution value itself renders equal. Otherwise E1013.
+renderings (constructors qualified by identity) and weights of the merged
+supports are byte-equal, and each domain value itself (a distribution value
+included) renders equal. Otherwise E1013.
 No value crosses from one store to the other: each version runs its own equal
 values.
 
@@ -71,8 +74,8 @@ values.
 outermost, each domain in its order (DES.1 §6: priority outer, availability
 inner, so `Low × (Up, Down, Down)` is case 11). Cases are numbered from 0.
 `--max-cases N` (default 10,000) is the run budget: cases from N on are
-`unrun`. The product is computed lazily; a product above 1,000,000 is refused
-(E1012) because its case numbers are not reportable.
+`unrun`. The product is enumerated in full before running, so a product above
+1,000,000 cases is refused (E1012).
 
 **Sampling.** `--sample N --seed S` (both or neither; 1 ≤ N ≤ `--max-cases`;
 every domain a `Distribution`; otherwise E1015) draws N cases instead of
@@ -131,10 +134,10 @@ and entry-contract identity are reported separately.
 |---|---|
 | E1010 | a version plus cases file does not check, the cases file redeclares a version name or has top-level expressions, or a named term is missing or not a term |
 | E1011 | the entry contracts differ (with no adapter), or the adapter's contract is not the old entry's |
-| E1012 | a domain has the wrong type or count, is empty, has invalid weights or unsupported values, the product is too large, a world or wrap is missing or mistyped, or the case expression needs effects no installed world handles |
+| E1012 | a domain has the wrong type or count, is empty, has invalid weights or unsupported values, the product is too large, a world or wrap is missing or mistyped, an operation is `--handle`d twice, a field fails, or the case expression needs effects no installed world handles |
 | E1013 | the two versions' domains are not equal |
 | E1014 | the policy cannot apply to both versions (see below) |
-| E1015 | `--sample`/`--seed` misuse, or sampling a `List` domain |
+| E1015 | `--sample`/`--seed` misuse, sampling a `List` domain, or a non-positive `--max-cases` or `--fuel` |
 
 **Policy across two versions.** The policy (OBS.1, default policy if omitted)
 is read once. Every operation it lists must be an operation of **both**
@@ -179,9 +182,12 @@ reported, so `failed` never hides that a review was sampled or incomplete, and
 no rendering says "agree" without its scope ("on the 16 declared cases", "in
 100 sampled cases"), nor while any case is inconclusive or unrun.
 
-`--case K` runs only case K (both versions, full fuel N each) and prints its
-pair. Because fuel is shared across a version's cases, a case run alone may
-complete where it was `unrun` in the full review; the output says so.
+`--case K` runs only case K (both versions, full fuel N each). The request
+records the selection (`select case=K`), so its identity differs from the full
+review's, and every other declared case is `unrun`: the status is
+`exhaustive-incomplete`, never a claim about the whole domain. Because fuel is
+shared across a version's cases, a case run alone may complete where it was
+`unrun` in the full review.
 
 ## 5. The request
 
@@ -189,7 +195,7 @@ complete where it was `unrun` in the full review; the output says so.
 jacquard-behavior-review-request format=1
 core version=<v> prelude=<hex>
 old source=<hex> entry=<hex> contract=<hex> interface=<hex>
-new source=<hex> entry=<hex> contract=<hex> interface=<hex> adapter=none|<hex>
+new source=<hex> entry=<hex>|none contract=<hex> interface=<hex> adapter=none|<hex>
 cases source=<hex>
 domain index=0 kind=list|distribution old=<hex> new=<hex>
 field index=0 name=<name> old=<hex> new=<hex>
@@ -197,6 +203,7 @@ handle op-old=<hex> op-new=<hex> term-old=<hex> term-new=<hex>
 wrap none|<old hex>:<new hex>
 policy <hex>
 budget fuel-model=fuel-v1 fuel=<n> max-cases=<n>
+select all|case=<k>
 mode exhaustive|sampled count=<n> seed=<n>
 ```
 
@@ -204,6 +211,9 @@ Lines appear in this order; `domain`, `field` and `handle` lines are repeated
 in declaration order. `entry`, `domain`, `field` and `wrap` are term identities in
 each version's checked store; `source` is HASH_V0 of the exact file bytes. The
 request identity is `HASH_V0("jacquard-behavior-review-request-v1" NUL bytes)`.
+The new version's `entry` is its own `--entry` term (`none` if it has none);
+with an adapter, `adapter` is the term actually compared and `contract` is the
+adapter's.
 
 ## 6. The report
 
@@ -268,11 +278,11 @@ claims declared-support-only
   `--field NAME` (a pure cases-file term taking the entry's n arguments and
   returning a supported data value; its checked row must be empty, E1012) adds
   one atom `field=<name>` whose head is its whole data-v1 value. Fields are
-  evaluated in the old version for every analyzed case, in their own
-  invocation with an allowance equal to `--fuel`, so they never spend run fuel;
-  a field that fails or exhausts that allowance on any analyzed case refuses
-  the review (E1012): a declared field must be total over the declared
-  cases. An atom is
+  evaluated in the old version for every case that will run, before any case
+  runs, in their own invocation with an allowance equal to `--fuel`, so they
+  never spend run fuel; a field that fails or exhausts that allowance refuses
+  the review (E1012) before anything runs: a declared field must be total over
+  the cases to run. An atom is
   false for a case that lacks its path.
 - **Analyzed cases** are the cases with a verdict other than `unrun`. Conditions
   are claims about them only; for an incomplete or sampled review the report's
