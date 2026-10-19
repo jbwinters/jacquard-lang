@@ -227,6 +227,7 @@ and lex s found =
           go j
       | '\n' ->
           flush ();
+          drop := false;
           toks := Op "\n" :: !toks;
           let j = ref (i + 1) in
           List.iter
@@ -265,7 +266,10 @@ and lex s found =
       | '$' when i + 1 < n && s.[i + 1] = '(' -> go (substitution i)
       | ('<' | '>') as c ->
           (* a redirection: drop a leading fd number and the target word *)
-          if !in_word && String.for_all (fun c -> c >= '0' && c <= '9') (Buffer.contents word) then (
+          if
+            !in_word && (not !drop)
+            && String.for_all (fun c -> c >= '0' && c <= '9') (Buffer.contents word)
+          then (
             Buffer.clear word;
             in_word := false)
           else flush ();
@@ -519,6 +523,9 @@ let test_detector_cases () =
       ": > \"$(jac hash x | head -1)\"";
       "cat <<<\"$(jac hash x | head -1)\"";
       "cat <<EOF\n$(printf ')'; jac run x | head -1)\nEOF";
+      ": >\"1\">&2\njac run x | head -1";
+      ">\"1\">&2 jac run x | head -1";
+      ": >\njac run x | head -1";
     ];
   List.iter
     (fun cmd -> Alcotest.(check bool) ("accepts: " ^ cmd) false (flagged cmd))
