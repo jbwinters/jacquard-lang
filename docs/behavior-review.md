@@ -38,13 +38,18 @@ runs; 124 for command-line errors.
 **Assembly.** Each version is checked as one source: the version file's bytes, a
 newline, then the cases file's bytes, in a fresh private scratch store
 (`Frontend` preparation of a single source, as `jacquard test` assembles suites).
-The cases file may name the version's types, constructors and terms. It must not
-declare a name that the version declares, and must not contain top-level
-expressions; either is E1010. The review appends a generated driver whose
-names all start with the reserved prefix `review-driver-`; neither file may
-declare such a name (E1010). Nothing is installed in a user store.
+The cases file may name the version's types, constructors and terms. Every
+binding the version declares, of any kind, must keep its identity once the
+cases file is added (the cases file cannot rebind a version name), and the
+cases file must not contain top-level expressions; either is E1010. The review
+appends a generated driver whose own names start with the reserved prefix
+`review-driver-` (neither file may declare such a name, E1010) and which refers
+to every entry, domain, field, wrap, model, operation and prelude constructor
+by identity (`#<hash>:term`, `:con`, `:op`), so no user declaration can shadow
+or capture it. Nothing is installed in a user store.
 
-**Entry.** `--entry NAME` names a term both versions define, with n ≥ 1
+**Entry.** `--entry NAME` names a term each version itself defines (the cases
+file cannot supply it; only a new-version adapter may stand in, E1010), with n ≥ 1
 parameters (D5 uncurried). `--domain NAME` is given exactly n times, in
 parameter order: each names a cases-file term of type `List a_k` or
 `Distribution a_k` (a prelude distribution value: `Bernoulli`, `Categorical`,
@@ -100,7 +105,8 @@ operations reach the root, so the policy records them and their arguments and
 results are compared. No other root handler, no grant, and no live handler is
 ever installed: any other operation that reaches the root fails the case.
 `--wrap NAME` names a cases-file handler term `(() ->{e} r) ->{e'} r`; a case
-then runs `wrap(fn () -> entry(x1, ..., xn))` as a closure application.
+then runs `wrap(fn () -> entry(x1, ..., xn))` as a closure application, and
+the wrap must keep the entry's result type (E1012).
 Operations a wrap handles never reach the root, so they are not observed (OBS.1
 records root operations only). **Missing world configuration** is refused
 (E1012) statically: the effect row of the entry's (or adapter's) checked scheme,

@@ -183,7 +183,7 @@ effect difference; an unmodeled operation is a missing world.
     2 run: 0 agree, 2 differ, 0 inconclusive, 0 failed in both, 0 unrun.
   
   2 cases differ (effect):
-    in every analyzed case (no case agrees)
+    no agreeing case to exclude: the condition is empty
     witness case 0 (1 of 2): 1
       old: 1 (1 observed operation)
       new: 1 (1 observed operation)
@@ -263,7 +263,7 @@ once; and the `review-driver-` prefix is reserved for the generated driver.
   exit=3
   $ head -2 reserved.out
   error[E1010]: A behavior review's program or cases file is invalid
-    Cause: the old version declares `review-driver-own`; the `review-driver-` prefix is reserved for the review
+    Cause: `review-driver-own` uses the `review-driver-` prefix, which is reserved for the review
 
 A version's own operation is modeled even when the prelude has one of the same
 name, and preparation problems are refusals, never crashes: a value too large
@@ -299,3 +299,54 @@ distributions whose merged supports agree but whose values differ.
   $ head -2 ones.out
   error[E1013]: The two versions' review domains differ
     Cause: the two versions' domain values differ
+
+The generated driver refers to everything by identity, so user declarations
+cannot capture it: a wrap must keep the entry's result type, a user
+constructor named like a prelude one is harmless, and an escaped entry name
+works. The entry must belong to each version, and the cases file cannot rebind
+a version's type.
+
+  $ printf 'text-of : (Int) ->{} Text\ntext-of(n) = "old"\n' > text-old.jac
+  $ printf 'text-of : (Int) ->{} Text\ntext-of(n) = "new"\n' > text-new.jac
+  $ printf 'ints = [1]\nconstant(thunk) = { let _ = thunk(); 42 }\n' > retype-cases.jac
+  $ jacquard review run --old text-old.jac --new text-new.jac --cases retype-cases.jac --entry text-of --domain ints --wrap constant > retype.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 retype.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: the old version's domains, fields, handlers or wrap do not fit the entry's parameters
+  $ printf 'type Other = | Categorical Int | Cons Int | Nil\nsame : (Int) ->{} Int\nsame(n) = n\n' > shadow.jac
+  $ printf 'ints = [1]\n' > ints-cases.jac
+  $ jacquard review run --old shadow.jac --new shadow.jac --cases ints-cases.jac --entry same --domain ints > shadow.out; echo "exit=$?"
+  exit=0
+  $ sed -n 4p shadow.out
+  Status exhaustive-complete, on the 1 declared case.
+  $ printf '`term:if` : (Int) ->{} Int\n`term:if`(n) = n\n' > escaped.jac
+  $ jacquard review run --old escaped.jac --new escaped.jac --cases ints-cases.jac --entry if --domain ints > escaped.out; echo "exit=$?"
+  exit=0
+  $ sed -n 4p escaped.out
+  Status exhaustive-complete, on the 1 declared case.
+  $ printf 'constant = 1\n' > bare-old.jac
+  $ printf 'constant = 2\n' > bare-new.jac
+  $ printf 'ints = [1]\nf(x) = x\n' > f-cases.jac
+  $ jacquard review run --old bare-old.jac --new bare-new.jac --cases f-cases.jac --entry f --domain ints > bare.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 bare.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the old version has no term named `f`
+  $ printf 'type Thing = | Thing Int\nsame : (Int) ->{} Int\nsame(n) = n\n' > thing.jac
+  $ printf 'ints = [1]\ntype Thing = | Thing Text\n' > rebind-cases.jac
+  $ jacquard review run --old thing.jac --new thing.jac --cases rebind-cases.jac --entry same --domain ints > rebind.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 rebind.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the cases file redeclares the old version's `thing`
+
+The readable report keeps text literals intact.
+
+  $ printf 'marker : (Int) ->{} Text\nmarker(n) = "#%s"\n' "$(head -c 64 /dev/zero | tr '\0' 1)" > marker-old.jac
+  $ printf 'marker : (Int) ->{} Text\nmarker(n) = "#%s"\n' "$(head -c 64 /dev/zero | tr '\0' 2)" > marker-new.jac
+  $ jacquard review run --old marker-old.jac --new marker-new.jac --cases ints-cases.jac --entry marker --domain ints > marker.out; echo "exit=$?"
+  exit=1
+  $ sed -n '/old:/p;/new:/p' marker.out | cut -c1-24
+      old: "#1111111111111
+      new: "#2222222222222
