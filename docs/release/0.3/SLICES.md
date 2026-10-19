@@ -802,3 +802,16 @@ errors are now pinned in their transcripts. The new `cram-status` law
 lexer and fails on any pipeline whose non-final stage runs a tool or script in
 any `test/**/*.t`; on the previous crams it reports 272 such stages. The
 source inventory is now `1197 / 78 / 36`.
+
+RW.8 adds `jacquard review run` (`docs/behavior-review.md`): two checked
+versions of an entry are each checked with a cases file and a generated driver,
+run over the product of declared List or Distribution domains (or a seeded
+sample) under an observation policy, with operations modeled at the root by
+pure terms, and compared case by case. The report groups differing cases by
+exact conjunctions over declared fields, picks deterministic witnesses, keeps
+agree, differ, inconclusive, failed and unrun counts, and writes the
+behavior-review request and report format 1. `review.t` covers the DES.1 §6
+scheduling example (16 cases, 3 differ, witness case 11), determinism and
+witness replay, effect-only differences, adapters, budgets, sampling and every
+refusal (E1010–E1015); `test_behavior_review.ml` adds four cases. The source
+inventory is now `1201 / 79 / 36`.

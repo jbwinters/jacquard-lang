@@ -760,8 +760,8 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `1197`
-- Cram transcript files: `78`
+- Alcotest/QCheck cases: `1201`
+- Cram transcript files: `79`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the

@@ -217,6 +217,12 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1005 | an observation policy is malformed, noncanonical, or refused for the observed program | unsorted operations, an operation identity the program does not have, or a pinned interface-v1 identity that differs |
 | E1006 | observation-transcript-v1 bytes are malformed, or were recorded under a different observation policy | decoding a transcript under another policy, or comparing transcripts of two policies |
 | E1007 | relational runs cannot be called equal under the selected observation policy | `relate --policy` where runs agree only on truncated prefixes, opaque kinds, uncoded failures, unfinished projections, or both stop incomplete |
+| E1010 | a behavior review's version does not check with the cases file, the cases file redeclares a version name or has a top-level expression, or a named term is missing | `jacquard review run --entry assign` where the new version has no `assign` |
+| E1011 | the two versions' entry contracts (checked signature by identity and call labels) differ and no adapter with the old contract is named | the new `assign` takes its parameters in another order |
+| E1012 | a review domain is not a finite List or Distribution of its parameter's type, is empty, has invalid weights or unsupported values, a field or handler is impure or fails, or the case needs an operation no `--handle` models | `--domain sizes` where the entry performs `notify` without `--handle notify=ack` |
+| E1013 | the two versions' review domains are not equal | a domain names a version term whose values changed |
+| E1014 | the observation policy cannot apply to both versions: it is pinned to an interface, or lists an operation one version lacks | `--policy` with `interface=<hash>` |
+| E1015 | `--sample` without `--seed` (or the reverse), sampling a List domain, or a sample count outside 1..`--max-cases` | `--sample 5` alone |
 
 ## Native compilation (E11xx)
 

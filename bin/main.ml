@@ -3360,6 +3360,173 @@ let interface_t =
        ~doc:"Produce, verify, and compare portable public-interface manifests (API.1).")
     [ emit; verify; diff ]
 
+(* --- review (RW.8): two checked versions over declared cases --- *)
+
+let review_run_cmd old_file new_file cases_file entry domains fields adapter handles wrap
+    policy_path fuel max_cases sample seed only_case out prelude =
+  let refused ds =
+    List.iter print_diagnostic ds;
+    exit_unhandled
+  in
+  let read path =
+    match read_file path with
+    | exception Sys_error message ->
+        Error
+          [
+            Behavior_review.diagnostic ~code:"E1010"
+              (Printf.sprintf "cannot read %s: %s" path message);
+          ]
+    | text -> Ok text
+  in
+  let handles =
+    List.map
+      (fun spec ->
+        match String.index_opt spec '=' with
+        | Some i -> Ok (String.sub spec 0 i, String.sub spec (i + 1) (String.length spec - i - 1))
+        | None -> Error spec)
+      handles
+  in
+  match List.find_map (function Error spec -> Some spec | Ok _ -> None) handles with
+  | Some spec ->
+      refused
+        [
+          Behavior_review.diagnostic ~code:"E1012"
+            (Printf.sprintf "--handle %S is not OP=TERM" spec);
+        ]
+  | None -> (
+      let handles = List.filter_map Result.to_option handles in
+      let sample =
+        match (sample, seed) with
+        | Some n, Some s -> Ok (Some (n, s))
+        | None, None -> Ok None
+        | _ ->
+            Error
+              [
+                Behavior_review.diagnostic ~code:"E1015"
+                  "--sample and --seed must be given together";
+              ]
+      in
+      match
+        let ( let* ) = Result.bind in
+        let* sample = sample in
+        let* old_source = read old_file in
+        let* new_source = read new_file in
+        let* cases_source = read cases_file in
+        let* policy = read_relate_policy policy_path in
+        Ok (sample, old_source, new_source, cases_source, policy)
+      with
+      | Error ds -> refused ds
+      | Ok (sample, old_source, new_source, cases_source, policy) -> (
+          let options =
+            {
+              Behavior_review.prelude_dir = prelude_dir_of prelude;
+              old_file;
+              old_source;
+              new_file;
+              new_source;
+              cases_file;
+              cases_source;
+              entry;
+              domains;
+              fields;
+              adapter;
+              handles;
+              wrap;
+              policy = Option.value policy ~default:Observation_policy.default;
+              fuel;
+              max_cases;
+              sample;
+              only_case;
+            }
+          in
+          match Behavior_review.run options with
+          | Error ds -> refused ds
+          | Ok review -> (
+              print_string (Behavior_review.render review);
+              let status = Behavior_review.exit_status review in
+              match out with
+              | None -> status
+              | Some out ->
+                  let written =
+                    write_output ~what:"review report" ~out (Behavior_review.serialize review)
+                  in
+                  if written = ok then status else written)))
+
+let review_t =
+  let run =
+    Cmd.v
+      (Cmd.info "run"
+         ~doc:
+           "Compare two checked versions of an entry over declared finite cases (RW.8): each \
+            version is checked with the cases file, every case runs under the observation policy \
+            with modeled root operations, and the report lists agreements, grouped differences \
+            with deterministic witnesses, failures and unrun cases. Exits 0 when every declared \
+            case agrees, 1 when a case differs, 2 when nothing differs but a case failed, was \
+            inconclusive or was not run, and 3 when the request is refused.")
+      Term.(
+        const (configure_diagnostics review_run_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(required & opt (some file) None & info [ "old" ] ~docv:"OLD" ~doc:"The old version.")
+        $ Arg.(required & opt (some file) None & info [ "new" ] ~docv:"NEW" ~doc:"The new version.")
+        $ Arg.(
+            required
+            & opt (some file) None
+            & info [ "cases" ] ~docv:"CASES"
+                ~doc:
+                  "The cases file: domains, fields, handlers and wraps, checked with each version.")
+        $ Arg.(
+            required & opt (some string) None & info [ "entry" ] ~docv:"NAME" ~doc:"The entry term.")
+        $ Arg.(
+            value & opt_all string []
+            & info [ "domain" ] ~docv:"NAME"
+                ~doc:"A cases-file List or Distribution term, once per entry parameter, in order.")
+        $ Arg.(
+            value & opt_all string []
+            & info [ "field" ] ~docv:"NAME"
+                ~doc:
+                  "A pure cases-file derived field over the entry's arguments, used in conditions.")
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "adapter" ] ~docv:"NAME"
+                ~doc:
+                  "A new-version term with the old entry's contract, compared in place of the new \
+                   entry.")
+        $ Arg.(
+            value & opt_all string []
+            & info [ "handle" ] ~docv:"OP=NAME"
+                ~doc:"Model operation OP at the root with the pure cases-file term NAME.")
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "wrap" ] ~docv:"NAME"
+                ~doc:"A cases-file handler term wrapped around each case.")
+        $ relate_policy_arg
+        $ Arg.(
+            value & opt int 10_000_000
+            & info [ "fuel" ] ~docv:"UNITS" ~doc:"Aggregate fuel of each version (fuel-v1).")
+        $ Arg.(
+            value & opt int 10_000
+            & info [ "max-cases" ] ~docv:"N" ~doc:"Cases run; later cases are reported unrun.")
+        $ Arg.(
+            value
+            & opt (some int) None
+            & info [ "sample" ] ~docv:"N" ~doc:"Sample N cases from Distribution domains.")
+        $ Arg.(value & opt (some int) None & info [ "seed" ] ~docv:"S" ~doc:"The sampling seed.")
+        $ Arg.(
+            value
+            & opt (some int) None
+            & info [ "case" ] ~docv:"K" ~doc:"Run only case K (both versions, full fuel each).")
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "o"; "output" ] ~docv:"REPORT" ~doc:"Also write the canonical report data.")
+        $ prelude_arg)
+  in
+  Cmd.group
+    (Cmd.info "review" ~doc:"Compare two checked versions over declared cases (RW.8).")
+    [ run ]
+
 (* --- project (PKG.1): local project manifests --- *)
 
 let project_arg =
@@ -4020,6 +4187,7 @@ let main =
       export_t;
       build_t;
       interface_t;
+      review_t;
       project_t;
       host_t;
     ]
