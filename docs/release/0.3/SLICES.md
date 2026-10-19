@@ -798,5 +798,7 @@ command that piped `jacquard`, `jac`, a demo script or a built native program
 into an excerpting filter now writes the output to a file, prints `exit=N`
 when the tool fails, and excerpts the file; 142 intentional refusals and usage
 errors are now pinned in their transcripts. The new `cram-status` law
-(`test/test_cram_status.ml`, three cases) fails on any such pipeline in
-`test/cli/*.t`. The source inventory is now `1198 / 78 / 36`.
+(`test/test_cram_status.ml`, two cases) parses each command with a small shell
+lexer and fails on any pipeline whose non-final stage runs a tool or script in
+any `test/**/*.t`; on the previous crams it reports 272 such stages. The
+source inventory is now `1197 / 78 / 36`.
