@@ -35,7 +35,8 @@ syn match jacquardNumber /[+-]\%(inf\|nan\)\.0/
 
 syn match jacquardEscapedName /`\%(term\|op\|type\|con\|effect\|tvar\|rvar\):[^`]*`/
 syn match jacquardReference /#group\[\d\+\]/
-syn match jacquardReference /#\x\{64}:\%(term\|op\|type\|con\|effect\)\>/
+" read_hash ends a reference at whitespace, ( ) { } [ ] , ; = | " ` or ->.
+syn match jacquardReference /#\x\{64}:\%(term\|op\|type\|con\|effect\)\ze\%(->\|[ \t(){}\[\],;=|"`]\|$\)/
 
 syn match jacquardOperator /->\||>\||\|=/
 
@@ -47,7 +48,7 @@ syn match jacquardBraceEscape /{{/ contained
 syn cluster jacquardNotInCode contains=jacquardStringEscape,jacquardBraceEscape,jacquardInterpolation,jacquardTodo,jacquardRawParens,jacquardRawString,jacquardRawComment
 syn region jacquardInterpolation matchgroup=jacquardInterpolationDelimiter start=/{\ze[^{]/ end=/}/ contained oneline contains=ALLBUT,@jacquardNotInCode
 syn region jacquardInterpolationBraces start=/{/ end=/}/ contained oneline transparent contains=ALLBUT,@jacquardNotInCode
-syn region jacquardMarkedText start=/\$"/ skip=/\\\\\|\\"/ end=/"/ oneline contains=jacquardStringEscape,jacquardBraceEscape,jacquardInterpolation,@Spell
+syn region jacquardMarkedText start=/\$"/ skip=/\\\\\|\\"/ end=/"\|$/ oneline contains=jacquardStringEscape,jacquardBraceEscape,jacquardInterpolation,@Spell
 
 " jqd { ... } is raw bootstrap syntax: balanced parentheses, strings and
 " ; comments, ending at the first } outside parentheses.

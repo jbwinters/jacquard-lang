@@ -13,10 +13,16 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
-# One keyword per line, as `ocamlformat` lays the list out.
+# One keyword per line, as `ocamlformat` lays the list out; comments are
+# dropped first, and every quoted line must yield a keyword.
 sed -n '/^let keywords =/,/]/p' "$root/src/surface_lex.ml" |
-  sed -n 's/^[[:space:]]*"\([a-z]*\)";\{0,1\}[[:space:]]*$/\1/p' | sort >"$tmp/lexer"
-[ -s "$tmp/lexer" ] || { echo "could not read Surface_lex.keywords" >&2; exit 2; }
+  sed 's/(\*.*\*)//g' >"$tmp/list"
+sed -n 's/^[[:space:]]*"\([a-z]*\)";\{0,1\}[[:space:]]*$/\1/p' "$tmp/list" | sort >"$tmp/lexer"
+quoted=$(grep -c '"' "$tmp/list" || true)
+if [ ! -s "$tmp/lexer" ] || [ "$quoted" -ne "$(wc -l <"$tmp/lexer")" ]; then
+  echo "could not read Surface_lex.keywords from src/surface_lex.ml" >&2
+  exit 2
+fi
 
 python3 - "$root/editors/textmate/jacquard.tmLanguage.json" >"$tmp/textmate" <<'PY'
 import json, re, sys

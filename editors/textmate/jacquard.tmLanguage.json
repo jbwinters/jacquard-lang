@@ -267,7 +267,7 @@
         },
         {
           "name": "constant.other.reference.hash.jacquard",
-          "match": "(#[0-9A-Fa-f]{64})(:)(term|op|type|con|effect)(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)",
+          "match": "(#[0-9A-Fa-f]{64})(:)(term|op|type|con|effect)(?=$|[\\s(){}\\[\\],;=|\"`]|->)",
           "captures": {
             "2": {
               "name": "punctuation.separator.kind.jacquard"
