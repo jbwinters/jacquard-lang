@@ -774,7 +774,11 @@ process framing, limits, and schema/state vectors. `jac host worker` is the
 experimental serial carrier for that protocol, and
 `spec/host-protocol-v0/kit/` is the executable conformance kit external
 adapters pin, with its evidence and limits in `docs/release/host-boundary/`;
-no stable ABI, adapter, or HTTP server ships in this repository.
+no stable ABI, adapter, or HTTP server ships in this repository. Host
+integrations live in the separate [jacquard-host](https://github.com/jbwinters/jacquard-host) repository. It
+contains independent Python, TypeScript, and Go adapters and SDKs, each of
+which pins a Core release (currently `jacquard-core-0.3.0`) and replays the
+full conformance kit against it.
 The deterministic Workspace v0 governance boundary is separately advertised
 as an evidence-backed research reference implementation, not as a sandbox or
 production security system; its exact claim and trusted-host limits are in
