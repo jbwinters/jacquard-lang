@@ -40,6 +40,9 @@ jobs:
       - name: Test dependency-install retry policy
         run: scripts/ci/test-opam-install-deps.sh
 
+      - name: Editor grammar keywords
+        run: sh editors/check.sh
+
       - name: Verify historical release manifests
         run: |
           scripts/release/check-historical-manifests.sh \

@@ -1,13 +1,14 @@
 # Editor support
 
 Syntax highlighting for Jacquard surface source (`.jac`). Both grammars are
-lexical: they follow `src/surface_lex.ml` and the one-page grammar in
-`docs/surface-syntax.md`, and do not parse. `sh editors/check.sh` checks that
-they reserve exactly the lexer's keywords.
+lexical: they are written from `src/surface_lex.ml` and the one-page grammar in
+`docs/surface-syntax.md`, and do not parse. `sh editors/check.sh`, which runs
+in the development gate, checks that they reserve exactly the lexer's keywords;
+other lexical rules are matched by hand, so the known gaps below apply.
 
 | Directory | Format | Used by |
 |---|---|---|
-| `textmate/` | TextMate grammar, scope `source.jacquard` | Shiki (the website, Astro), VS Code and other TextMate-grammar editors |
+| `textmate/` | TextMate grammar, scope `source.jacquard` | Shiki (jacquardlang.org highlights its samples with it) and TextMate-grammar editors; VS Code needs a small extension manifest, which is not provided here |
 | `vim/` | Vim runtime files: `ftdetect`, `ftplugin`, `syntax` | Vim and Neovim |
 
 ## Vim and Neovim
@@ -54,9 +55,13 @@ type, effect and constructor names, top-level definition heads, calls,
 `` `kind:name` `` escapes, `#hash:kind` and `#group[n]` references, `_`, and
 `jqd { ... }` raw blocks (parentheses, strings and `;` comments).
 
-Lowercase names in a type, such as type variables, are not distinguished from
-term names, because that needs a parser. The bootstrap `.jqd` carrier has no
-grammar here.
+Known gaps:
+
+- Lowercase names in a type, such as type variables, are not distinguished
+  from term names, because that needs a parser.
+- Contextual splits the lexer makes, such as the `.` that ends `forall a b.`,
+  are approximated.
+- The bootstrap `.jqd` carrier has no grammar here.
 
 ## Changing the syntax
 

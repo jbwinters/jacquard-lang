@@ -103,7 +103,7 @@
           "name": "punctuation.definition.string.begin.jacquard"
         }
       },
-      "end": "\"|$",
+      "end": "\"",
       "endCaptures": {
         "0": {
           "name": "punctuation.definition.string.end.jacquard"
@@ -113,7 +113,8 @@
         {
           "include": "#string-escape"
         }
-      ]
+      ],
+      "comment": "Plain strings may span lines, as in the lexer (read_string has no newline case); marked text may not."
     },
     "marked-text": {
       "name": "string.interpolated.jacquard",
@@ -266,7 +267,7 @@
         },
         {
           "name": "constant.other.reference.hash.jacquard",
-          "match": "(#[0-9a-f]{64})(:)(term|op|type|con|effect)",
+          "match": "(#[0-9A-Fa-f]{64})(:)(term|op|type|con|effect)(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)",
           "captures": {
             "2": {
               "name": "punctuation.separator.kind.jacquard"
@@ -329,9 +330,9 @@
       "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])_(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
     },
     "lower-name": {
-      "comment": "Consumes whole atoms so that keywords and numbers never match inside a kebab-case name.",
+      "comment": "Consumes whole atoms so that keywords and numbers never match inside a kebab-case name. A trailing dot is left for the punctuation rule, as in `forall a b.`.",
       "name": "variable.other.jacquard",
-      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])[a-z][A-Za-z0-9.?!_'-]*?(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])[a-z][A-Za-z0-9.?!_'-]*?(?=\\.?(?:$|[\\s(){}\\[\\],:;=|\"`#]|->))"
     },
     "operator": {
       "patterns": [

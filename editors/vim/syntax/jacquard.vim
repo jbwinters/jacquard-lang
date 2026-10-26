@@ -7,9 +7,10 @@ if exists("b:current_syntax")
   finish
 endif
 
-" Names are kebab-case and may end in ? or !, so those characters are part of
-" a word. Dots are not, so `text.from-int` highlights as one call.
-syn iskeyword @,48-57,_,-,?,!
+" Names are kebab-case, may be dotted and may end in ? or !, and the lexer
+" matches keywords against the whole atom, so all of those characters are part
+" of a word: `option.then` is a name, not the keyword `then`.
+syn iskeyword @,48-57,_,-,?,!,.
 
 syn keyword jacquardConditional if then else match
 syn keyword jacquardStatement handle return resume try
@@ -25,10 +26,11 @@ syn match jacquardStorageClass /\<opaque\ze\s\+type\>/
 syn match jacquardCall /\<\l[a-z0-9.-]*[?!]\=\ze(/
 " A top-level signature or definition head; defined after jacquardCall so it wins.
 syn match jacquardDefinition /^\l[a-z0-9.-]*[?!]\=\ze\s*[(:=]/
-syn match jacquardType /\<\u[A-Za-z0-9]*\>/
-syn match jacquardWildcard /\<_\>/
+" An atom also ends at ->, which \> misses because - is a word character.
+syn match jacquardType /\<\u[A-Za-z0-9]*\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
+syn match jacquardWildcard /\<_\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
 
-syn match jacquardNumber /\%(^\|[^A-Za-z0-9_?!.-]\)\@1<=-\=\d\+\%(\.\d*\)\=\%([eE][+-]\=\d\+\)\=\>/
+syn match jacquardNumber /\%(^\|[^A-Za-z0-9_?!.-]\)\@1<=-\=\d\+\%(\.\d*\)\=\%([eE][+-]\=\d\+\)\=\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
 syn match jacquardNumber /[+-]\%(inf\|nan\)\.0/
 
 syn match jacquardEscapedName /`\%(term\|op\|type\|con\|effect\|tvar\|rvar\):[^`]*`/
@@ -38,9 +40,13 @@ syn match jacquardReference /#\x\{64}:\%(term\|op\|type\|con\|effect\)\>/
 syn match jacquardOperator /->\||>\||\|=/
 
 syn match jacquardStringEscape /\\\%([\\"ntr]\|x\x\x\)/ contained
-syn region jacquardString start=/"/ skip=/\\\\\|\\"/ end=/"/ oneline contains=jacquardStringEscape,@Spell
+" Plain strings may span lines, as in the lexer; marked text may not.
+syn region jacquardString start=/"/ skip=/\\\\\|\\"/ end=/"/ contains=jacquardStringEscape,@Spell
 syn match jacquardBraceEscape /{{/ contained
-syn region jacquardInterpolation matchgroup=jacquardInterpolationDelimiter start=/{\ze[^{]/ end=/}/ contained oneline contains=TOP
+" An interpolation ends at the } that balances its {, as in the lexer.
+syn cluster jacquardNotInCode contains=jacquardStringEscape,jacquardBraceEscape,jacquardInterpolation,jacquardTodo,jacquardRawParens,jacquardRawString,jacquardRawComment
+syn region jacquardInterpolation matchgroup=jacquardInterpolationDelimiter start=/{\ze[^{]/ end=/}/ contained oneline contains=ALLBUT,@jacquardNotInCode
+syn region jacquardInterpolationBraces start=/{/ end=/}/ contained oneline transparent contains=ALLBUT,@jacquardNotInCode
 syn region jacquardMarkedText start=/\$"/ skip=/\\\\\|\\"/ end=/"/ oneline contains=jacquardStringEscape,jacquardBraceEscape,jacquardInterpolation,@Spell
 
 " jqd { ... } is raw bootstrap syntax: balanced parentheses, strings and
