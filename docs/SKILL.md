@@ -946,8 +946,11 @@ Do not invent new kernel forms for surface sugar.
   opt-in serial process carrier that evaluates one preflighted invocation over
   stdin/stdout frames (`host-worker-v0.md`). HB.3 publishes the executable
   conformance kit under `spec/host-protocol-v0/kit/` with its evidence pack in
-  `docs/release/host-boundary/`; one external adapter (jacquard-host) replays
-  it. No stable foreign-host ABI, adapter, or HTTP server ships here.
+  `docs/release/host-boundary/`. Independent Python, TypeScript, and Go
+  adapters in the separate
+  [jacquard-host](https://github.com/jbwinters/jacquard-host) repository share
+  one pinned Core release and replay it in full. No stable foreign-host ABI,
+  adapter, or HTTP server ships here.
   Internal evaluator-capture and host-readiness OCaml APIs are not supported
   embedding contracts; future adapters must consume the versioned protocol and
   its executable conformance fixtures, not those OCaml seams.
