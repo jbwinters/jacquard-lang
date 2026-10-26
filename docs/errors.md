@@ -531,11 +531,12 @@ cannot replace or reinterpret the diagnostic.
 ## Host protocol v0 (E16xx)
 
 HB.1 freezes these `process` diagnostics for the experimental
-`jacquard-host-v0` contract. No executable carrier ships yet. Before invocation
-a trustworthy carrier may return them in `fatal`; after invocation they appear
+`jacquard-host-v0` contract. `jac host worker` is the executable serial
+carrier ([`host-worker-v0.md`](host-worker-v0.md)). Before invocation a
+trustworthy carrier may return them in `fatal`; after invocation they appear
 in the single error `outcome`. Carrier loss can prevent Core from emitting a
-diagnostic, in which case E1611 belongs to host/operator evidence rather than a
-fabricated Core result.
+diagnostic, in which case E1611 belongs to host/operator evidence rather than
+a fabricated Core result.
 
 | Code | Meaning | Example |
 |---|---|---|

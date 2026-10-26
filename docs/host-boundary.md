@@ -252,11 +252,13 @@ checked invoke preflight, its later runnable carrier inside Core, executable
 fixtures, and language/runtime evidence. It may contain a tiny fake host used
 only to prove conformance.
 
-The separate, public [`jacquard-host`](https://github.com/jbwinters/jacquard-host) repository owns real adapters,
-sockets, persistence, the minimal serial HTTP integration, and the
-requirements report fed back to Core. Its adapters are independent Python,
+The separate, public
+[`jacquard-host`](https://github.com/jbwinters/jacquard-host) repository owns
+real adapters, sockets, persistence, the minimal serial HTTP integration, and
+the requirements report fed back to Core. Its adapters are independent Python,
 TypeScript, and Go implementations of this protocol, each with an SDK. They
-share one pinned Core release, recorded in that repository's `core-pin.json`. HTTP parsing and routing written in Jacquard remain external
+share one pinned Core release, recorded in that repository's `core-pin.json`.
+HTTP parsing and routing written in Jacquard remain external
 library/application code; they do not belong in the language repository.
 
 The real readability application moves to its own repository before it gains
@@ -275,7 +277,7 @@ headers are not smuggled into HB.0.
 |---|---|---|
 | First-party programs | safety for hostile uploaded Jacquard code | separate-process or equivalent isolation design, hostile resource tests, and reviewed threat model |
 | Trusted adapter and OS | protection from a lying host or broader OS credentials | independently enforced isolation/authentication plus external security review |
-| Experimental serial carrier with a published kit | interoperability guarantees beyond the pinned kit, or embedding support | independent adapters in three languages (Python, TypeScript, and Go in jacquard-host) now pass the same fixtures; removal is Core's v1 decision (see `release/host-boundary/LIMITS.md` and the next row) |
+| Experimental serial carrier with a published kit | interoperability guarantees beyond the pinned kit, or embedding support | independent adapters in three languages (Python, TypeScript, and Go in jacquard-host) now match the same 21 recordings, including the disclosed `noncanonical-target-hash` divergence; removal remains Core's decision (see `release/host-boundary/LIMITS.md` and the next row) |
 | Experimental process carrier first | permanent ABI stability or low-overhead embedding | two independent adapters and one real integration pass the frozen fixtures before v1 |
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
