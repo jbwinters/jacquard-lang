@@ -30,8 +30,8 @@ syn match jacquardDefinition /^\l[a-z0-9.-]*[?!]\=\ze\s*[(:=]/
 syn match jacquardType /\<\u[A-Za-z0-9]*\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
 syn match jacquardWildcard /\<_\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
 
-syn match jacquardNumber /\%(^\|[^A-Za-z0-9_?!.-]\)\@1<=-\=\d\+\%(\.\d*\)\=\%([eE][+-]\=\d\+\)\=\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
-syn match jacquardNumber /[+-]\%(inf\|nan\)\.0/
+syn match jacquardNumber /\%(^\|[^A-Za-z0-9_?!.+-]\)\@1<=-\=\d\+\%(\.\d*\)\=\%([eE][+-]\=\d\+\)\=\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
+syn match jacquardNumber /\%(^\|[^A-Za-z0-9_?!.+-]\)\@1<=[+-]\%(inf\|nan\)\.0\ze\%(->\|[^A-Za-z0-9_?!.-]\|$\)/
 
 syn match jacquardEscapedName /`\%(term\|op\|type\|con\|effect\|tvar\|rvar\):[^`]*`/
 syn match jacquardReference /#group\[\d\+\]/

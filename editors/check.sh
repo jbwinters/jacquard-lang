@@ -15,8 +15,8 @@ trap 'rm -rf "$tmp"' EXIT
 
 # One keyword per line, as `ocamlformat` lays the list out; comments are
 # dropped first, and every quoted line must yield a keyword.
-sed -n '/^let keywords =/,/]/p' "$root/src/surface_lex.ml" |
-  sed 's/(\*.*\*)//g' >"$tmp/list"
+sed -n '/^let keywords =/,/^[[:space:]]*]/p' "$root/src/surface_lex.ml" |
+  sed 's/(\*[^*]*\*)//g' >"$tmp/list"
 sed -n 's/^[[:space:]]*"\([a-z]*\)";\{0,1\}[[:space:]]*$/\1/p' "$tmp/list" | sort >"$tmp/lexer"
 quoted=$(grep -c '"' "$tmp/list" || true)
 if [ ! -s "$tmp/lexer" ] || [ "$quoted" -ne "$(wc -l <"$tmp/lexer")" ]; then
