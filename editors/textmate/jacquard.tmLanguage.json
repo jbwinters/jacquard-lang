@@ -1,0 +1,389 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Jacquard",
+  "scopeName": "source.jacquard",
+  "fileTypes": [
+    "jac"
+  ],
+  "comment": "Lexical grammar of Jacquard surface syntax (.jac). Source of truth: src/surface_lex.ml and docs/surface-syntax.md (One-page grammar). Atom boundaries follow the lexer: an atom ends at whitespace, ( ) { } [ ] , : ; = | \" ` # or ->.",
+  "patterns": [
+    {
+      "include": "#source"
+    }
+  ],
+  "repository": {
+    "source": {
+      "patterns": [
+        {
+          "include": "#comment"
+        },
+        {
+          "include": "#raw"
+        },
+        {
+          "include": "#marked-text"
+        },
+        {
+          "include": "#string"
+        },
+        {
+          "include": "#escaped-name"
+        },
+        {
+          "include": "#reference"
+        },
+        {
+          "include": "#keyword"
+        },
+        {
+          "include": "#definition"
+        },
+        {
+          "include": "#number"
+        },
+        {
+          "include": "#call"
+        },
+        {
+          "include": "#upper-name"
+        },
+        {
+          "include": "#wildcard"
+        },
+        {
+          "include": "#lower-name"
+        },
+        {
+          "include": "#operator"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "comment": {
+      "patterns": [
+        {
+          "name": "comment.line.documentation.jacquard",
+          "match": "(--\\|).*$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.jacquard"
+            }
+          }
+        },
+        {
+          "name": "comment.line.double-dash.jacquard",
+          "match": "(--).*$",
+          "captures": {
+            "1": {
+              "name": "punctuation.definition.comment.jacquard"
+            }
+          }
+        }
+      ]
+    },
+    "string-escape": {
+      "patterns": [
+        {
+          "name": "constant.character.escape.jacquard",
+          "match": "\\\\(?:[\\\\\"ntr]|x[0-9A-Fa-f]{2})"
+        },
+        {
+          "name": "invalid.illegal.escape.jacquard",
+          "match": "\\\\."
+        }
+      ]
+    },
+    "string": {
+      "name": "string.quoted.double.jacquard",
+      "begin": "\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.jacquard"
+        }
+      },
+      "end": "\"|$",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.jacquard"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#string-escape"
+        }
+      ]
+    },
+    "marked-text": {
+      "name": "string.interpolated.jacquard",
+      "begin": "\\$\"",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.begin.jacquard"
+        }
+      },
+      "end": "\"|$",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.string.end.jacquard"
+        }
+      },
+      "patterns": [
+        {
+          "include": "#string-escape"
+        },
+        {
+          "name": "constant.character.escape.brace.jacquard",
+          "match": "\\{\\{"
+        },
+        {
+          "name": "meta.embedded.expression.jacquard",
+          "contentName": "source.jacquard",
+          "begin": "\\{",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.embedded.begin.jacquard"
+            }
+          },
+          "end": "\\}|$",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.embedded.end.jacquard"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#interpolation-braces"
+            },
+            {
+              "include": "#source"
+            }
+          ]
+        }
+      ]
+    },
+    "interpolation-braces": {
+      "begin": "\\{",
+      "end": "\\}|$",
+      "patterns": [
+        {
+          "include": "#interpolation-braces"
+        },
+        {
+          "include": "#source"
+        }
+      ]
+    },
+    "raw": {
+      "comment": "jqd { ... } enters the bootstrap reader's raw mode: balanced parentheses, strings and ; comments, ending at the first } outside parentheses.",
+      "begin": "(?<![^\\s(){}\\[\\],:;=|\"`#])(jqd)\\s*(\\{)",
+      "beginCaptures": {
+        "1": {
+          "name": "keyword.other.raw.jacquard"
+        },
+        "2": {
+          "name": "punctuation.section.raw.begin.jacquard"
+        }
+      },
+      "end": "\\}",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.section.raw.end.jacquard"
+        }
+      },
+      "contentName": "meta.embedded.block.jqd",
+      "patterns": [
+        {
+          "include": "#raw-form"
+        }
+      ]
+    },
+    "raw-form": {
+      "patterns": [
+        {
+          "name": "comment.line.semicolon.jqd",
+          "match": ";.*$"
+        },
+        {
+          "name": "string.quoted.double.jqd",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [
+            {
+              "include": "#string-escape"
+            }
+          ]
+        },
+        {
+          "begin": "\\(",
+          "beginCaptures": {
+            "0": {
+              "name": "punctuation.section.parens.begin.jqd"
+            }
+          },
+          "end": "\\)",
+          "endCaptures": {
+            "0": {
+              "name": "punctuation.section.parens.end.jqd"
+            }
+          },
+          "patterns": [
+            {
+              "include": "#raw-form"
+            }
+          ]
+        },
+        {
+          "name": "constant.numeric.jqd",
+          "match": "(?<![^\\s(])[+-]?(?:inf\\.0|nan\\.0|[0-9]+(?:\\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)(?=[\\s()]|$)"
+        }
+      ]
+    },
+    "escaped-name": {
+      "name": "variable.other.escaped.jacquard",
+      "match": "(`)(term|op|type|con|effect|tvar|rvar)(:)[^`\\n]*(`)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.escaped.begin.jacquard"
+        },
+        "2": {
+          "name": "storage.modifier.kind.jacquard"
+        },
+        "3": {
+          "name": "punctuation.separator.kind.jacquard"
+        },
+        "4": {
+          "name": "punctuation.definition.escaped.end.jacquard"
+        }
+      }
+    },
+    "reference": {
+      "patterns": [
+        {
+          "name": "constant.other.reference.group.jacquard",
+          "match": "#group\\[[0-9]+\\]"
+        },
+        {
+          "name": "constant.other.reference.hash.jacquard",
+          "match": "(#[0-9a-f]{64})(:)(term|op|type|con|effect)",
+          "captures": {
+            "2": {
+              "name": "punctuation.separator.kind.jacquard"
+            },
+            "3": {
+              "name": "storage.modifier.kind.jacquard"
+            }
+          }
+        }
+      ]
+    },
+    "keyword": {
+      "comment": "Exactly Surface_lex.keywords, plus the contextual `opaque` before `type`. editors/check.sh keeps this list in step with the lexer.",
+      "patterns": [
+        {
+          "name": "keyword.control.jacquard",
+          "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])(match|if|then|else|handle|return|resume|try)(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+        },
+        {
+          "name": "storage.modifier.jacquard",
+          "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])(once|multi|opaque(?=\\s+type(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)))(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+        },
+        {
+          "name": "storage.type.jacquard",
+          "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])(type|effect|fn|let|rec)(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+        },
+        {
+          "name": "keyword.other.jacquard",
+          "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])(where|forall|as|with|quote|unquote|jqd)(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+        }
+      ]
+    },
+    "definition": {
+      "comment": "A top-level signature or definition head: a name at the start of a line followed by :, ( or =.",
+      "match": "^([a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*(?:\\.[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*)*[?!]?)(?=\\s*[:(=])",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.jacquard"
+        }
+      }
+    },
+    "number": {
+      "name": "constant.numeric.jacquard",
+      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])(?:[+-](?:inf|nan)\\.0|-?[0-9]+(?:\\.[0-9]*)?(?:[eE][+-]?[0-9]+)?)(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+    },
+    "call": {
+      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])([a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*(?:\\.[a-z][a-z0-9]*(?:-[a-z][a-z0-9]*)*)*[?!]?)(?=\\()",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.call.jacquard"
+        }
+      }
+    },
+    "upper-name": {
+      "name": "entity.name.type.jacquard",
+      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])[A-Z][A-Za-z0-9]*(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+    },
+    "wildcard": {
+      "name": "variable.language.wildcard.jacquard",
+      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])_(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+    },
+    "lower-name": {
+      "comment": "Consumes whole atoms so that keywords and numbers never match inside a kebab-case name.",
+      "name": "variable.other.jacquard",
+      "match": "(?<![^\\s(){}\\[\\],:;=|\"`#>])[a-z][A-Za-z0-9.?!_'-]*?(?=$|[\\s(){}\\[\\],:;=|\"`#]|->)"
+    },
+    "operator": {
+      "patterns": [
+        {
+          "name": "keyword.operator.arrow.jacquard",
+          "match": "->"
+        },
+        {
+          "name": "keyword.operator.pipe.jacquard",
+          "match": "\\|>"
+        },
+        {
+          "name": "keyword.operator.bar.jacquard",
+          "match": "\\|"
+        },
+        {
+          "name": "keyword.operator.assignment.jacquard",
+          "match": "="
+        },
+        {
+          "name": "punctuation.separator.annotation.jacquard",
+          "match": ":"
+        }
+      ]
+    },
+    "punctuation": {
+      "patterns": [
+        {
+          "name": "punctuation.separator.comma.jacquard",
+          "match": ","
+        },
+        {
+          "name": "punctuation.terminator.semicolon.jacquard",
+          "match": ";"
+        },
+        {
+          "name": "punctuation.accessor.jacquard",
+          "match": "\\."
+        },
+        {
+          "name": "punctuation.section.braces.jacquard",
+          "match": "[{}]"
+        },
+        {
+          "name": "punctuation.section.parens.jacquard",
+          "match": "[()]"
+        },
+        {
+          "name": "punctuation.section.brackets.jacquard",
+          "match": "[\\[\\]]"
+        }
+      ]
+    }
+  }
+}
