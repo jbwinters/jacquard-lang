@@ -157,10 +157,11 @@ jac export PROGRAM.jac -o PROGRAM.jqd  # explicit evidence/debug carrier only
 `check` typechecks every declaration. `run` loads declarations, then evaluates
 each bare top-level expression in order, and typechecks only what those
 expressions reach, so run `check` to catch errors in code nothing calls yet.
-`check --manifest` checks the inferred requirements of the file's bare
-top-level expressions against the supplied grant set and never runs the
-program. A file of declarations only therefore always passes; include the
-entry call (for example `main()`). Important exit codes are:
+`check --manifest` checks the inferred requirements of the file's bare top-level
+expressions against the supplied grant set and never runs the program. A file of
+declarations only still typechecks but passes the authority comparison
+trivially; include the entry call (for example `main()`). Important exit codes
+are:
 
 - `0`: success
 - `1`: checker or ordinary diagnostic failure
@@ -221,7 +222,8 @@ Names follow these rules:
 
 Reserved words are `type`, `effect`, `once`, `multi`, `fn`, `let`, `rec`,
 `match`, `handle`, `return`, `resume`, `quote`, `unquote`, `if`, `then`,
-`else`, `as`, `where`, `forall`, and `jqd`.
+`else`, `as`, `where`, `forall`, `jqd`, `try`, and `with`. `opaque` is a
+contextual keyword, special only before a top-level `type`.
 
 ### Values, Calls, And Definitions
 
@@ -327,8 +329,9 @@ greet(name) = {
 
 Local recursive bindings must bind functions. Jacquard is strict and
 evaluates arguments left to right. A local `let rec` whose body performs an
-effect currently fails to typecheck (E0801, a known checker bug); define that
-recursive function at top level instead.
+effect currently fails row inference (E0801, a known checker bug) unless its
+recursive call is annotated, as in `(go : (Int) ->{Console} ())(k)`; defining
+the function at top level avoids the problem.
 
 `try` propagates a `Result` error out of the enclosing block. `let p = try e`
 binds the `Ok` payload; `try e` alone requires `Ok` and discards it. When `e` is
@@ -574,9 +577,12 @@ than introducing raw authority. Put one `workspace.live-layer` outside the
 forwarding chain to terminate it in real drivers. Do not create another
 sequence owner inside a layer or infer support for argument transforms.
 
-Use `resume _` when a clause deliberately never resumes. **Since 0.3.0:** the
-0.3.0 checker crashes on `resume _` (internal error, exit 125); with that
-release, bind a name you never use, such as `resume ignored`.
+Use `resume _` when a clause deliberately never resumes. A handler inside
+`quote` must name its continuation instead (E1245), because quoted code is
+name-addressed. **Since 0.3.0:** the 0.3.0 checker can crash on `resume _` in
+some handlers (internal error `Bug_unprintable`, exit 125) and accepts it
+inside `quote`; with that release, bind a name you never use, such as
+`resume ignored`.
 
 ```jacquard doctest=skill-resume-wildcard mode=check fixture=skill-resume-wildcard.jac stdout=skill-resume-wildcard.stdout stderr=empty exit=0
 to-option(body) =
@@ -660,7 +666,7 @@ file        := top-item*
 top-item    := signature | definition | type-decl | effect-decl | expression
 signature   := name ":" type
 definition  := name ["(" ([label ":"] pattern ("," [label ":"] pattern)*)? ")"] "=" expression
-type-decl   := "type" Type type-vars? "=" ("|" constructor)+
+type-decl   := ["opaque"] "type" Type type-vars? "=" ("|" constructor)+
 effect-decl := mode "effect" Effect type-vars? "where" "{" uniform-op-signature+ "}"
 | "effect" Effect type-vars? "where" "{" mode-op-signature+ "}"
 uniform-op-signature := name ":" "(" ([label ":"] type ("," [label ":"] type)*)? ")" "->" type
@@ -674,8 +680,9 @@ call-items  := [label ":"] expression ("," [label ":"] expression)*
 primary     := literal | marked-text | name | tuple | list | block | fn | match | if
              | handle | quote | unquote | annotation
 marked-text := '$"' ("{{" | "{" expression "}" | character-or-escape)* '"'
-block       := "{" (let-item | expression)* "}"
+block       := "{" (let-item | try-item | expression)* "}"
 let-item    := "let" ["rec"] pattern ["(" patterns? ")"] "=" expression
+try-item    := ["let" pattern "="] "try" expression
 fn          := "fn" "(" patterns? ")" "->" expression
 match       := "match" expression "{" ("|" pattern "->" expression)+ "}"
 if          := "if" expression "then" expression "else" expression
@@ -733,8 +740,8 @@ Rules to rely on:
 The world operations are called directly:
 
 - Console: `println(text)` writes a line; `print(text)` writes without a
-  newline; `read-line()` returns `Text` (`""` at end of input);
-  `next-line()` returns `Option Text`.
+  newline; `read-line()` returns `Text` (`""` at end of input). The
+  `ConsoleInput` operation `next-line()` returns `Option Text`.
 - Fs: `read(path)`, `write(path, text)`, `list-dir(path)`.
 - Net: `fetch(MkRequest(url: u, body: b))` returns a `Response`, whose
   constructor is `MkResponse(status, body)`.
@@ -961,14 +968,14 @@ units. Consequently:
   ABI. Binder and callable renames preserve it; a conflicting relabel is
   E0612 rather than an identity-silent API change.
 
-Use `jac fmt --write` for canonical layout. The formatter also orders
-top-level definitions so each one follows the definitions it uses, so adding a
-call to a later definition can move the caller. Use stores and `jac diff` when
-you need rename classification, changed canonical subtrees, or affected
-dependents. `jac diff` accepts two stores or two declaration-only source files;
-a source file with a bare top-level expression is refused (E0610), so diff a
-program without its entry call. Its output names callees by content hash. Hash or diff equality establishes canonical structural identity,
-not general behavioral equivalence.
+Use `jac fmt --write` for canonical layout. The formatter also orders top-level
+definitions so each one follows the definitions it uses, so adding a call to a
+later definition can move the caller. Use stores and `jac diff` when you need
+rename classification, changed canonical subtrees, or affected dependents. `jac
+diff` accepts two stores or two declaration-only source files; a source file
+with a bare top-level expression is refused (E0610), so diff a program without
+its entry call. Its output names callees by content hash. Hash or diff equality
+establishes canonical structural identity, not general behavioral equivalence.
 
 Record/replay logs contain operation, argument, and result triples. Strict
 replay fails closed on operation or argument drift. Counterfactual `--fork`
@@ -1113,8 +1120,9 @@ Do not invent new kernel forms for surface sugar.
 - Process substitution is not seekable input for `jac run`; use a real file.
 - `jac test` rejects bare top-level expressions in test files (E1001).
 - `--dry-run` refuses a program whose row includes `Eval` (E1002).
-- A local `let rec` whose body performs an effect fails to typecheck (E0801);
-  use a top-level recursive definition.
+- A local `let rec` whose body performs an effect fails row inference (E0801)
+  unless the recursive call is annotated with its type; use a top-level
+  recursive definition.
 - W1201 warns when a parameter is named like a constructor in scope (`job`
   for `Job`, `allow` for the prelude's `Allow`); rename the parameter.
 
