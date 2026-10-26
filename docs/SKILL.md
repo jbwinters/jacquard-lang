@@ -23,6 +23,11 @@ visible to the checker and tools:
 This file is self-contained for public use. A repository checkout is needed
 only to develop the OCaml implementation, not to install or write Jacquard.
 
+This guide describes the current `main` branch. Where it differs from the
+latest release (0.3.0), the difference is marked **Since 0.3.0**. Every
+`jacquard` example in this file is run or checked by the repository's
+documentation tests (`test/docs-doctest`).
+
 ## Install
 
 The release installer downloads a checksum-verified binary, the standard
@@ -74,6 +79,7 @@ jac check PROGRAM.jac --manifest fs,net,console
 jac run PROGRAM.jac
 jac run PROGRAM.jac --allow console --allow net
 jac run PROGRAM.jac --dry-run
+jac run PROGRAM.jac --fuel 1000000   # bounded: running out is E0919, exit 2
 
 # Local projects (project.jqd): compose several files, pin dependencies,
 # bundle; see docs/designs/project-structure.md.
@@ -82,6 +88,16 @@ jac project run --project DIR ENTRY --allow console
 jac project test --project DIR --seed 42 --no-cache
 jac project build --project DIR ENTRY -o OUT
 jac project pin --project DIR
+
+# Public API identity: emit a source's interface-v1 manifest, verify a store
+# against one, or classify a change between two manifests.
+jac interface emit LIB.jac
+jac interface verify LIB.jqi STORE
+jac interface diff OLD.jqi NEW.jqi
+
+# Since 0.3.0: compare two checked versions of an entry point over declared
+# cases and report where behavior differs (docs/behavior-review.md).
+jac review run --old OLD.jac --new NEW.jac --cases CASES.jac --entry NAME --domain NAME
 
 # Compare complete transcripts under schedule/Secret variation, or only result
 # values under one live grant versus the dry world.
@@ -138,20 +154,24 @@ jac export PROGRAM.jac -o PROGRAM.jqd  # explicit evidence/debug carrier only
 ./program --allow console
 ```
 
-`check --manifest` checks the inferred requirements against the supplied grant
-set and never runs the program. `run` loads declarations, then evaluates each
-bare top-level expression in order. Important exit codes are:
+`check` typechecks every declaration. `run` loads declarations, then evaluates
+each bare top-level expression in order, and typechecks only what those
+expressions reach, so run `check` to catch errors in code nothing calls yet.
+`check --manifest` checks the inferred requirements of the file's bare
+top-level expressions against the supplied grant set and never runs the
+program. A file of declarations only therefore always passes; include the
+entry call (for example `main()`). Important exit codes are:
+
+- `0`: success
+- `1`: checker or ordinary diagnostic failure
+- `2`: runtime failure, including running out of `--fuel` (E0919)
+- `3`: unhandled or ungranted effect
+- `124`: command-line usage error
 
 `tiers` reports handler syntax and native lowering as separate tables. A
 tail-resumptive source shape is tokenless only for a `multi` operation; every
 `once` clause materializes the shared affine resume token, including a
 syntactically tail-resumptive clause.
-
-- `0`: success
-- `1`: checker or ordinary diagnostic failure
-- `2`: runtime failure
-- `3`: unhandled or ungranted effect
-- `124`: command-line usage error
 
 Use stderr for diagnostics and stdout for successful program output. Always
 provide an explicit seed for reproducible sampling and property tests.
@@ -208,7 +228,7 @@ Reserved words are `type`, `effect`, `once`, `multi`, `fn`, `let`, `rec`,
 Calls are uncurried. A function declared with two parameters is called with
 two arguments in one call.
 
-```jacquard
+```jacquard doctest=skill-definitions mode=run fixture=skill-definitions.jac stdout=skill-definitions.stdout stderr=empty exit=0
 limit = 100
 
 add-tax(amount, rate) = real.mul(amount, real.add(1.0, rate))
@@ -222,7 +242,7 @@ answer() = increment(41)
 
 answer()
 
-resize(photo, scale: 2)
+resize("photo.png", scale: 2)
 ```
 
 An eligible callable may declare an unlabeled positional prefix followed by an
@@ -272,7 +292,9 @@ returns a function. Zero-argument functions are thunks and are called with
 
 Marked text interpolation keeps conversions explicit:
 
-```jacquard
+```jacquard doctest=skill-interpolation mode=run fixture=skill-interpolation.jac stdout=skill-interpolation.stdout stderr=empty exit=0
+count = 3
+
 $"total: {text.from-int(count)} of {{limit}"
 ```
 
@@ -287,7 +309,7 @@ A block is one expression. Each `let` scopes over the rest of the block. A
 non-final expression is sequencing whose value is discarded; the final
 expression is the block's value.
 
-```jacquard
+```jacquard doctest=skill-blocks mode=check fixture=skill-blocks.jac stdout=skill-blocks.stdout stderr=empty exit=0
 factorial(n) = {
   let rec go(k, acc) =
     match k {
@@ -298,19 +320,45 @@ factorial(n) = {
 }
 
 greet(name) = {
-  console.print(text.concat("hello ", name))
+  println(text.concat("hello ", name))
   text.length(name)
 }
 ```
 
 Local recursive bindings must bind functions. Jacquard is strict and
-evaluates arguments left to right.
+evaluates arguments left to right. A local `let rec` whose body performs an
+effect currently fails to typecheck (E0801, a known checker bug); define that
+recursive function at top level instead.
+
+`try` propagates a `Result` error out of the enclosing block. `let p = try e`
+binds the `Ok` payload; `try e` alone requires `Ok` and discards it. When `e` is
+`Err(x)`, the rest of the block is skipped and the block's value is `Err(x)`.
+The scope is the innermost `{ ... }` block, the error type must match exactly,
+and `try` adds no effect (it is sugar for a `match`).
+
+```jacquard doctest=skill-try mode=run fixture=skill-try.jac stdout=skill-try.stdout stderr=empty exit=0
+parse-age(raw) =
+  match text.to-int(raw) {
+    | Some(n) -> if int.between?(n, 0, 150) then Ok(n) else Err($"out of range: {raw}")
+    | None -> Err($"not a number: {raw}")
+  }
+
+total-age(a, b) = {
+  let x = try parse-age(a)
+  let y = try parse-age(b)
+  Ok(add(x, y))
+}
+
+total-age("30", "12")
+
+total-age("30", "abc")
+```
 
 ### Conditionals And Matches
 
 `if` requires both branches and is an expression:
 
-```jacquard
+```jacquard doctest=skill-if mode=check fixture=skill-if.jac stdout=skill-if.stdout stderr=empty exit=0
 sign(n) =
   if int.lt?(n, 0) then "negative"
   else if eq(n, 0) then "zero"
@@ -321,7 +369,7 @@ sign(n) =
 literals, constructors, tuples, and `as` patterns. Constructor patterns start
 uppercase; a lowercase pattern always binds a new variable.
 
-```jacquard
+```jacquard doctest=skill-match mode=check fixture=skill-match.jac stdout=skill-match.stdout stderr=empty exit=0
 type Option a =
   | None
   | Some a
@@ -336,12 +384,12 @@ head(xs) =
 For constructors with labeled fields, a match may select only the fields it
 needs:
 
-```jacquard
+```jacquard doctest=skill-labeled-patterns mode=check fixture=skill-labeled-patterns.jac stdout=skill-labeled-patterns.stdout stderr=empty exit=0
 type Snapshot =
   | Snapshot(id: Int, error: Int, vendor: Text)
 
-describe(snapshot) =
-  match snapshot {
+describe(snap) =
+  match snap {
     | Snapshot(vendor: vendor, error: problem) -> (problem, vendor)
   }
 ```
@@ -360,15 +408,15 @@ semantically.
 
 Use a braced block when an arm sequences work:
 
-```jacquard
+```jacquard doctest=skill-match-block mode=check fixture=skill-match-block.jac stdout=skill-match-block.stdout stderr=empty exit=0
 report(result) =
   match result {
     | Ok(value) -> {
-        console.print("ok")
+        println("ok")
         value
       }
     | Err(message) -> {
-        console.print(message)
+        println(message)
         0
       }
   }
@@ -382,7 +430,7 @@ patterns. Duplicate binders are rejected. There are no guards or or-patterns.
 `()` is both the unit value and unit type. `(a, b)` is a tuple. List literals
 lower to `Cons`/`Nil`.
 
-```jacquard
+```jacquard doctest=skill-pipe mode=run fixture=skill-pipe.jac stdout=skill-pipe.stdout stderr=empty exit=0
 top-three(xs) =
   xs
   |> list.filter(fn (n) -> int.gt?(n, 0))
@@ -419,7 +467,7 @@ Tuples use `(A, B)`, unit uses `()`, and type application is whitespace-based:
 Algebraic data types are declared with constructors. Constructor fields may
 be positional or labeled:
 
-```jacquard
+```jacquard doctest=skill-types mode=check fixture=skill-types.jac stdout=empty stderr=empty exit=0
 type Decision =
   | Ship
   | Canary(percent: Int)
@@ -429,6 +477,11 @@ type Result e a =
   | Err e
   | Ok a
 ```
+
+Positional constructor fields are written like type application, separated
+by spaces: `| Leaf Int`, `| Branch Tree Tree`, `| Cons a (List a)`.
+Parentheses after a constructor introduce labeled fields, `| Leaf(value: Int)`;
+positional types in parentheses (`| Leaf(Int)`) are refused with E1225.
 
 Labels do not create records. A label that every constructor carries
 generates an accessor named after the type: `type Pair = | Pair(left: Int,
@@ -443,6 +496,20 @@ covers only the constructor it names and is refused as a non-exhaustive match
 no accessor or setter; select it with a pattern. Construct values either positionally with `Canary(5)` or by label with
 `Canary(percent: 5)`; match either positionally with
 `Canary(percent)` or by selection with `Canary(percent: value)`.
+Prelude types declared in `.jqd` (such as `Request` and `Response`) have no
+generated accessors; read their fields with a match.
+
+`opaque type` seals a type's constructors to the source file or project that
+declares it. Other code must go through the owner's functions, so the owner can
+enforce an invariant. Accessors are still generated, setters are not, and a
+value prints as `<opaque name>` (see `demos/abstract-types`).
+
+```jacquard doctest=skill-opaque mode=check fixture=skill-opaque.jac stdout=skill-opaque.stdout stderr=empty exit=0
+opaque type Percent = Percent(value: Int)
+
+percent.of-int(n) =
+  if int.between?(n, 0, 100) then Ok(Percent(n)) else Err("out of range")
+```
 
 Comma-separated surface groups accept an optional final comma. Compact
 formatting removes it, except for singleton tuples such as `(T,)`; when a
@@ -455,7 +522,7 @@ or `.jqd` behavior.
 Effects declare operations. Calling an operation looks like an ordinary call;
 there is no `perform` keyword.
 
-```jacquard
+```jacquard doctest=skill-effects mode=check fixture=skill-effects.jac stdout=empty stderr=empty exit=0
 multi effect Choice where {
   choose : () -> Bool
 }
@@ -479,13 +546,19 @@ escape; it is engineering enforcement, not a formal proof. The interpreter and
 native runtime independently report E0906 if one captured `once` instance is
 resumed twice.
 
-```jacquard
+```jacquard doctest=skill-multi-handler mode=run fixture=skill-multi-handler.jac stdout=skill-multi-handler.stdout stderr=empty exit=0
+multi effect Choice where {
+  choose : () -> Bool
+}
+
 all-choices(body) =
   handle body() {
     | return value -> [value]
     | choose() resume continue ->
         list.append(continue(True), continue(False))
   }
+
+all-choices(fn () -> (choose(), choose()))
 ```
 
 Handlers are deep: operations performed after `continue(...)` re-enter the
@@ -501,9 +574,11 @@ than introducing raw authority. Put one `workspace.live-layer` outside the
 forwarding chain to terminate it in real drivers. Do not create another
 sequence owner inside a layer or infer support for argument transforms.
 
-Use `resume _` when a clause deliberately never resumes:
+Use `resume _` when a clause deliberately never resumes. **Since 0.3.0:** the
+0.3.0 checker crashes on `resume _` (internal error, exit 125); with that
+release, bind a name you never use, such as `resume ignored`.
 
-```jacquard
+```jacquard doctest=skill-resume-wildcard mode=check fixture=skill-resume-wildcard.jac stdout=skill-resume-wildcard.stdout stderr=empty exit=0
 to-option(body) =
   handle body() {
     | return value -> Some(value)
@@ -513,11 +588,24 @@ to-option(body) =
 
 If the handled expression is not an atomic call, use two braces:
 
-```jacquard
-handle { match direction { | Up -> risky() | Down -> safe() } } {
-  | return value -> Some(value)
-  | abort() resume _ -> None
-}
+```jacquard doctest=skill-two-brace-handler mode=run fixture=skill-two-brace-handler.jac stdout=skill-two-brace-handler.stdout stderr=empty exit=0
+type Direction =
+  | Up
+  | Down
+
+risky() = abort()
+
+safe() = 1
+
+attempt(direction) =
+  handle { match direction { | Up -> risky() | Down -> safe() } } {
+    | return value -> Some(value)
+    | abort() resume _ -> None
+  }
+
+attempt(Up)
+
+attempt(Down)
 ```
 
 Handling subtracts only the handled effect from the row and forwards all other
@@ -529,7 +617,7 @@ scripted, hostile, or probabilistic handlers.
 `quote` captures unresolved surface structure as a `Code` value. `unquote`
 splices a `Code` value while inside a quote.
 
-```jacquard
+```jacquard doctest=skill-quote mode=check fixture=skill-quote.jac stdout=skill-quote.stdout stderr=empty exit=0
 make-call(argument) = quote { add(unquote(argument), 1) }
 
 candidate = quote { fn (x) -> add(x, 1) }
@@ -642,6 +730,36 @@ Rules to rely on:
 - Top-level rows are closed. When an API expects an open-row thunk, eta-expand
   a named computation: `fn () -> model()`.
 
+The world operations are called directly:
+
+- Console: `println(text)` writes a line; `print(text)` writes without a
+  newline; `read-line()` returns `Text` (`""` at end of input);
+  `next-line()` returns `Option Text`.
+- Fs: `read(path)`, `write(path, text)`, `list-dir(path)`.
+- Net: `fetch(MkRequest(url: u, body: b))` returns a `Response`, whose
+  constructor is `MkResponse(status, body)`.
+- Clock: `now()` returns an `Int`; `sleep(ms)`.
+- Secret: `secret.read(SecretRef(name: n, version: None))` returns an
+  unprintable `Secret`; `secret.expose(s)` returns its `Text` and is itself a
+  `Secret` operation.
+
+```jacquard doctest=skill-world-operations mode=check fixture=skill-world-operations.jac stdout=skill-world-operations.stdout stderr=empty exit=0
+ask-name() = {
+  println("name?")
+  match next-line() {
+    | Some(name) -> println($"hello {name}")
+    | None -> println("no input")
+  }
+}
+
+status-of(url) =
+  match fetch(MkRequest(url: url, body: "")) {
+    | MkResponse(status: status) -> status
+  }
+
+token() = secret.expose(secret.read(SecretRef(name: "deploy-token", version: None)))
+```
+
 Never infer authority from a hand-written manifest or comment; use the checked
 row. Never add a grant merely to silence a refusal without reviewing why the
 row contains that effect.
@@ -657,7 +775,7 @@ The prelude defines distribution values such as `Bernoulli(p)`,
 `Categorical(weighted-pairs)`, and `UniformInt(low, high)`. Models perform
 `sample` and `observe` through the `Dist` effect.
 
-```jacquard
+```jacquard doctest=skill-dist mode=check fixture=skill-dist.jac stdout=skill-dist.stdout stderr=empty exit=0
 coin-model : () ->{Dist} Bool
 coin-model() = {
   let first = `op:sample`(Bernoulli(0.5))
@@ -698,10 +816,17 @@ Jacquard uses explicit dictionaries instead of implicit typeclasses. Operations
 that need equality, ordering, rendering, or generic arithmetic receive `Eq`,
 `Ord`, `Show`, or `Num` values:
 
-```jacquard
+```jacquard doctest=skill-dictionaries mode=run fixture=skill-dictionaries.jac stdout=skill-dictionaries.stdout stderr=empty exit=0
+numbers = [3, 1, 2]
+
+names = ["alice", "bob"]
+
+three-numbers() = check.eq(list.length(numbers), 3, int.eq, int.show, "three numbers")
+
 list.sort(numbers, int.ord)
+
 list.contains?(names, "alice", text.eq)
-check.eq(actual, expected, int.eq, int.show, "same value")
+
 num.add(int.num)(40, 2)
 ```
 
@@ -727,13 +852,20 @@ Core data and common functions:
 - Numeric: dotted `int.add`/`sub`/`mul`/`div` and `real.add`/`sub`/`mul`/`div`;
   compatibility `add`/`sub`/`mul`/`div`; `mod`, `eq`, and `lt`; `int.*` and
   `real.*` predicates/conversions; generic calls use an explicit `Num` value.
-- Text: `text.concat`, `text.join`, `text.split`, `text.contains?`,
-  `text.length`, `text.from-int`, `text.from-real-fixed(x, decimals)`,
+- Text: `text.concat`, `text.join(a, b, ...)` (variadic, no separator),
+  `text.join-list(parts, separator)`, `text.split`, `text.contains?`,
+  `text.slice(t, start, end)` (codepoint indexes, end exclusive),
+  `text.length`, `text.from-int`, `text.to-int` (`Option Int`),
+  `text.from-real-fixed(x, decimals)`,
   the singleton-codepoint classes `text.ascii-digit?`/`ascii-letter?`/
-  `ascii-space?`, `text.ascii-digit-value`, `text.codepoint`, direct
+  `ascii-space?`, `text.ascii-digit-value`, `text.codepoint` (`Option Int` for
+  a one-codepoint text), direct
   predicate `text.eq?`, dictionary `text.eq`, and ordering dictionary
   `text.ord`; `real.from-int` converts directly
 - Maps and sets carry their comparison dictionary in the value.
+- Absent by design or not yet written: `text.starts-with?`, case conversion,
+  codepoint-to-text, and `int.min` (`int.max` exists). Compose them from
+  `text.slice`, comparisons, and `if`.
 
 Control effects and handlers:
 
@@ -742,6 +874,11 @@ Control effects and handlers:
 - `State`: `state.run`, `state.eval`
 - `Emit`: `emit.collect`, `emit.pipe`
 - `Fault`: `fault.none`, `fault.random`, `fault.all`
+- Scoped instances: `state.scoped`, `throw.scoped`, and `emit.scoped` pass
+  their body a capability (`StateRef`, `ThrowRef`, `EmitRef`) and serve only
+  operations made through it (`state.get-at(ref)`, `state.put-at(ref, v)`,
+  `throw.throw-at(ref, x)`, `emit.emit-at(ref, w)`), so two stores of one type
+  never confuse each other.
 
 World fixtures include `net.scripted`, `net.record`, replay handlers,
 `fs.in-memory`, `fs.read-only`, `clock.fixed`, `console.scripted`, and
@@ -759,7 +896,7 @@ Warp tests are ordinary typed Jacquard definitions. Discovery is by checked
 type, not filenames, annotations, or a registry. Test files may contain
 declarations but no bare top-level expressions.
 
-```jacquard
+```jacquard doctest=skill-warp mode=check fixture=skill-warp.jac stdout=skill-warp.stdout stderr=empty exit=0
 double(n) = mul(n, 2)
 
 unit-tests =
@@ -824,9 +961,13 @@ units. Consequently:
   ABI. Binder and callable renames preserve it; a conflicting relabel is
   E0612 rather than an identity-silent API change.
 
-Use `jac fmt --write` for canonical layout. Use stores and `jac diff` when you
-need rename classification, changed canonical subtrees, or affected
-dependents. Hash or diff equality establishes canonical structural identity,
+Use `jac fmt --write` for canonical layout. The formatter also orders
+top-level definitions so each one follows the definitions it uses, so adding a
+call to a later definition can move the caller. Use stores and `jac diff` when
+you need rename classification, changed canonical subtrees, or affected
+dependents. `jac diff` accepts two stores or two declaration-only source files;
+a source file with a bare top-level expression is refused (E0610), so diff a
+program without its entry call. Its output names callees by content hash. Hash or diff equality establishes canonical structural identity,
 not general behavioral equivalence.
 
 Record/replay logs contain operation, argument, and result triples. Strict
@@ -876,6 +1017,7 @@ compiled binaries refuse them. A C toolchain is required. Deep non-tail
 recursion uses the configured program stack; set `JACQUARD_STACK_MB` if needed.
 Compiled units cache under `.jacquard-native/` by content hash.
 
+Native binaries do not count `--fuel`; bound execution with the interpreter.
 This is an AOT research backend, not a production optimizer, VM, or JIT. Do
 not infer broad performance claims from a single benchmark.
 
@@ -971,6 +1113,10 @@ Do not invent new kernel forms for surface sugar.
 - Process substitution is not seekable input for `jac run`; use a real file.
 - `jac test` rejects bare top-level expressions in test files (E1001).
 - `--dry-run` refuses a program whose row includes `Eval` (E1002).
+- A local `let rec` whose body performs an effect fails to typecheck (E0801);
+  use a top-level recursive definition.
+- W1201 warns when a parameter is named like a constructor in scope (`job`
+  for `Job`, `allow` for the prelude's `Allow`); rename the parameter.
 
 ## Recommended Agent Workflow
 

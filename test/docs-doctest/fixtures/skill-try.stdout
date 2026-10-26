@@ -1,0 +1,2 @@
+ok(42)
+err("not a number: abc")

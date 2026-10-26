@@ -815,3 +815,16 @@ scheduling example (16 cases, 3 differ, witness case 11), determinism and
 witness replay, effect-only differences, adapters, budgets, sampling and every
 refusal (E1010–E1015); `test_behavior_review.ml` adds four cases. The source
 inventory is now `1201 / 79 / 36`.
+
+DOC.1 brings `docs/SKILL.md` up to the current language and puts it under the
+documentation doctest. Its examples called `console.print`, which does not
+exist (E0301); they now use `println`, and every `jacquard` fence is a named,
+self-contained doctest (20 examples: 7 run, 13 check). The guide now covers
+the 0.3.0 surface it lacked (`try`, `opaque type`, scoped effect instances,
+`--fuel`, `jacquard interface`), `jacquard review run`, the world operations
+by name, positional constructor field syntax (E1225), `text.join-list` and
+`text.slice` bounds, and current limits (the local `let rec` effect bug, E0610
+for `jac diff` on runnable files, `--manifest` checking only top-level
+expressions, formatter definition order, W1201 on parameters). Differences
+from the 0.3.0 release are marked **Since 0.3.0**. The source inventory is now
+`1201 / 79 / 56`.
