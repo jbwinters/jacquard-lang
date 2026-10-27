@@ -579,12 +579,11 @@ than introducing raw authority. Put one `workspace.live-layer` outside the
 forwarding chain to terminate it in real drivers. Do not create another
 sequence owner inside a layer or infer support for argument transforms.
 
-Use `resume _` when a clause deliberately never resumes. A handler inside
-`quote` must name its continuation instead (E1245), because quoted code is
-name-addressed. **Since 0.3.0:** the 0.3.0 checker can crash on `resume _` in
-some handlers (internal error `Bug_unprintable`, exit 125) and does not
-refuse it inside `quote` (it may accept or crash); with that release, bind a
-name you never use, such as `resume ignored`.
+Use `resume _` when a clause deliberately never resumes. A handler in quoted
+code must name its continuation instead (E1245), because quoted code is
+name-addressed; a handler inside a live `unquote` may still use `resume _`. **Since 0.3.0:** the 0.3.0 checker can crash on `resume _` in
+some handlers (internal error `Bug_unprintable`, exit 125), including quoted
+ones; with that release, bind a name you never use, such as `resume ignored`.
 
 ```jacquard doctest=skill-resume-wildcard mode=check fixture=skill-resume-wildcard.jac stdout=skill-resume-wildcard.stdout stderr=empty exit=0
 to-option(body) =
@@ -973,15 +972,18 @@ units. Consequently:
   ABI. Binder and callable renames preserve it; a conflicting relabel is
   E0612 rather than an identity-silent API change.
 
-Use `jac fmt --write` for canonical layout. The formatter also orders top-level
-definitions so each one follows the definitions it uses (members of one mutually
-recursive group keep their relative order), so adding a call to a later
-definition can move the caller. Use stores and `jac diff` when you need rename
-classification, changed canonical subtrees, or affected dependents. `jac diff`
-accepts two stores or two declaration-only source files; a source file with a
-bare top-level expression is refused (E0610), so diff a program without its
-entry call. Its output names callees by content hash. Hash or diff equality
-establishes canonical structural identity, not general behavioral equivalence.
+Use `jac fmt --write` for canonical layout. Within each uninterrupted run of
+term definitions, the formatter orders definitions so each one follows the
+definitions it uses (members of one mutually recursive group keep their relative
+order), so adding a call to a later definition can move the caller. A term
+cannot refer forward across a `type` or `effect` declaration or a bare top-level
+expression (E0301); keep terms that use each other in one run. Use stores and
+`jac diff` when you need rename classification, changed canonical subtrees, or
+affected dependents. `jac diff` accepts two stores or two declaration-only
+source files; a source file with a bare top-level expression is refused (E0610),
+so diff a program without its entry call. Its output names callees by content
+hash. Hash or diff equality establishes canonical structural identity, not
+general behavioral equivalence.
 
 Record/replay logs contain operation, argument, and result triples. Strict
 replay fails closed on operation or argument drift. Counterfactual `--fork`
