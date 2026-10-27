@@ -434,7 +434,8 @@ let test_lw_rejects_zero_argument_continuation_mutation () =
   let factory_calls = ref 0 in
   let model () =
     incr factory_calls;
-    Eval.SApply (mutator, Value.FAppFn { args = []; scope = Value.empty_scope } :: continuation)
+    Eval.SApply
+      (mutator, Value.FAppFn { args = []; scope = Value.empty_scope; site = None } :: continuation)
   in
   (match Infer_dist.likelihood_weighting ctx ~seed:17 ~samples:5 model with
   | Error [ diagnostic ] ->
@@ -495,8 +496,10 @@ let test_lw_samples_restore_mutable_runtime_graph () =
     incr factory_calls;
     Eval.SApply
       ( closure,
-        [ Value.FAppArgs { fn = mutator; done_rev = []; pending = []; scope = Value.empty_scope } ]
-      )
+        [
+          Value.FAppArgs
+            { fn = mutator; done_rev = []; pending = []; scope = Value.empty_scope; site = None };
+        ] )
   in
   match Infer_dist.likelihood_weighting ctx ~seed:23 ~samples:5 model with
   | Error diagnostics -> Eval_support.fail_diags "independent LW samples" diagnostics

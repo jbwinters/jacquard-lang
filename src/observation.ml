@@ -11,7 +11,13 @@ type value =
   | Opaque of string
 
 type event =
-  | Operation of { call : int; operation : Hash.t; name : string; arguments : value list Lazy.t }
+  | Operation of {
+      call : int;
+      operation : Hash.t;
+      name : string;
+      arguments : value list Lazy.t;
+      site : Span.t option;
+    }
   | Output of { call : int; operation : Hash.t; bytes : string }
   | Result of { call : int; operation : Hash.t; result : (value, Runtime_err.t) result Lazy.t }
 

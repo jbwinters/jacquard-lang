@@ -828,3 +828,14 @@ for `jac diff` on runnable files, `--manifest` checking only top-level
 expressions, formatter definition order, W1201 on parameters). Differences
 from the 0.3.0 release are marked **Since 0.3.0**. The source inventory is now
 `1201 / 79 / 56`.
+
+EXP.1 adds `jacquard run --record LOG` (`docs/exploration-log.md`): the
+evaluator's application frames carry their source span to the root operation
+event (`Observation.Operation.site`), and the recording writes an owner-only
+exploration-log-v1 of every root-reaching operation and Dist choice under an
+observation policy, with exposed secret plaintext redacted and step and byte
+bounds that stop the run (E1016) rather than truncate. Plain runs are
+unchanged. `exploration-log.t` pins recording, source sites, output parity,
+permissions, refusals, bounds, policy selection and a twenty-payload secret
+check; `test_exploration_log.ml` adds two cases. The source inventory is now
+`1203 / 80 / 56`.

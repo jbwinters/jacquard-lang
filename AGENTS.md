@@ -169,6 +169,11 @@ When adding valid corpus files, regenerate the golden hashes with
   entry over declared List/Distribution domains, modeled root operations,
   exact-conjunction grouping, request/report format 1), `jacquard review run`,
   `docs/behavior-review.md`, `test/test_behavior_review.ml`, `test/cli/review.t`.
+- Exploration recording (EXP.1): `src/exploration_log.ml` (exploration-log-v1
+  recorder, encoding and strict parser), `jacquard run --record`, application
+  sites on `Value.FAppFn`/`FAppArgs` and `Observation.Operation.site`,
+  `Store.retain_source_declarations`; `docs/exploration-log.md`,
+  `test/cli/exploration-log.t`, `test/test_exploration_log.ml`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.
 - Warp: `prelude/15-warp.jqd`, `prelude/16-gen.jqd`, `src/warp.ml`,

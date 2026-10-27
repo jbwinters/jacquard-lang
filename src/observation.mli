@@ -34,7 +34,15 @@ type value =
     nest or a call is captured and dispatched later. Ids are distinct within an evaluator; they are
     not stable across runs and are not meant to be persisted. *)
 type event =
-  | Operation of { call : int; operation : Hash.t; name : string; arguments : value list Lazy.t }
+  | Operation of {
+      call : int;
+      operation : Hash.t;
+      name : string;
+      arguments : value list Lazy.t;
+      site : Span.t option;
+          (** the source span of the application that performed the operation, when the evaluator
+              knows it: trace metadata, never part of a value or identity *)
+    }
       (** An operation crossed every language handler and reached the root, before any root handler
           ran or a driver captured it. [name] is display-only; [operation] is its identity. The
           arguments are projected only if forced; the projection walk draws on computation fuel. *)

@@ -495,11 +495,11 @@ let dispatching_as ctx call run =
 
 (* observers receive immutable data projections, computed only if forced: never live values, so
    a callback cannot read a secret, mutate a captured cell, or hold a continuation *)
-let notify_root_operation ctx ~call operation ~name arguments =
+let notify_root_operation ?site ctx ~call operation ~name arguments =
   if Option.is_some ctx.root_observer then
     emit ctx
       (Observation.Operation
-         { call; operation; name; arguments = lazy (List.map Observation.of_value arguments) })
+         { call; operation; name; arguments = lazy (List.map Observation.of_value arguments); site })
 
 let notify_root_result ctx ~call operation result =
   if Option.is_some ctx.root_observer then
@@ -1017,10 +1017,10 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
       Value.Env.iter (fun _ cell -> ignore (value ~static_trusted:false !cell)) scope_value.env
   and frame ~check_static frame_value =
     match frame_value with
-    | FAppFn { args; scope = frame_scope } ->
+    | FAppFn { args; scope = frame_scope; site = _ } ->
         if check_static && List.exists Recovery_marker.expr args then marked ();
         scope frame_scope
-    | FAppArgs { fn; done_rev; pending; scope = frame_scope } ->
+    | FAppArgs { fn; done_rev; pending; scope = frame_scope; site = _ } ->
         if check_static && List.exists Recovery_marker.expr pending then marked ();
         ignore (value ~static_trusted fn);
         List.iter (fun item -> ignore (value ~static_trusted item)) done_rev;
@@ -1395,7 +1395,8 @@ let op_mode ctx op =
 (** Perform an operation: walk the continuation outward for the nearest matching handler (deep
     semantics; the captured resumption is inner frames + that handler frame); fall back to root
     handlers (grants); otherwise raise [Unhandled]. *)
-let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) : state =
+let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) :
+    state =
   let rec split walked inner_rev = function
     | FHandle h :: outer when handler_covers h op ->
         if walked > 0 then charge ctx walked;
@@ -1438,7 +1439,7 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
           if Option.is_none native && ctx.capture_ops then Some (op_mode ctx op) else None
         in
         let call = fresh_call ctx in
-        notify_root_operation ctx ~call op ~name args;
+        notify_root_operation ?site ctx ~call op ~name args;
         if Fuel_meter.exhausted () then exhaust ctx;
         match (native, mode) with
         | Some native, _ ->
@@ -1453,7 +1454,7 @@ let perform_unchecked ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k 
 
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
-let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
+let apply_unchecked ?site ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
   let charge_frames frames = charge ctx (List.length frames) in
   match fn with
   | VClosure { scope; params; body } ->
@@ -1489,7 +1490,7 @@ let apply_unchecked ctx (fn : Value.t) (args : Value.t list) (k : kont) : state 
       if List.length args <> arity then
         rt_arity "constructor %s expects %d argument(s), got %d" name arity (List.length args)
       else SApply (VCon { con; name; args }, k)
-  | VOp { op; name; effect_ } -> perform_unchecked ctx op ~name ~effect_ args k
+  | VOp { op; name; effect_ } -> perform_unchecked ?site ctx op ~name ~effect_ args k
   | VResume frames -> (
       match args with
       | [ v ] ->
@@ -1520,8 +1521,9 @@ let apply ctx fn args k =
          failure, and exhaustion all arrive through that run's result *)
       let scope = empty_scope in
       match List.rev args with
-      | [] -> SApply (fn, FAppFn { args = []; scope } :: k)
-      | last :: done_rev -> SApply (last, FAppArgs { fn; done_rev; pending = []; scope } :: k))
+      | [] -> SApply (fn, FAppFn { args = []; scope; site = None } :: k)
+      | last :: done_rev ->
+          SApply (last, FAppArgs { fn; done_rev; pending = []; scope; site = None } :: k))
   | _ -> (
       (* a driver resuming a continuation or performing an operation outside any run defers a
          refused debit to the next run, so exhaustion is reported through that run's result rather
@@ -1725,7 +1727,8 @@ and step_unchecked ctx (state : state) : state option =
             Some (eval_ref ctx ~trusted:scope.trusted_store_refs scope.group.(i) Kernel.Term k)
           else rt_type "groupref %d outside its group at runtime" i
       | Kernel.Lam (params, body) -> Some (SApply (VClosure { scope; params; body }, k))
-      | Kernel.App (fn, args) -> Some (SEval (scope, fn, FAppFn { args; scope } :: k))
+      | Kernel.App (fn, args) ->
+          Some (SEval (scope, fn, FAppFn { args; scope; site = Meta.span e.meta } :: k))
       | Kernel.Let { isrec = false; binder; value; body } ->
           Some (SEval (scope, value, FLet { binder; body; scope } :: k))
       | Kernel.Let { isrec = true; binder; value; body } -> (
@@ -1772,14 +1775,18 @@ and step_unchecked ctx (state : state) : state option =
       None (* terminal; run handles it *)
   | SApply (v, frame :: k) -> (
       match frame with
-      | FAppFn { args = []; scope = _ } -> Some (apply_unchecked ctx v [] k)
-      | FAppFn { args = a0 :: rest; scope } ->
-          Some (SEval (scope, a0, FAppArgs { fn = v; done_rev = []; pending = rest; scope } :: k))
-      | FAppArgs { fn; done_rev; pending = []; scope = _ } ->
-          Some (apply_unchecked ctx fn (List.rev (v :: done_rev)) k)
-      | FAppArgs { fn; done_rev; pending = e :: rest; scope } ->
+      | FAppFn { args = []; scope = _; site } -> Some (apply_unchecked ?site ctx v [] k)
+      | FAppFn { args = a0 :: rest; scope; site } ->
           Some
-            (SEval (scope, e, FAppArgs { fn; done_rev = v :: done_rev; pending = rest; scope } :: k))
+            (SEval (scope, a0, FAppArgs { fn = v; done_rev = []; pending = rest; scope; site } :: k))
+      | FAppArgs { fn; done_rev; pending = []; scope = _; site } ->
+          Some (apply_unchecked ?site ctx fn (List.rev (v :: done_rev)) k)
+      | FAppArgs { fn; done_rev; pending = e :: rest; scope; site } ->
+          Some
+            (SEval
+               ( scope,
+                 e,
+                 FAppArgs { fn; done_rev = v :: done_rev; pending = rest; scope; site } :: k ))
       | FLet { binder; body; scope } -> (
           match match_pat v binder scope.env with
           | Some env -> Some (SEval ({ scope with env }, body, k))

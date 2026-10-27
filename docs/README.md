@@ -91,6 +91,9 @@ project shape from file names alone.
   versions of an entry over declared finite or sampled cases under an
   observation policy, with grouped differences, deterministic witnesses and the
   behavior-review request/report formats.
+- `exploration-log.md`: EXP.1 `jacquard run --record`, the owner-only
+  exploration-log-v1 of root operations and Dist choices with source spans,
+  under an observation policy, with secret redaction and bounds.
 - `computation-fuel.md`: RT.1 per-invocation computation budget, the versioned
   fuel-v1 cost model, and E0919 incomplete-run semantics.
 - `errors.md`: diagnostic code catalog.
