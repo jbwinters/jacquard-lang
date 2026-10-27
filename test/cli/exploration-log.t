@@ -269,11 +269,11 @@ Warp see the same model.
   > model()
   > JAC
   $ sed 's/dist.named("[a-z]*", \([^)]*)\))/sample(\1)/g' named.jac > unnamed.jac
-  $ jacquard infer enumerate named.jac > named.enum; jacquard infer enumerate unnamed.jac | cmp - named.enum && echo same
+  $ jacquard infer enumerate named.jac > named.enum; jacquard infer enumerate unnamed.jac > unnamed.enum; cmp named.enum unnamed.enum && echo same
   same
-  $ jacquard infer lw named.jac --seed 5 --samples 200 > named.lw; jacquard infer lw unnamed.jac --seed 5 --samples 200 | cmp - named.lw && echo same
+  $ jacquard infer lw named.jac --seed 5 --samples 200 > named.lw; jacquard infer lw unnamed.jac --seed 5 --samples 200 > unnamed.lw; cmp named.lw unnamed.lw && echo same
   same
-  $ jacquard run named.jac --allow dist --seed 9 > named.run; jacquard run unnamed.jac --allow dist --seed 9 | cmp - named.run && echo same
+  $ jacquard run named.jac --allow dist --seed 9 > named.run; jacquard run unnamed.jac --allow dist --seed 9 > unnamed.run; cmp named.run unnamed.run && echo same
   same
   $ cat > named-tests.jac <<'JAC'
   > named-model() = if dist.named("rain", Bernoulli(0.3)) then dist.named("die", UniformInt(1, 2)) else dist.named("die", UniformInt(1, 3))
@@ -299,7 +299,7 @@ addressed by its position. The output is the same as without --record.
   > add(roll(2), sample(UniformInt(1, 6)))
   > JAC
   $ jacquard run dice.jac --allow dist --seed 3 > dice.plain
-  $ jacquard run dice.jac --allow dist --seed 3 --record dice.log | cmp - dice.plain && echo same
+  $ jacquard run dice.jac --allow dist --seed 3 --record dice.log > dice.recorded; cmp dice.recorded dice.plain && echo same
   same
   $ grep -A1 -E '^(step|choice-name)' dice.log | grep -v -E '^(--|name|site)' | cut -d' ' -f1-3
   step index=0 kind=choice
