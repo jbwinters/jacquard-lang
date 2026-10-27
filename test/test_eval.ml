@@ -269,7 +269,7 @@ let test_native_mutation_rechecks_closure_argument () =
     (Eval.run_state_capturing h.ctx
        (Eval.SApply
           ( mutator,
-            Value.FAppFn { args = [ argument ]; scope = argument_scope }
+            Value.FAppFn { args = [ argument ]; scope = argument_scope; site = None }
             :: [ read_mutated_cell; following_action ] )));
   Alcotest.(check int) "action after native mutation" 0 !action_count
 
@@ -322,14 +322,17 @@ let test_zero_argument_native_mutation_guards_continuation () =
   run_case "zero-argument builtin mutation"
     (fun _ mutate -> Value.VBuiltin ("mutate-continuation", mutate))
     (fun builtin continuation ->
-      Eval.SApply (builtin, Value.FAppFn { args = []; scope = Value.empty_scope } :: continuation));
+      Eval.SApply
+        (builtin, Value.FAppFn { args = []; scope = Value.empty_scope; site = None } :: continuation));
   run_case "zero-argument root mutation"
     (fun h mutate ->
       let op = Hash.of_string "zero-argument-root-mutation" in
       Eval.register_root_handler h.Eval_support.ctx op mutate;
       Value.VOp { op; name = "zero-argument-root-mutation"; effect_ = "StateGuard" })
     (fun operation continuation ->
-      Eval.SApply (operation, Value.FAppFn { args = []; scope = Value.empty_scope } :: continuation))
+      Eval.SApply
+        ( operation,
+          Value.FAppFn { args = []; scope = Value.empty_scope; site = None } :: continuation ))
 
 let test_clean_recursive_memo_closure_cycle () =
   let h = Eval_support.make () in
@@ -467,7 +470,7 @@ let test_state_guard_precedes_effects_and_follows_resumptions () =
     Eval.SApply
       ( operation,
         [
-          Value.FAppFn { args = []; scope = Value.empty_scope };
+          Value.FAppFn { args = []; scope = Value.empty_scope; site = None };
           Value.FTuple { done_rev = []; pending = [ marked ]; scope = Value.empty_scope };
         ] )
   in
@@ -521,7 +524,9 @@ let test_state_guard_checks_machine_transition_results () =
   expect_eval_e1202 "builtin transition result"
     (Eval.run_state_capturing h.ctx
        (Eval.SApply
-          (producer, Value.FAppFn { args = []; scope = Value.empty_scope } :: continue_with_action)));
+          ( producer,
+            Value.FAppFn { args = []; scope = Value.empty_scope; site = None }
+            :: continue_with_action )));
   Alcotest.(check int) "continuation action after builtin" 0 !action_count;
   let compound_marked =
     Value.VTuple
@@ -539,7 +544,8 @@ let test_state_guard_checks_machine_transition_results () =
     (Eval.run_state_capturing h.ctx
        (Eval.SApply
           ( compound_producer,
-            Value.FAppFn { args = []; scope = Value.empty_scope } :: continue_with_action )));
+            Value.FAppFn { args = []; scope = Value.empty_scope; site = None }
+            :: continue_with_action )));
   Alcotest.(check int) "continuation action after compound builtin" 0 !action_count;
   let op = Hash.of_string "marked-root-result" in
   Eval.register_root_handler h.ctx op (fun _ -> Ok marked_code);
@@ -547,7 +553,9 @@ let test_state_guard_checks_machine_transition_results () =
   expect_eval_e1202 "root handler transition result"
     (Eval.run_state_capturing h.ctx
        (Eval.SApply
-          (operation, Value.FAppFn { args = []; scope = Value.empty_scope } :: continue_with_action)));
+          ( operation,
+            Value.FAppFn { args = []; scope = Value.empty_scope; site = None }
+            :: continue_with_action )));
   Alcotest.(check int) "continuation action after root handler" 0 !action_count
 
 let suite =

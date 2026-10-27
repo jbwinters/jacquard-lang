@@ -66,6 +66,7 @@ let diagnostic_summary = function
   | "E1003" -> "Relational runs diverged"
   | "E1005" -> "Observation policy is invalid or refused"
   | "E1007" -> "Relational runs cannot be called equal"
+  | "E1016" -> "Exploration recording cannot proceed"
   | "E1101" -> "Program is outside the native v1 compilation subset"
   | "E1102" -> "Program requires the interpreter tier"
   | "E1103" -> "Native build could not complete"
@@ -98,6 +99,9 @@ let diagnostic_next_step = function
   | "E1007" ->
       "Raise the policy's field limit, compare coded failures, or compare runs that complete; an \
        inconclusive field agrees only on a prefix, an opaque kind, or an unfinished projection."
+  | "E1016" ->
+      "Choose a new log path, positive bounds, or raise --max-steps/--max-bytes; a recording is \
+       never truncated silently."
   | "E1101" -> "Run the program with the interpreter or rewrite the unsupported construct."
   | "E1102" -> "Run this program with the interpreter."
   | "E1103" -> "Correct the native toolchain or build input and try again."
@@ -427,47 +431,200 @@ let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_
               exit_unhandled
           | Error ds -> print_diags ds))
 
-let run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
+let is_operation store operation =
+  match Store.locate_internal store operation with
+  | Ok { Store.role = Store.Operation _; _ } -> true
+  | Ok _ | Error _ -> false
+
+let relate_policy_check ~prelude ~syntax ~file ~source policy =
+  let store_error action error =
+    Error
+      [
+        cli_diagnostic ~code:"E0611"
+          (Printf.sprintf "relate could not %s its policy check store: %s" action
+             (Printexc.to_string error));
+      ]
+  in
+  match fresh_check_root () with
+  | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "create" error
+  | root -> (
+      match Frontend.check ~prelude_dir:(prelude_dir_of prelude) ~root ~syntax ~file source with
+      | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "prepare" error
+      | Error diagnostics -> Error diagnostics
+      | Ok (Frontend.Recovered { diagnostics; _ }) -> Error diagnostics
+      | Ok (Frontend.Checked artifact) -> (
+          match Store.open_store root with
+          | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "read" error
+          | Error diagnostics -> Error diagnostics
+          | Ok store -> (
+              match
+                Observation_policy.validate_operations policy ~is_operation:(is_operation store)
+              with
+              | Error diagnostics -> Error diagnostics
+              | Ok () ->
+                  Observation_policy.check_interface policy
+                    ~identity:(Interface.identity (Frontend.Checked.interface artifact)))))
+
+let rec run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
+    schedule_replay schedule_fork fuel syntax record =
+  (* schedule flags are validated before any store is opened, as for a plain run *)
+  match schedule_mode schedule_replay schedule_fork with
+  | Error diagnostics -> print_diags diagnostics
+  | Ok _ -> (
+      match open_ctx ~prelude ~store_dir with
+      | Error ds -> print_diags ds
+      | Ok session -> (
+          let source = read_file file in
+          match record with
+          | None ->
+              run_in ~session ~source file allows seed infer_cache origin dry_run schedule_record
+                schedule_replay schedule_fork fuel syntax
+          | Some record ->
+              record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache origin
+                dry_run schedule_record schedule_replay schedule_fork fuel syntax record))
+
+(* EXP.1: [run --record LOG] records every root-reaching operation and Dist choice, with its
+   source span, into an owner-only exploration-log-v1; values, output and exit codes are those of
+   the plain run *)
+and record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache origin dry_run
+    schedule_record schedule_replay schedule_fork fuel syntax
+    (path, policy_path, record_output, max_steps, max_bytes) =
+  let store, ctx = session in
+  let refuse code cause =
+    print_diagnostic (cli_diagnostic ~code cause);
+    exit_diags
+  in
+  if max_steps < 1 || max_bytes < 1 then
+    refuse "E1016" "--max-steps and --max-bytes must be positive"
+  else
+    let policy =
+      match policy_path with
+      | None -> Ok Exploration_log.default_policy
+      | Some path -> (
+          match read_file path with
+          | exception Sys_error message ->
+              Error
+                [ cli_diagnostic ~code:"E1005" ("cannot read the observation policy: " ^ message) ]
+          | bytes -> Observation_policy.parse bytes)
+    in
+    (* a recording policy must apply to this program, exactly as for relate --policy: its
+       operations exist and any interface pin matches *)
+    let policy =
+      match policy with
+      | Ok p when Option.is_some policy_path -> (
+          match relate_policy_check ~prelude ~syntax ~file ~source p with
+          | Ok () -> Ok p
+          | Error ds
+            when Option.is_some store_dir
+                 && List.exists (fun d -> Diag.code_or_uncoded d = "E0301") ds ->
+              (* the policy is validated against the source checked on its own, which cannot see
+                 definitions a --store already holds *)
+              Error
+                (cli_diagnostic ~code:"E1005"
+                   "a --record-policy is validated against the source checked on its own, and this \
+                    source does not check without its --store; record it with the default policy \
+                    or make the source self-contained"
+                :: ds)
+          | Error ds -> Error ds)
+      | other -> other
+    in
+    match (policy, lazy (Exploration_log.reserve ~path)) with
+    | Error ds, _ -> print_diags ds
+    | Ok _, (lazy (Error cause)) -> refuse "E1016" cause
+    | Ok policy, (lazy (Ok reservation)) -> (
+        (* the recording names its seed, so an unpinned run draws one here *)
+        let seed =
+          match seed with
+          | Some s -> s
+          | None ->
+              Random.self_init ();
+              Random.bits ()
+        in
+        let op name =
+          match Prelude_identity.lookup_kind store name Resolve.KOp with
+          | Some { Resolve.hash; _ } -> Some hash
+          | None -> None
+        in
+        let recorder =
+          Exploration_log.create ~policy ~record_output ~max_steps ~max_bytes ~sample:(op "sample")
+            ~observe:(op "observe") ~expose:(op "secret.expose")
+        in
+        Store.retain_source_declarations store;
+        let status =
+          match
+            Eval.with_observer ctx (Exploration_log.on_event recorder) (fun () ->
+                run_in ~session ~source file allows (Some seed) infer_cache origin dry_run
+                  schedule_record schedule_replay schedule_fork fuel syntax)
+          with
+          | status -> status
+          | exception Exploration_log.Bound_reached bound ->
+              print_diagnostic
+                (cli_diagnostic ~code:"E1016"
+                   (Printf.sprintf "the recording reached --max-%s; the run was stopped" bound));
+              exit_runtime
+          | exception other ->
+              Exploration_log.release reservation;
+              raise other
+        in
+        let prelude_identity =
+          match Store.prelude_manifest store with
+          | None -> "none"
+          | Some pairs ->
+              Hash.to_hex
+                (Hash.of_string (String.concat "\n" (List.map (fun (k, v) -> k ^ "=" ^ v) pairs)))
+        in
+        let program =
+          Printf.sprintf "program source=%s core=%s prelude=%s engine=interpreter"
+            (Hash.to_hex (Hash.of_string source))
+            Version.version prelude_identity
+        in
+        match
+          Exploration_log.write_reserved reservation
+            (Exploration_log.serialize
+               (Exploration_log.finish recorder ~program ~seed ~grants:(String.concat "," allows)
+                  ~exit_status:status))
+        with
+        | Ok () -> status
+        | Error cause -> refuse "E1016" ("cannot write the exploration log: " ^ cause))
+
+and run_in ~session ~source file allows seed infer_cache origin dry_run schedule_record
     schedule_replay schedule_fork fuel syntax =
   match schedule_mode schedule_replay schedule_fork with
   | Error diagnostics -> print_diags diagnostics
   | Ok requested_mode -> (
-      match open_ctx ~prelude ~store_dir with
-      | Error ds -> print_diags ds
-      | Ok (store, ctx) -> (
-          let source = read_file file in
-          let trace_enabled = Option.is_some schedule_record || Option.is_some requested_mode in
-          let expression_count =
-            if not trace_enabled then Ok ()
-            else
-              Result.bind
-                (Frontend.parse_tops ~syntax ~names:(Store.names_view store) ~file source)
-                (fun (tops, _warnings) ->
-                  let rec count_expressions count = function
-                    | [] -> Ok count
-                    | parsed :: rest ->
-                        Result.bind (Frontend.validate_parsed_top parsed) (function
-                          | Kernel.Expr _ -> count_expressions (count + 1) rest
-                          | Kernel.Decl _ -> count_expressions count rest)
-                  in
-                  Result.bind (count_expressions 0 tops) (fun count ->
-                      if count = 1 then Ok ()
-                      else
-                        Error
-                          [
-                            cli_diagnostic ~code:"E0908"
-                              (Printf.sprintf
-                                 "schedule record/replay requires exactly one top-level \
-                                  expression, found %d"
-                                 count);
-                          ]))
-          in
-          match expression_count with
-          | Error diagnostics -> print_diags diagnostics
-          | Ok () ->
-              run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
-                ~requested_mode ~walk:(fun ~on_expr ->
-                  process_forms ?origin ~syntax store ~file source ~on_expr)))
+      let store, ctx = session in
+      let trace_enabled = Option.is_some schedule_record || Option.is_some requested_mode in
+      let expression_count =
+        if not trace_enabled then Ok ()
+        else
+          Result.bind
+            (Frontend.parse_tops ~syntax ~names:(Store.names_view store) ~file source)
+            (fun (tops, _warnings) ->
+              let rec count_expressions count = function
+                | [] -> Ok count
+                | parsed :: rest ->
+                    Result.bind (Frontend.validate_parsed_top parsed) (function
+                      | Kernel.Expr _ -> count_expressions (count + 1) rest
+                      | Kernel.Decl _ -> count_expressions count rest)
+              in
+              Result.bind (count_expressions 0 tops) (fun count ->
+                  if count = 1 then Ok ()
+                  else
+                    Error
+                      [
+                        cli_diagnostic ~code:"E0908"
+                          (Printf.sprintf
+                             "schedule record/replay requires exactly one top-level expression, \
+                              found %d"
+                             count);
+                      ]))
+      in
+      match expression_count with
+      | Error diagnostics -> print_diags diagnostics
+      | Ok () ->
+          run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
+            ~requested_mode ~walk:(fun ~on_expr ->
+              process_forms ?origin ~syntax store ~file source ~on_expr))
 
 (* --- relate --- *)
 
@@ -495,11 +652,6 @@ type relate_failure =
 type relate_transcript =
   | V1_transcript of Run_transcript.transcript
   | Policy_transcript of Observation_transcript.transcript
-
-let is_operation store operation =
-  match Store.locate_internal store operation with
-  | Ok { Store.role = Store.Operation _; _ } -> true
-  | Ok _ | Error _ -> false
 
 let relate_store_failure action error =
   Relate_diagnostics
@@ -624,35 +776,6 @@ let print_relate_failure = function
 (* Before anything runs, the program is checked into a private scratch store: the policy's
    operations must be operations of that prepared program (prelude and the file's own
    declarations), and a pinned interface must be its interface-v1 identity. *)
-let relate_policy_check ~prelude ~syntax ~file ~source policy =
-  let store_error action error =
-    Error
-      [
-        cli_diagnostic ~code:"E0611"
-          (Printf.sprintf "relate could not %s its policy check store: %s" action
-             (Printexc.to_string error));
-      ]
-  in
-  match fresh_check_root () with
-  | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "create" error
-  | root -> (
-      match Frontend.check ~prelude_dir:(prelude_dir_of prelude) ~root ~syntax ~file source with
-      | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "prepare" error
-      | Error diagnostics -> Error diagnostics
-      | Ok (Frontend.Recovered { diagnostics; _ }) -> Error diagnostics
-      | Ok (Frontend.Checked artifact) -> (
-          match Store.open_store root with
-          | exception ((Sys_error _ | Unix.Unix_error _) as error) -> store_error "read" error
-          | Error diagnostics -> Error diagnostics
-          | Ok store -> (
-              match
-                Observation_policy.validate_operations policy ~is_operation:(is_operation store)
-              with
-              | Error diagnostics -> Error diagnostics
-              | Ok () ->
-                  Observation_policy.check_interface policy
-                    ~identity:(Interface.identity (Frontend.Checked.interface artifact)))))
-
 let read_relate_policy = function
   | None -> Ok None
   | Some path -> (
@@ -2350,6 +2473,45 @@ let schedule_fork_arg =
           "With --schedule-replay, strictly replay before DECISION, choose the named runnable \
            TASK, then continue FIFO and record fork provenance.")
 
+(* EXP.1: opt-in exploration-log-v1 recording (docs/exploration-log.md) *)
+let record_arg =
+  let record =
+    Arg.(
+      value
+      & opt (some string) None
+      & info [ "record" ] ~docv:"LOG"
+          ~doc:
+            "Record every root-reaching operation and Dist choice, with its source position, into \
+             a new owner-only exploration-log-v1 file $(docv) (never replaced).")
+  in
+  let record_policy =
+    Arg.(
+      value
+      & opt (some file) None
+      & info [ "record-policy" ] ~docv:"POLICY"
+          ~doc:
+            "The observation policy that governs what --record keeps and redacts (default: every \
+             operation with its arguments and result).")
+  in
+  let record_output =
+    Arg.(value & flag & info [ "record-output" ] ~doc:"Also record Console output bytes.")
+  in
+  let max_steps =
+    Arg.(
+      value & opt int 10_000
+      & info [ "max-steps" ] ~docv:"N" ~doc:"Stop the run with E1016 rather than record more steps.")
+  in
+  let max_bytes =
+    Arg.(
+      value
+      & opt int (16 * 1024 * 1024)
+      & info [ "max-bytes" ] ~docv:"N" ~doc:"Stop the run with E1016 rather than record more bytes.")
+  in
+  Term.(
+    const (fun path policy output steps bytes ->
+        Option.map (fun path -> (path, policy, output, steps, bytes)) path)
+    $ record $ record_policy $ record_output $ max_steps $ max_bytes)
+
 let run_t =
   Cmd.v
     (Cmd.info "run" ~doc:"Run a .jac surface or .jqd bootstrap file in top-level order.")
@@ -2357,7 +2519,7 @@ let run_t =
       const (configure_diagnostics run_cmd)
       $ diagnostic_format_arg $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
-      $ schedule_fork_arg $ fuel_arg $ syntax_arg)
+      $ schedule_fork_arg $ fuel_arg $ syntax_arg $ record_arg)
 
 let relate_term format file variation seed allows prelude syntax policy =
   selected_diagnostic_format := format;

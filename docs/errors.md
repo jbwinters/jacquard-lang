@@ -223,6 +223,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 | E1013 | the two versions' review domains are not equal | a domain names a version term whose values changed |
 | E1014 | the observation policy cannot apply to both versions: it is pinned to an interface, or lists an operation one version lacks | `--policy` with `interface=<hash>` |
 | E1015 | `--sample` without `--seed` (or the reverse), sampling a List domain, a sample count outside 1..`--max-cases`, or a non-positive `--max-cases` or `--fuel` | `--sample 5` alone |
+| E1016 | `run --record` cannot proceed: the log path exists, `--max-steps` or `--max-bytes` is not positive, the log cannot be written, or a bound was reached (the run stops, exit 2, and the log ends `bounded=`) | `jacquard run m.jac --record m.log --max-steps 1` |
 
 ## Native compilation (E11xx)
 

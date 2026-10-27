@@ -33,6 +33,9 @@ type t = {
   visible : (Hash.t, unit) Hashtbl.t;
       (* hashes {!visible} has confirmed publicly locatable; cleared whenever an object can become
          hidden or removed (TYPE.1) *)
+  mutable source_overlay : (Hash.t, Kernel.decl) Hashtbl.t option;
+      (* EXP.1, session-only and opt-in: the source-resolved declarations this session installed,
+         so evaluation sees their source spans; never persisted *)
 }
 
 let objects_dir t = Filename.concat t.root "objects"
@@ -261,7 +264,15 @@ let index_entries (decl : Kernel.decl) (hs : Canon.decl_hashes) =
     before the index becomes observable. *)
 let open_store root : (t, Diag.t list) result =
   let t =
-    { root; names = []; hidden = []; call_abis = []; index = []; visible = Hashtbl.create 64 }
+    {
+      root;
+      names = [];
+      hidden = [];
+      call_abis = [];
+      index = [];
+      visible = Hashtbl.create 64;
+      source_overlay = None;
+    }
   in
   if not (Sys.file_exists root) then Sys.mkdir root 0o755;
   if not (Sys.file_exists (objects_dir t)) then Sys.mkdir (objects_dir t) 0o755;
@@ -424,6 +435,90 @@ let add_call_abis t companions =
       write_names t;
       Ok ()
 
+(* [remap_group_refs f e] renumbers every [GroupRef i] in [e] to [GroupRef (f i)]. Quoted payloads
+   are data, except LIVE (level-0) unquote splices, which are expressions in the enclosing group
+   (the quasiquote-level rule of [Canon.ser_quoted] and [Resolve.resolve_quote_payload]). *)
+let rec remap_group_refs f (e : Kernel.expr) : Kernel.expr =
+  let r = remap_group_refs f in
+  let it : Kernel.expr_node =
+    match e.Kernel.it with
+    | Kernel.GroupRef i -> Kernel.GroupRef (f i)
+    | (Kernel.Lit _ | Kernel.Var _ | Kernel.Ref _) as same -> same
+    | Kernel.Quote payload -> Kernel.Quote (remap_quoted f payload)
+    | Kernel.Lam (params, body) -> Kernel.Lam (params, r body)
+    | Kernel.App (fn, args) -> Kernel.App (r fn, List.map r args)
+    | Kernel.Let { isrec; binder; value; body } ->
+        Kernel.Let { isrec; binder; value = r value; body = r body }
+    | Kernel.Match (scrutinee, clauses) ->
+        Kernel.Match
+          (r scrutinee, List.map (fun c -> { c with Kernel.cbody = r c.Kernel.cbody }) clauses)
+    | Kernel.Tuple items -> Kernel.Tuple (List.map r items)
+    | Kernel.Handle { body; ret; ops } ->
+        Kernel.Handle
+          {
+            body = r body;
+            ret = { ret with Kernel.rbody = r ret.Kernel.rbody };
+            ops = List.map (fun o -> { o with Kernel.obody = r o.Kernel.obody }) ops;
+          }
+    | Kernel.Unquote splice -> Kernel.Unquote (r splice)
+    | Kernel.Ann (subject, ty) -> Kernel.Ann (r subject, ty)
+  in
+  { e with Kernel.it }
+
+and remap_quoted f ?(level = 0) (form : Form.t) : Form.t =
+  if form.Form.head = "unquote" && level = 0 then
+    match form.Form.args with
+    | [ Form.F splice ] -> (
+        match Kernel.expr_of_form splice with
+        | Ok e -> { form with Form.args = [ Form.F (Kernel.expr_to_form (remap_group_refs f e)) ] }
+        | Error _ -> form (* validation already rejected it; the rehash guard keeps it unserved *))
+    | _ -> form
+  else
+    let level =
+      match form.Form.head with "quote" -> level + 1 | "unquote" -> level - 1 | _ -> level
+    in
+    {
+      form with
+      Form.args =
+        List.map (function Form.F g -> Form.F (remap_quoted f ~level g) | a -> a) form.Form.args;
+    }
+
+(* [in_persisted_order decl ~incoming ~persisted] is the source declaration with its members in
+   the persisted object's order (group references renumbered to match), so the overlay serves
+   source spans while member positions stay those of the object. [None] when the member hashes
+   are not a permutation of each other. *)
+let in_persisted_order (decl : Kernel.decl) ~incoming ~persisted : Kernel.decl option =
+  if List.equal Hash.equal incoming persisted then Some decl
+  else
+    match decl.Kernel.it with
+    | Kernel.DefTerm bindings when List.length bindings = List.length persisted -> (
+        let incoming = Array.of_list incoming and bindings = Array.of_list bindings in
+        let index_of h =
+          let rec go i =
+            if i >= Array.length incoming then None
+            else if Hash.equal incoming.(i) h then Some i
+            else go (i + 1)
+          in
+          go 0
+        in
+        match List.map index_of persisted with
+        | sources when List.for_all Option.is_some sources ->
+            let sources = Array.of_list (List.map Option.get sources) in
+            (* old (incoming) index -> new (persisted) index *)
+            let target = Array.make (Array.length sources) 0 in
+            Array.iteri (fun j i -> target.(i) <- j) sources;
+            let reordered =
+              Array.to_list
+                (Array.map
+                   (fun i ->
+                     let b = bindings.(i) in
+                     { b with Kernel.value = remap_group_refs (fun k -> target.(k)) b.Kernel.value })
+                   sources)
+            in
+            Some { decl with Kernel.it = Kernel.DefTerm reordered }
+        | _ -> None)
+    | _ -> None
+
 (** [put_decl t decl] canonicalizes, hashes, and stores a resolved declaration, then binds every
     public name it introduces (members, type + constructors, effect + operations) in the name index,
     and installs any explicit term/operation [call-abi-v1] companion transactionally, replacing
@@ -476,6 +571,26 @@ let put_decl ?origin t (decl : Kernel.decl) : (Canon.decl_hashes, Diag.t list) r
           match persisted with
           | Error _ as error -> error
           | Ok persisted ->
+              (* the overlay keeps the incoming declaration when its members are in the persisted
+                 object's order, so member positions stay those of the object; hash-equal
+                 declarations share one body (and, once the evaluator has loaded it, one site) *)
+              (match t.source_overlay with
+              | Some overlay -> (
+                  match
+                    in_persisted_order decl ~incoming:(List.map snd hs.Canon.named)
+                      ~persisted:(List.map snd (snd persisted).Canon.named)
+                  with
+                  | Some served -> (
+                      (* served only if it is exactly the persisted object up to metadata *)
+                      match Canon.hash_decl served with
+                      | Ok h
+                        when Hash.equal h.Canon.decl_hash hs.Canon.decl_hash
+                             && List.equal Hash.equal (List.map snd h.Canon.named)
+                                  (List.map snd (snd persisted).Canon.named) ->
+                          Hashtbl.replace overlay hs.Canon.decl_hash served
+                      | _ -> ())
+                  | None -> ())
+              | None -> ());
               (match origin with
               | Some tag -> (
                   (* first writer wins, matching the object's own immutability: content that
@@ -577,6 +692,11 @@ let tier t (h : Hash.t) : Tier.arrow_tier option =
 let locate_internal t (h : Hash.t) : (located, Diag.t list) result =
   match List.find_opt (fun (h', _) -> Hash.equal h h') t.index with
   | None -> err ~code:"E0601" "unknown hash %s" (Hash.to_hex h)
+  | Some (_, (decl_hash, role))
+    when match t.source_overlay with Some o -> Hashtbl.mem o decl_hash | None -> false -> (
+      match t.source_overlay with
+      | Some overlay -> Ok { decl = Hashtbl.find overlay decl_hash; decl_hash; role }
+      | None -> assert false)
   | Some (_, (decl_hash, role)) -> (
       let path = object_path t decl_hash in
       if not (Sys.file_exists path) then
@@ -585,6 +705,13 @@ let locate_internal t (h : Hash.t) : (located, Diag.t list) result =
         match load_object ~file:path (read_file path) with
         | Error ds -> Error ds
         | Ok (decl, _) -> Ok { decl; decl_hash; role })
+
+(** [retain_source_declarations t] makes this session keep every declaration it installs, as
+    resolved from source, and serve it from {!locate} in place of the reloaded object (which is
+    hash-equal but carries the object file's spans). Exploration recording uses it so operation
+    sites point into the user's source; nothing is persisted. *)
+let retain_source_declarations t =
+  if Option.is_none t.source_overlay then t.source_overlay <- Some (Hashtbl.create 64)
 
 (** [locate t h] finds the public declaration owning [h]. Hidden derived members are deliberately
     reported as unknown so neither direct hash references nor rebinding can reconstruct them. *)

@@ -136,7 +136,8 @@ let test_once_validated_state_cannot_reset_consumption () =
   let resume = capture_once_resume h in
   let argument = Kernel.{ it = Lit (LInt 40); meta = Meta.empty } in
   let initial_state =
-    Eval.SApply (resume, [ Value.FAppFn { args = [ argument ]; scope = Value.empty_scope } ])
+    Eval.SApply
+      (resume, [ Value.FAppFn { args = [ argument ]; scope = Value.empty_scope; site = None } ])
   in
   let validated =
     match Eval.validate_state_once h.Eval_support.ctx initial_state with

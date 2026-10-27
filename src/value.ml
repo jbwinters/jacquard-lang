@@ -61,9 +61,16 @@ and scope = { env : env; group : Hash.t array; trusted_store_refs : bool }
     not, so explicit hashes cannot reach hidden capability constructors. *)
 
 and frame =
-  | FAppFn of { args : Kernel.expr list; scope : scope }
-      (** function position evaluated; arguments pending *)
-  | FAppArgs of { fn : t; done_rev : t list; pending : Kernel.expr list; scope : scope }
+  | FAppFn of { args : Kernel.expr list; scope : scope; site : Span.t option }
+      (** function position evaluated; arguments pending. [site] is the application's source span
+          (metadata for traces: never part of a value, identity or output) *)
+  | FAppArgs of {
+      fn : t;
+      done_rev : t list;
+      pending : Kernel.expr list;
+      scope : scope;
+      site : Span.t option;
+    }
   | FLet of { binder : Kernel.pat; body : Kernel.expr; scope : scope }
   | FMatch of { scrutinee_meta : Meta.t; clauses : Kernel.clause list; scope : scope }
   | FTuple of { done_rev : t list; pending : Kernel.expr list; scope : scope }
