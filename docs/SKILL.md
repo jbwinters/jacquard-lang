@@ -329,15 +329,17 @@ greet(name) = {
 
 Local recursive bindings must bind functions. Jacquard is strict and
 evaluates arguments left to right. A local `let rec` whose body performs an
-effect currently fails row inference (E0801, a known checker bug) unless its
-recursive call is annotated, as in `(go : (Int) ->{Console} ())(k)`; defining
-the function at top level avoids the problem.
+effect can fail row inference (E0801, a known checker bug) when nothing fixes
+the recursive binder's row. Annotating the recursive call, as in
+`(go : (Int) ->{Console} ())(k)`, or defining the function at top level avoids
+it.
 
 `try` propagates a `Result` error out of the enclosing block. `let p = try e`
 binds the `Ok` payload; `try e` alone requires `Ok` and discards it. When `e` is
 `Err(x)`, the rest of the block is skipped and the block's value is `Err(x)`.
 The scope is the innermost `{ ... }` block, the error type must match exactly,
-and `try` adds no effect (it is sugar for a `match`).
+and `try` adds no effect (it is sugar for a `match`). A block cannot end with a
+`try` item (E1243); its final expression is already the block's `Result`.
 
 ```jacquard doctest=skill-try mode=run fixture=skill-try.jac stdout=skill-try.stdout stderr=empty exit=0
 parse-age(raw) =
@@ -580,9 +582,9 @@ sequence owner inside a layer or infer support for argument transforms.
 Use `resume _` when a clause deliberately never resumes. A handler inside
 `quote` must name its continuation instead (E1245), because quoted code is
 name-addressed. **Since 0.3.0:** the 0.3.0 checker can crash on `resume _` in
-some handlers (internal error `Bug_unprintable`, exit 125) and accepts it
-inside `quote`; with that release, bind a name you never use, such as
-`resume ignored`.
+some handlers (internal error `Bug_unprintable`, exit 125) and does not
+refuse it inside `quote` (it may accept or crash); with that release, bind a
+name you never use, such as `resume ignored`.
 
 ```jacquard doctest=skill-resume-wildcard mode=check fixture=skill-resume-wildcard.jac stdout=skill-resume-wildcard.stdout stderr=empty exit=0
 to-option(body) =
@@ -666,7 +668,7 @@ file        := top-item*
 top-item    := signature | definition | type-decl | effect-decl | expression
 signature   := name ":" type
 definition  := name ["(" ([label ":"] pattern ("," [label ":"] pattern)*)? ")"] "=" expression
-type-decl   := ["opaque"] "type" Type type-vars? "=" ("|" constructor)+
+type-decl   := ["opaque"] "type" Type type-vars? "=" ["|"] constructor ("|" constructor)*
 effect-decl := mode "effect" Effect type-vars? "where" "{" uniform-op-signature+ "}"
 | "effect" Effect type-vars? "where" "{" mode-op-signature+ "}"
 uniform-op-signature := name ":" "(" ([label ":"] type ("," [label ":"] type)*)? ")" "->" type
@@ -680,7 +682,7 @@ call-items  := [label ":"] expression ("," [label ":"] expression)*
 primary     := literal | marked-text | name | tuple | list | block | fn | match | if
              | handle | quote | unquote | annotation
 marked-text := '$"' ("{{" | "{" expression "}" | character-or-escape)* '"'
-block       := "{" (let-item | try-item | expression)* "}"
+block       := "{" (let-item | try-item | expression)* expression "}"
 let-item    := "let" ["rec"] pattern ["(" patterns? ")"] "=" expression
 try-item    := ["let" pattern "="] "try" expression
 fn          := "fn" "(" patterns? ")" "->" expression
@@ -739,9 +741,10 @@ Rules to rely on:
 
 The world operations are called directly:
 
-- Console: `println(text)` writes a line; `print(text)` writes without a
-  newline; `read-line()` returns `Text` (`""` at end of input). The
-  `ConsoleInput` operation `next-line()` returns `Option Text`.
+- Console: `print(text)` writes without a newline; `println(text)`, a prelude
+  function over `print`, writes a line; `read-line()` returns `Text` (`""` at
+  end of input). The `ConsoleInput` operation `next-line()` returns
+  `Option Text`.
 - Fs: `read(path)`, `write(path, text)`, `list-dir(path)`.
 - Net: `fetch(MkRequest(url: u, body: b))` returns a `Response`, whose
   constructor is `MkResponse(status, body)`.
@@ -859,8 +862,10 @@ Core data and common functions:
 - Numeric: dotted `int.add`/`sub`/`mul`/`div` and `real.add`/`sub`/`mul`/`div`;
   compatibility `add`/`sub`/`mul`/`div`; `mod`, `eq`, and `lt`; `int.*` and
   `real.*` predicates/conversions; generic calls use an explicit `Num` value.
-- Text: `text.concat`, `text.join(a, b, ...)` (variadic, no separator),
-  `text.join-list(parts, separator)`, `text.split`, `text.contains?`,
+- Text: `text.concat`, `text.join(a, b, ...)` (variadic, no separator; join a
+  list with a separator by folding with `text.join(acc, separator, part)`;
+  `text.join-list(parts, separator)` still works but is a deprecated
+  compatibility binding), `text.split`, `text.contains?`,
   `text.slice(t, start, end)` (codepoint indexes, end exclusive),
   `text.length`, `text.from-int`, `text.to-int` (`Option Int`),
   `text.from-real-fixed(x, decimals)`,
@@ -969,12 +974,13 @@ units. Consequently:
   E0612 rather than an identity-silent API change.
 
 Use `jac fmt --write` for canonical layout. The formatter also orders top-level
-definitions so each one follows the definitions it uses, so adding a call to a
-later definition can move the caller. Use stores and `jac diff` when you need
-rename classification, changed canonical subtrees, or affected dependents. `jac
-diff` accepts two stores or two declaration-only source files; a source file
-with a bare top-level expression is refused (E0610), so diff a program without
-its entry call. Its output names callees by content hash. Hash or diff equality
+definitions so each one follows the definitions it uses (members of one mutually
+recursive group keep their relative order), so adding a call to a later
+definition can move the caller. Use stores and `jac diff` when you need rename
+classification, changed canonical subtrees, or affected dependents. `jac diff`
+accepts two stores or two declaration-only source files; a source file with a
+bare top-level expression is refused (E0610), so diff a program without its
+entry call. Its output names callees by content hash. Hash or diff equality
 establishes canonical structural identity, not general behavioral equivalence.
 
 Record/replay logs contain operation, argument, and result triples. Strict
@@ -1120,8 +1126,8 @@ Do not invent new kernel forms for surface sugar.
 - Process substitution is not seekable input for `jac run`; use a real file.
 - `jac test` rejects bare top-level expressions in test files (E1001).
 - `--dry-run` refuses a program whose row includes `Eval` (E1002).
-- A local `let rec` whose body performs an effect fails row inference (E0801)
-  unless the recursive call is annotated with its type; use a top-level
+- A local `let rec` whose body performs an effect can fail row inference
+  (E0801); annotate the recursive call with its type or use a top-level
   recursive definition.
 - W1201 warns when a parameter is named like a constructor in scope (`job`
   for `Job`, `allow` for the prelude's `Allow`); rename the parameter.
