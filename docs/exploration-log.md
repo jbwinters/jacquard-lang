@@ -100,6 +100,11 @@ call in the program, not the `sample` inside the prelude function.
 - The name is redacted like any field (§3): an exposed secret inside it is
   replaced, and once a secret's plaintext is unknown the name is recorded as
   `<secret redacted>`. k still counts draws under the original name.
+- A handler that forwards the draw (`sample(d) resume k -> k(sample(d))`)
+  performs a new, unnamed `sample`: the name belongs to the draw `dist.named`
+  performed, which that handler caught, so the forwarded root step is unnamed.
+- The `choice-name` line was added to format 1 before any release carried the
+  format, so format 1 has always allowed it.
 - Tagging happens only while recording: `dist.named` adds nothing to a plain
   run, and its fuel cost is that of any function application.
 

@@ -301,11 +301,13 @@ addressed by its position. The output is the same as without --record.
   $ jacquard run dice.jac --allow dist --seed 3 > dice.plain
   $ jacquard run dice.jac --allow dist --seed 3 --record dice.log | cmp - dice.plain && echo same
   same
-  $ grep -E '^(step|choice-name)' dice.log | cut -d' ' -f1-3
+  $ grep -A1 -E '^(step|choice-name)' dice.log | grep -v -E '^(--|name|site)' | cut -d' ' -f1-3
   step index=0 kind=choice
   choice-name draw=0 bytes=3
+  die
   step index=1 kind=choice
   choice-name draw=1 bytes=3
+  die
   step index=2 kind=choice
   $ grep -A1 '^site' dice.log | grep -v '^--'
   site bytes=18
@@ -328,3 +330,26 @@ step and leaves no pending name behind for a later root draw.
   $ grep -c '^step' inner.log; grep -c '^choice-name' inner.log || true
   1
   0
+
+A name is redacted like any field: an exposed secret inside it is not recorded,
+and the draw count still follows the name as written.
+
+  $ cat > named-secret.jac <<'JAC'
+  > pick() = {
+  >   let plain = secret.expose(secret.read(secret-ref("deploy-token", None)))
+  >   let a = dist.named(text.concat("pick-", plain), UniformInt(1, 2))
+  >   let b = dist.named(text.concat("pick-", plain), UniformInt(1, 2))
+  >   add(a, b)
+  > }
+  > 
+  > pick()
+  > JAC
+  $ env "$key=hunter2zz" jacquard run named-secret.jac --allow secret --allow dist --seed 1 --record ns.log > /dev/null; echo "exit=$?"
+  exit=0
+  $ grep -c hunter2zz ns.log || true
+  0
+  $ grep -A1 '^choice-name' ns.log | grep -v '^--'
+  choice-name draw=0 bytes=22
+  pick-<secret redacted>
+  choice-name draw=1 bytes=22
+  pick-<secret redacted>

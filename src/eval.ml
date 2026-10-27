@@ -465,7 +465,6 @@ let with_observer ctx on_event body =
   ctx.root_observer <- Some on_event;
   Fun.protect ~finally:(fun () -> ctx.root_observer <- previous) body
 
-(* the run-transcript-v1 view of the typed stream: operation identities and trusted output bytes *)
 let with_named_choices ctx named body =
   let previous = ctx.named_choice in
   ctx.named_choice <- named;
@@ -476,6 +475,7 @@ let with_named_choices ctx named body =
       ctx.pending_choice <- None)
     body
 
+(* the run-transcript-v1 view of the typed stream: operation identities and trusted output bytes *)
 let with_root_observer ctx ~on_operation ~on_output operation =
   with_observer ctx
     (function
