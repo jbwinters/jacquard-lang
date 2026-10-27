@@ -94,6 +94,8 @@ project shape from file names alone.
 - `computation-fuel.md`: RT.1 per-invocation computation budget, the versioned
   fuel-v1 cost model, and E0919 incomplete-run semantics.
 - `errors.md`: diagnostic code catalog.
+- `../editors/README.md`: syntax highlighting for `.jac` (a TextMate grammar
+  for Shiki and TextMate editors, and Vim/Neovim runtime files).
 
 ## Current Release 0.3 Evidence
 

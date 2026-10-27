@@ -63,6 +63,7 @@ scripts/release/check-historical-manifests.sh \
   --commit "$(git rev-parse HEAD)" \
   --require-history
 scripts/release/test-historical-manifests.sh --commit "$(git rev-parse HEAD)"
+sh editors/check.sh
 scripts/ci/opam-install-deps.sh \
   --deps-only . --with-test --with-doc --with-dev-setup -y
 opam exec -- dune build @all
