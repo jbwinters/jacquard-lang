@@ -16,6 +16,7 @@
   ../../docs/effect-taxonomy.md
   ../../docs/concurrency.md
   ../../docs/tutorial.md
+  ../../docs/SKILL.md
   ../../docs/stdlib.md
   ../../docs/warp-testing.md
   ../../demos/README.md)
@@ -29,6 +30,7 @@
      ../../docs/effect-taxonomy.md
      ../../docs/concurrency.md
      ../../docs/tutorial.md
+     ../../docs/SKILL.md
      ../../docs/stdlib.md
      ../../docs/warp-testing.md
      ../../demos/README.md)))))

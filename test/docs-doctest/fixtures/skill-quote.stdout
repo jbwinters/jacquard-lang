@@ -1,0 +1,3 @@
+make-call : (Code) ->{} Code
+candidate : Code
+run-candidate : forall a. () ->{Eval} a
