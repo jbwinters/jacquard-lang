@@ -839,3 +839,16 @@ unchanged. `exploration-log.t` pins recording, source sites, output parity,
 permissions, refusals, bounds, policy selection and a twenty-payload secret
 check; `test_exploration_log.ml` adds two cases. The source inventory is now
 `1203 / 80 / 56`.
+
+EXP.2 adds `dist.named(name, d)` (`docs/stdlib.md`), a prelude function that is
+exactly `sample(d)` under every handler. While `jacquard run --record` records,
+the evaluator tags the `sample` a `dist.named` application performs with its
+name and call site, and the exploration log writes a `choice-name draw=k` line,
+so the draw is addressed by `(name, k)` (`docs/exploration-log.md` §2a);
+unnamed samples stay position-addressed. Values, output and fuel of plain runs
+are unchanged. `exploration-log.t` pins parity with `sample` under
+`infer enumerate`, `infer lw`, a seeded root grant and Warp, the `(name, k)`
+addressing inside a recursion, and that an in-language driver's choices are not
+steps; the parser refuses a name on a non-choice step. The new prelude term
+changes the prelude identity, so the demo projects are re-pinned. The source
+inventory is unchanged (`1203 / 80 / 56`).

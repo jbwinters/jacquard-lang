@@ -64,6 +64,12 @@ val register_root_handler :
     Its arguments, continuation mutation, and result are guarded at dispatch; callback failures are
     returned as runtime errors. *)
 
+val with_named_choices : ctx -> Hash.t option -> (unit -> 'a) -> 'a
+(** [with_named_choices ctx named f] runs [f] with [named] as the [dist.named] member identity
+    (EXP.2): while an observer is installed, a [dist.named(label, d)] application tags the [sample]
+    it performs next with [label] and its own call site ([Observation.Operation.choice]). Values,
+    fuel and control flow are unchanged; [None] (the default) disables tagging. *)
+
 val with_observer : ctx -> (Observation.event -> unit) -> (unit -> 'a) -> 'a
 (** [with_observer ctx on_event f] delivers the typed root events of [ctx] (RF.3,
     docs/observation-boundary.md) to [on_event] for the dynamic extent of [f], in evaluation order:

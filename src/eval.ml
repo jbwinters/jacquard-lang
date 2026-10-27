@@ -192,6 +192,12 @@ type ctx = {
   mutable observing : bool;
       (** set while an observer callback runs: the callback may not evaluate (RF.3) *)
   mutable next_call : int;  (** the next root-call correlation id (OBS.1) *)
+  mutable named_choice : Hash.t option;
+      (** the [dist.named] member hash, set by a recording run (EXP.2) so the name of a named choice
+          reaches its root [sample] event; [None] keeps evaluation unchanged *)
+  mutable pending_choice : (string * Span.t option) option;
+      (** the name and call site of a [dist.named] application whose [sample] has not yet been
+          performed; taken (and cleared) by the next perform, which is that [sample] *)
   mutable dispatching : int list;
       (** the calls whose root handlers are running, innermost first: trusted output belongs to the
           innermost *)
@@ -285,6 +291,8 @@ let make_ctx store =
     root_observer = None;
     observing = false;
     next_call = 0;
+    named_choice = None;
+    pending_choice = None;
     dispatching = [];
     capture_ops = false;
     capture_root_handlers = false;
@@ -458,6 +466,16 @@ let with_observer ctx on_event body =
   Fun.protect ~finally:(fun () -> ctx.root_observer <- previous) body
 
 (* the run-transcript-v1 view of the typed stream: operation identities and trusted output bytes *)
+let with_named_choices ctx named body =
+  let previous = ctx.named_choice in
+  ctx.named_choice <- named;
+  ctx.pending_choice <- None;
+  Fun.protect
+    ~finally:(fun () ->
+      ctx.named_choice <- previous;
+      ctx.pending_choice <- None)
+    body
+
 let with_root_observer ctx ~on_operation ~on_output operation =
   with_observer ctx
     (function
@@ -495,11 +513,18 @@ let dispatching_as ctx call run =
 
 (* observers receive immutable data projections, computed only if forced: never live values, so
    a callback cannot read a secret, mutate a captured cell, or hold a continuation *)
-let notify_root_operation ?site ctx ~call operation ~name arguments =
+let notify_root_operation ?site ?choice ctx ~call operation ~name arguments =
   if Option.is_some ctx.root_observer then
     emit ctx
       (Observation.Operation
-         { call; operation; name; arguments = lazy (List.map Observation.of_value arguments); site })
+         {
+           call;
+           operation;
+           name;
+           arguments = lazy (List.map Observation.of_value arguments);
+           site;
+           choice;
+         })
 
 let notify_root_result ctx ~call operation result =
   if Option.is_some ctx.root_observer then
@@ -1397,6 +1422,15 @@ let op_mode ctx op =
     handlers (grants); otherwise raise [Unhandled]. *)
 let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t list) (k : kont) :
     state =
+  (* a pending named choice belongs to exactly this perform (the [sample] in [dist.named]'s body);
+     it names the event and replaces the prelude-internal site with the user's call site *)
+  let choice, site =
+    match ctx.pending_choice with
+    | None -> (None, site)
+    | Some (label, call_site) ->
+        ctx.pending_choice <- None;
+        (Some label, call_site)
+  in
   let rec split walked inner_rev = function
     | FHandle h :: outer when handler_covers h op ->
         if walked > 0 then charge ctx walked;
@@ -1439,7 +1473,7 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
           if Option.is_none native && ctx.capture_ops then Some (op_mode ctx op) else None
         in
         let call = fresh_call ctx in
-        notify_root_operation ?site ctx ~call op ~name args;
+        notify_root_operation ?site ?choice ctx ~call op ~name args;
         if Fuel_meter.exhausted () then exhaust ctx;
         match (native, mode) with
         | Some native, _ ->
@@ -1458,6 +1492,13 @@ let apply_unchecked ?site ctx (fn : Value.t) (args : Value.t list) (k : kont) : 
   let charge_frames frames = charge ctx (List.length frames) in
   match fn with
   | VClosure { scope; params; body } ->
+      (match (ctx.named_choice, args) with
+      | Some named, [ VText label; _ ]
+        when Option.is_some ctx.root_observer
+             && Array.length scope.group = 1
+             && Hash.equal scope.group.(0) named ->
+          ctx.pending_choice <- Some (label, site)
+      | _ -> ());
       if List.length params <> List.length args then
         rt_arity "closure of %d parameter(s) applied to %d argument(s)" (List.length params)
           (List.length args)

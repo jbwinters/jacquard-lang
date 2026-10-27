@@ -19,6 +19,7 @@ type step = {
   operation : Hash.t;
   name : string;
   site : Span.t option;
+  choice : (string * int) option;  (** EXP.2: the [dist.named] name (redacted) and its draw k *)
   arguments : (int * Observation_transcript.field) list;
   mutable result : Observation_transcript.field option;
   wants_result : bool;  (** the policy keeps this operation's result *)
@@ -42,6 +43,7 @@ type t = {
   mutable steps : step list;  (** newest first *)
   mutable count : int;
   calls : (int, step) Hashtbl.t;
+  draws : (string, int) Hashtbl.t;  (** draws so far per [dist.named] name (the raw name) *)
   mutable bytes : int;
   mutable bounded : string option;
 }
@@ -77,6 +79,7 @@ let create ~policy ~record_output ~max_steps ~max_bytes ~sample ~observe ~expose
     steps = [];
     count = 0;
     calls = Hashtbl.create 64;
+    draws = Hashtbl.create 16;
     bytes = 0;
     bounded = None;
   }
@@ -150,7 +153,7 @@ let span_text (s : Span.t) =
 let on_event t (event : Observation.event) =
   if Option.is_none t.bounded then
     match event with
-    | Observation.Operation { call; operation; name; arguments; site } -> (
+    | Observation.Operation { call; operation; name; arguments; site; choice = named } -> (
         match Observation_policy.rule_for t.policy operation with
         | None -> ()
         | Some rule ->
@@ -175,6 +178,20 @@ let on_event t (event : Observation.event) =
                   | Observation_policy.Selected_arguments positions ->
                       List.map (fun i -> (i, Observation_transcript.Unfinished)) positions)
             in
+            (* a named choice is addressed by (name, k): k counts earlier draws under the same raw
+               name; the recorded name is redacted like any field *)
+            let choice =
+              match (kind, named) with
+              | Choice_step, Some label ->
+                  let k = Option.value ~default:0 (Hashtbl.find_opt t.draws label) in
+                  let shown =
+                    if t.secret_unknown then "<secret redacted>"
+                    else if t.secrets = [] then label
+                    else Relate.redact ~secrets:t.secrets label
+                  in
+                  Some (shown, k)
+              | _ -> None
+            in
             let step =
               {
                 index = t.count;
@@ -182,6 +199,7 @@ let on_event t (event : Observation.event) =
                 operation;
                 name;
                 site;
+                choice;
                 arguments;
                 result = None;
                 wants_result = rule.result = Observation_policy.Compare;
@@ -194,7 +212,11 @@ let on_event t (event : Observation.event) =
               + (if rule.result = Observation_policy.Compare then line_cost else 0)
               + String.length name
               + (match site with Some s -> String.length (span_text s) | None -> 0)
+              + (match choice with Some (shown, _) -> line_cost + String.length shown | None -> 0)
               + List.fold_left (fun acc (_, f) -> acc + line_cost + field_size f) 0 arguments);
+            (match (choice, named) with
+            | Some (_, k), Some label -> Hashtbl.replace t.draws label (k + 1)
+            | _ -> ());
             t.steps <- step :: t.steps;
             t.count <- t.count + 1;
             Hashtbl.replace t.calls call step)
@@ -257,6 +279,7 @@ type entry = {
   e_operation : Hash.t;
   e_name : string;
   e_site : string option;  (** [file:line:col-line:col] *)
+  e_choice : (string * int) option;  (** a named choice's name and draw k (EXP.2) *)
   e_arguments : (int * Observation_transcript.field) list;
   e_result : Observation_transcript.field option;
   e_output : Observation_transcript.field option;
@@ -290,6 +313,7 @@ let finish t ~program ~seed ~grants ~exit_status =
             e_operation = s.operation;
             e_name = s.name;
             e_site = Option.map span_text s.site;
+            e_choice = s.choice;
             e_arguments = s.arguments;
             (* as in OBS.1, a kept result that never arrived (an inference driver captured the
                choice and resumed it itself, or the run stopped first) is [missing] *)
@@ -344,6 +368,9 @@ let serialize log =
       (match e.e_site with
       | Some s -> framed buf "site" s
       | None -> Buffer.add_string buf "site unknown\n");
+      Option.iter
+        (fun (label, k) -> framed buf (Printf.sprintf "choice-name draw=%d" k) label)
+        e.e_choice;
       List.iter (fun (i, f) -> add_field buf (Printf.sprintf "argument index=%d" i) f) e.e_arguments;
       Option.iter (add_field buf "result") e.e_result;
       Option.iter (add_field buf "output") e.e_output)
@@ -463,6 +490,19 @@ let parse bytes =
                 None
             | _ -> Some (framed_after "site")
           in
+          let choice =
+            match peek () with
+            | Some l when String.starts_with ~prefix:"choice-name draw=" l ->
+                if kind <> Choice_step then fail "a choice-name on a %s step" (kind_name kind);
+                let k =
+                  match String.split_on_char ' ' l with
+                  | [ _; d; _ ] -> int_of (after "draw=" d)
+                  | _ -> fail "bad choice-name line %S" l
+                in
+                if k < 0 then fail "bad draw %d" k;
+                Some (framed_after (Printf.sprintf "choice-name draw=%d" k), k)
+            | _ -> None
+          in
           let arguments =
             List.init count (fun _ ->
                 match peek () with
@@ -495,6 +535,7 @@ let parse bytes =
                e_operation = operation;
                e_name = name;
                e_site = site;
+               e_choice = choice;
                e_arguments = arguments;
                e_result = result;
                e_output = output;

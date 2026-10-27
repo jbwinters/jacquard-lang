@@ -3,5 +3,5 @@
   (requires (core "0.2"))
   (namespace client)
   (units "client.jac")
-  (deps (dep (as nel) (path "../nel") (pin #faa51e47c1f3e3b5d2b4c4b76ea30b9570a470380256252265b0bcc4683ccfb0)) (dep (as prob) (path "../prob") (pin #3776811cc0a103faea7b0c6efcb69441a95b4ac09f47ff7330ae1da25e501d32)) (dep (as req) (path "../req") (pin #7adfbee9ac3e724154aee4302bfc202e5ed252cba5bfe83610df7b9fef4e2236)))
+  (deps (dep (as nel) (path "../nel") (pin #f5d725b52250d272f41423b8e715a15c979e805e6b1152b029ee03852d989b64)) (dep (as prob) (path "../prob") (pin #0188ca3e4c09eec6c09aad3d10b878db1f84de818b2781674c2e530fb282ded1)) (dep (as req) (path "../req") (pin #7094f73cbdf8ce07f6c9fb657c005af2335f32c93c1b99a11ef4254837a0319a)))
   (entries (run demo (units "demo.jac") (grants console) (native))))

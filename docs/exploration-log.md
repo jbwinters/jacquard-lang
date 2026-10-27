@@ -7,8 +7,9 @@
   prelude function, forks replay from the start, `observe` is never forked,
   recording is interpreter-only in v1), and a line-based, length-framed log
   format matching `observation-transcript-v1` and the behavior-review report.
-- Later work reads these logs: named choices (EXP.2), the fork engine (EXP.3),
-  exploration reports (EXP.4).
+- Named choices (EXP.2, `dist.named`) are recorded with their name (§2a).
+- Later work reads these logs: the fork engine (EXP.3) and exploration reports
+  (EXP.4).
 
 ## 1. Recording a run
 
@@ -81,6 +82,27 @@ own source or store object, not the user's call site. Hash-equal declarations
 share one body, so a step's site names one of them (whichever the evaluator
 loaded first); sites cannot tell such twins apart.
 
+## 2a. Named choices
+
+`dist.named(name, d)` (`docs/stdlib.md`) is exactly `sample(d)`; in a
+recording it also names the draw. Its `choice` step carries a `choice-name`
+line with the name and `draw=k`, the number of earlier recorded draws under the
+same name (from 0), so a choice inside a loop or a recursion is addressed by
+`(name, k)` rather than by its step index. The step's site is the `dist.named`
+call in the program, not the `sample` inside the prelude function.
+
+- A `sample` with no name has no `choice-name` line. It is addressable only by
+  its step index, which a different path can shift; reports built on the log
+  (EXP.3, EXP.4) mark such forks as position-addressed.
+- Only a draw that reaches the root is a step. A named choice an in-language
+  driver handles (`dist.enumerate`, `dist.sample-lw`) is not recorded and does
+  not count toward k.
+- The name is redacted like any field (§3): an exposed secret inside it is
+  replaced, and once a secret's plaintext is unknown the name is recorded as
+  `<secret redacted>`. k still counts draws under the original name.
+- Tagging happens only while recording: `dist.named` adds nothing to a plain
+  run, and its fuel cost is that of any function application.
+
 ## 3. Exposure
 
 - A `Secret` value is never rendered: OBS.1 records it as `unsupported
@@ -127,13 +149,17 @@ name bytes=<n>
 <display name>
 site bytes=<n>
 <file>:<line>:<col>-<line>:<col>
+choice-name draw=<k> bytes=<n>
+<name>
 argument index=<j> <field>
 result <field>
 output <field>
 end steps=<k> exit=<status> | end steps=<k> bounded=steps|bytes
 ```
 
-- `site unknown` replaces the framed site when there is none. `result` and
+- `site unknown` replaces the framed site when there is none. `choice-name`
+  appears only on a `choice` step made by `dist.named` (§2a); the parser refuses
+  it on any other step. `result` and
   `output` appear only when recorded. Steps are numbered from 0 in order.
 - A field is `data bytes=N` (then N bytes and a newline), `truncated total=T
   bytes=L` (the first L bytes), `unsupported kind=K`, `failure code=C`,
