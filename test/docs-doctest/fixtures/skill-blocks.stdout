@@ -1,0 +1,2 @@
+factorial : (Int) ->{} Int
+greet : (Text) ->{Console} Int

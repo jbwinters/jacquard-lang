@@ -1,0 +1,2 @@
+coin-model : () ->{Dist} Bool
+_ : Bool

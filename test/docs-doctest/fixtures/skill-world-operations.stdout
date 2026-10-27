@@ -1,0 +1,3 @@
+ask-name : () ->{Console, ConsoleInput} ()
+status-of : (Text) ->{Net} Int
+token : () ->{Secret} Text

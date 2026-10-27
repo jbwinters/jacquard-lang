@@ -1,0 +1,1 @@
+head : forall a. (List a) ->{} Option (a, List a, List a)

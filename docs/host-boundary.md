@@ -252,9 +252,13 @@ checked invoke preflight, its later runnable carrier inside Core, executable
 fixtures, and language/runtime evidence. It may contain a tiny fake host used
 only to prove conformance.
 
-The private `jacquard-host` repository owns real adapters, sockets,
-persistence, the minimal serial HTTP integration, and the requirements report
-fed back to Core. HTTP parsing and routing written in Jacquard remain external
+The separate, public
+[`jacquard-host`](https://github.com/jbwinters/jacquard-host) repository owns
+real adapters, sockets, persistence, the minimal serial HTTP integration, and
+the requirements report fed back to Core. Its adapters are independent Python,
+TypeScript, and Go implementations of this protocol, each with an SDK. They
+share one pinned Core release, recorded in that repository's `core-pin.json`.
+HTTP parsing and routing written in Jacquard remain external
 library/application code; they do not belong in the language repository.
 
 The real readability application moves to its own repository before it gains
@@ -273,7 +277,7 @@ headers are not smuggled into HB.0.
 |---|---|---|
 | First-party programs | safety for hostile uploaded Jacquard code | separate-process or equivalent isolation design, hostile resource tests, and reviewed threat model |
 | Trusted adapter and OS | protection from a lying host or broader OS credentials | independently enforced isolation/authentication plus external security review |
-| Experimental serial carrier with a published kit pinned by one adapter | interoperability beyond one language, or embedding support | a second independent adapter passes the same fixtures (see `release/host-boundary/LIMITS.md`) |
+| Experimental serial carrier with a published kit | interoperability guarantees beyond the pinned kit, or embedding support | independent adapters in three languages (Python, TypeScript, and Go in jacquard-host) now match the same 21 recordings, including the disclosed `noncanonical-target-hash` divergence; removal remains Core's decision (see `release/host-boundary/LIMITS.md` and the next row) |
 | Experimental process carrier first | permanent ABI stability or low-overhead embedding | two independent adapters and one real integration pass the frozen fixtures before v1 |
 | One serial invocation | concurrent requests, streaming, or throughput | demonstrated need followed by the C4 scheduler contract and resource evidence |
 | No automatic side-effect retry | transparent recovery from ambiguous completion | per-operation idempotency, receipt, and crash/recovery contract |
@@ -302,9 +306,13 @@ described in [`host-worker-v0.md`](host-worker-v0.md).
 HB.3 published the language-neutral conformance kit
 ([`spec/host-protocol-v0/kit/`](../spec/host-protocol-v0/kit/README.md)) and
 its evidence pack ([`release/host-boundary/`](release/host-boundary/EVIDENCE.md)).
-The first external adapter, jacquard-host, pinned that kit, replayed it in
-full, and returned its authority inventory and a versioned requirements
-report; those are the inputs to the gates below.
+The first external adapter, jacquard-host's Python adapter, pinned that kit,
+replayed it in full, and returned its authority inventory and a versioned
+requirements report; those are the inputs to the gates below. Independent
+TypeScript and Go adapters in the same repository have since replayed all 21
+recordings as well, and all three adapters now pin the `jacquard-core-0.3.0`
+release. The kit's recordings are unchanged since HB.3; only its recorded
+Core version changed.
 
 The external serial HTTP integration reports concrete authority needs back to
 Core. That report gates resource attenuation. Measured concurrency need gates
