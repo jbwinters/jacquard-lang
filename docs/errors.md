@@ -616,6 +616,21 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | W1702 | beside a checker error, the definition's signature is in another unit, so the report names both files | a signature in `sig.jac`, its definition in `def.jac` |
 | W1703 | the root exports a transparent type without its constructors, or that type's generated setter; the constructors are hidden by name only | `(exports (type liba-box))` for `type LibaBox = LibaBox(n: Int)` |
 
+## Model documents (E18xx)
+
+Diagnostics of `jacquard-model-v1` documents and their dependency records
+(`docs/designs/model-dependencies.md`). Each is reported before any result is
+evaluated.
+
+| code | meaning | example |
+|---|---|---|
+| E1800 | the document is malformed: a wrong header, a missing or repeated `source` or `policy` line, an unknown line or driver, a missing, repeated or unknown driver setting, a noncanonical number, a carriage return, or a document over 64 KiB | `result r entry f args a driver run fuel=010` |
+| E1801 | a name is declared twice across the document's assumptions, inputs and results | `input note ...` and `result note ...` |
+| E1802 | a result argument names no assumption, input or exported term; names a result (results are not arguments in model-v1); or a declared name is also an exported term of the source | `args summary` where `summary` is a result |
+| E1803 | an assumption (or an inline numeric argument) is not closed literal data: it does not parse or resolve, computes, or uses a sealed constructor of an opaque type | `assumption step = add(1, 3)` |
+| E1804 | a named source, input or policy file is missing, not a regular file, over 16 MiB, an input that is not UTF-8, or a policy that is not canonical `observation-policy-v1` | `input note text absent.txt` |
+| E1805 | a result's entry is not an exported term of the source, or the entry does not check when applied to the result's arguments | `entry scale args note` where `scale` takes `Int` |
+
 ## Appendix: the W5.3 audit (ten message rewrites)
 
 Before/after wording improvements applied during the audit:

@@ -852,3 +852,15 @@ addressing inside a recursion, and that an in-language driver's choices are not
 steps; the parser refuses a name on a non-choice step. The new prelude term
 changes the prelude identity, so the demo projects are re-pinned. The source
 inventory is unchanged (`1203 / 80 / 56`).
+
+MODEL.1 slice 1 accepts the model-dependency design
+(`docs/designs/model-dependencies.md`) and implements its document format and
+dependency key (`src/model_doc.ml`): a strict `jacquard-model-v1` parser; the
+validation of a document against its checked source (closed literal
+assumptions, UTF-8 text inputs, exported term arguments, and each result's
+application checked at the entry's types, with the effects beyond the driver's
+recorded as world effects); and the canonical `jacquard-model-dependency-v1`
+record with its domain-separated key. Refusals are E1800-E1805. No command uses
+it yet; `jacquard model eval` and `explain` follow. `test_model_doc.ml` adds six
+cases, including key-level invalidation for each dependency axis. The source
+inventory is now `1209 / 80 / 56`.
