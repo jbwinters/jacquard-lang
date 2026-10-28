@@ -44,6 +44,9 @@ val parse : file:string -> string -> (t, Diag.t list) result
     and canonical numbers. Blank lines and lines starting with [#] are ignored. Refused with E1800
     (malformed) or E1801 (a repeated name). *)
 
+val read : string -> (t, Diag.t list) result
+(** [read file] reads a regular file (E1804 when it cannot be read) and {!parse}s it. *)
+
 (** {1 Dependency records} *)
 
 type argument_identity =

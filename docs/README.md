@@ -180,6 +180,9 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   for recording an execution, forking one typed observation or named random
   choice under models, comparing the two executions, and exporting a hermetic
   Warp regression case; with the EXP.1–EXP.5 and EXP.7 follow-up backlog and its reconciliation with existing tasks.
+- `designs/model-dependencies.md`: DES.5 accepted design for MODEL.1: model
+  documents with explicit assumptions, inputs and results, per-result
+  dependency keys, and `jacquard model eval` with its result cache.
 - `designs/project-structure.md`: PKG.0 design for local projects (task
   217): the `project.jqd` manifest, a no-rewrite namespace contract,
   consumer-relative visibility for names and identities, composed units,

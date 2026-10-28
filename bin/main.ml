@@ -4333,6 +4333,92 @@ let project_t =
        ~doc:"Local multi-file projects (project.jqd; docs/designs/project-structure.md).")
     [ check; run; test; build; hash; pin; interface; bundle; fmt ]
 
+(* --- model (MODEL.1, docs/designs/model-dependencies.md) --- *)
+
+let model_eval_cmd file prelude allows seed cache no_cache json =
+  let prelude_dir = prelude_dir_of prelude in
+  let cache =
+    if no_cache then None
+    else
+      match cache with
+      | Some dir -> Some dir
+      | None ->
+          Some (Filename.concat (Filename.dirname file) (Filename.concat ".jacquard" "model-cache"))
+  in
+  let root = fresh_check_root () in
+  let prepared =
+    match Model_doc.read file with
+    | Error ds -> Error ds
+    | Ok doc -> Model_doc.prepare ~prelude_dir ~root ~file doc
+  in
+  match prepared with
+  | Error ds -> print_diags ds
+  | Ok prepared -> (
+      match Frontend.open_session ~prelude_dir ~root with
+      | Error ds -> print_diags ds
+      | Ok (_, ctx) ->
+          let results, warnings =
+            Model_eval.evaluate ~ctx ~allows ~seed ~cache ~out:print_string prepared
+          in
+          print_warnings warnings;
+          if json then print_endline (Model_eval.to_json results)
+          else
+            List.iter
+              (fun (e : Model_eval.evaluated) ->
+                List.iter print_endline (Model_eval.render_text e);
+                match e.Model_eval.status with
+                | Model_eval.Refused ds -> List.iter print_diagnostic ds
+                | _ -> ())
+              results;
+          let refused =
+            List.exists
+              (fun (e : Model_eval.evaluated) ->
+                match e.Model_eval.status with Model_eval.Refused _ -> true | _ -> false)
+              results
+          in
+          let failed =
+            List.exists
+              (fun (e : Model_eval.evaluated) ->
+                match e.Model_eval.outcome with
+                | Some
+                    (Model_eval.Failure _ | Model_eval.Incomplete | Model_eval.Inference_failure _)
+                  ->
+                    true
+                | _ -> false)
+              results
+          in
+          if refused then exit_unhandled else if failed then exit_runtime else ok)
+
+let model_t =
+  let eval =
+    Cmd.v
+      (Cmd.info "eval"
+         ~doc:
+           "Evaluate every result of a model document, serving unchanged results from the cache \
+            (docs/designs/model-dependencies.md).")
+      Term.(
+        const (configure_diagnostics model_eval_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(required & pos 0 (some file) None & info [] ~docv:"MODEL")
+        $ prelude_arg $ allows_arg
+        $ Arg.(
+            value & opt int 0
+            & info [ "seed" ] ~docv:"SEED"
+                ~doc:"Seed of the dist root grant under --allow dist (default 0).")
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "cache" ] ~docv:"DIR"
+                ~doc:"Cache directory (default: .jacquard/model-cache beside the document).")
+        $ Arg.(value & flag & info [ "no-cache" ] ~doc:"Neither read nor write the cache.")
+        $ Arg.(
+            value & flag
+            & info [ "json" ] ~doc:"Print the results as one jacquard-model-eval-v1 JSON object."))
+  in
+  Cmd.group
+    (Cmd.info "model" ~doc:"Model documents with explicit dependencies and cached results.")
+    [ eval ]
+
 let main =
   Cmd.group
     (Cmd.info "jacquard" ~version:Version.version ~doc:"The Jacquard language toolchain")
@@ -4358,6 +4444,7 @@ let main =
       review_t;
       project_t;
       host_t;
+      model_t;
     ]
 
 let render_selected_diagnostic diagnostic =

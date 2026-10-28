@@ -2,11 +2,12 @@
 
 - Status: accepted. Revision 3 followed two design reviews, and the owner
   adopted the recommended option of every decision in §6 on 2026-10-27.
-- Implementation: in slices. Slice 1 (this revision) implements the document
-  format, its validation against the source, and the dependency record and key
-  (`src/model_doc.ml`, E1800-E1805). `jacquard model eval` with the cache
-  (slice 2) and history, snapshots and `jacquard model explain` (slice 3) follow.
-  §7 lists what each slice proves.
+- Implementation: in slices. Slice 1 implements the document format, its
+  validation against the source, and the dependency record and key
+  (`src/model_doc.ml`, E1800-E1805). Slice 2 implements `jacquard model eval`,
+  `model-result-v1` and the cache (`src/model_eval.ml`, E1806, W1800, W1801;
+  §3.3a). History, snapshots and `jacquard model explain` (slice 3) follow. §7
+  lists what each slice proves.
 - Task: MODEL.1. Consumers: EXP.5 (`scenario-v1` is a MODEL.1 artifact plus
   forks), UNC.3 (assumption sets), the host's decision documents (APP.3), and
   MODEL.2 (measured incremental computation).
@@ -96,18 +97,21 @@ The format, exactly (slice 1):
   lines and lines starting with `#` are ignored. A document is UTF-8 and at most
   64 KiB.
 - `source PATH` appears once; `policy PATH` at most once. Paths are single
-  tokens, relative to the document's directory.
+  tokens, relative to the document's directory: an absolute path is refused,
+  while `..` and symbolic links are followed. The source, every input and the
+  policy are regular files read once through one descriptor, at most 16 MiB
+  each.
 - `assumption NAME = EXPR`: the expression is the rest of the line. A
   closed-literal assumption is a literal, a constructor, or a constructor
   application or tuple over them, possibly annotated; it must resolve against
   the checked source, check, and use no sealed constructor of an opaque type.
-- `input NAME text PATH`: the file is read once, must be UTF-8, and holds at
-  most 16 MiB.
+- `input NAME text PATH`: the file must be UTF-8.
 - `result NAME entry TERM args ARGS driver DRIVER SETTINGS`. `ARGS` is `none`
-  or a comma-separated list without spaces; each item is a numeric literal (an
-  inline assumption) or a name, looked up first among the document's
+  or a comma-separated list without spaces; each item is a numeric literal
+  (`-?D+(.D+)?`, an inline assumption) or a name, looked up first among the document's
   assumptions and inputs and then among the source's exported terms. A declared
-  name that is also an exported term is refused. The driver and its settings
+  name (an assumption, input or result) that is also an exported term is
+  refused. The driver and its settings
   are `run fuel=N`, `enumerate max-branches=N fuel=N`, or
   `lw seed=S samples=N fuel=N`; each setting appears exactly once, and numbers
   are canonical decimals (fuel, bounds and samples positive).
@@ -117,16 +121,22 @@ The format, exactly (slice 1):
 - A result's entry applied to its arguments must check. Effects its row
   requires beyond what the driver handles (`dist` for `enumerate` and `lw`, and
   the scheduler infrastructure the runtime always discharges) are the result's
-  world effects: it needs `--allow` and is never cached.
+  world effects: it needs `--allow` and is never cached. The scheduler
+  infrastructure is not a world read: it is the interpreter's own deterministic
+  round-robin scheduler, installed for every run, so a result that spawns tasks
+  replays exactly.
+- A closed-literal assumption may name a constructor with fields only applied:
+  an unapplied one is a function value. A policy pinned to an interface must
+  name the source's `interface-v1` identity (E1804).
 
 ### 3.2 Dependency record and key
 
-Each result has a canonical **dependency record**, line-based and
-length-framed like `exploration-log-v1`, parsed strictly:
+Each result has a canonical **dependency record**, line-based and parsed
+strictly:
 
 ```text
 jacquard-model-dependency format=1
-entry <term-hex> signature <hex> labels <positional | l1,_,l3>
+entry <term-hex> signature <hex> labels <positional | [+l1,-,+l3]>
 prelude <hex | none> core <version> engine interpreter driver model-driver-v1 fuel-model fuel-v1
 driver enumerate max-branches=10000 fuel=1000000
 policy <hex>
@@ -194,6 +204,54 @@ A refused result is evaluated and shown with its reason, never stored. Only
 data-v1 text is persisted, after OBS.1 redaction; values a policy excludes are
 never hashed into a record. Input files are the user's declared data and are
 retained as given; the documentation warns against declaring secret files.
+
+### 3.3a The implemented artifact and command (slice 2)
+
+`model-result-v1` is the dependency record followed by exactly one outcome
+section. Every line ends with LF; a field is `data bytes=N`, an LF, the N
+bytes of its data-v1 rendering, and an LF:
+
+```text
+outcome value
+data bytes=1
+9
+outcome posterior complete explored=2 entries=2
+entry p=0.69999999999999996
+data bytes=6
+...
+outcome inference impossible complete explored=3
+outcome failure code=E0902
+```
+
+Probabilities are written with 17 significant digits, so they round-trip
+exactly. A runtime failure without a public code is named by its stable kind
+(`arithmetic`, `match-failure`, `unhandled`, ...), never by its message. The
+reader accepts only canonical bytes holding a cacheable outcome.
+
+`jacquard model eval DOC [--cache DIR | --no-cache] [--allow EFFECT]...
+[--seed N] [--json]`:
+
+- The default cache is `.jacquard/model-cache/` beside the document. Each
+  outcome is stored as `outcomes/<key>`, written to an owner-only temporary file
+  and renamed; directories are created `0700`. A file whose record differs
+  from the result's, or that does not parse, is ignored with W1800 and
+  replaced; a failed write is W1801 and leaves the result uncacheable.
+- Each result is printed as `NAME: fresh|cached|uncacheable (REASON)|refused`
+  with its outcome. Reasons are `fuel`, `result-excluded` (the policy ignores
+  the result), the opaque kind of an unsupported field (`closure`, `secret`,
+  ...), `truncated`, `root-grants`, `no-cache` and `write-failed`. The value is
+  the data-v1 rendering, the same text whether fresh or cached.
+- A result whose entry needs a root grant that was not given is refused
+  (E1806) without running. `--allow` installs the named grants for every
+  result (`--seed` seeds `dist`, default 0) and disables the cache for the
+  whole document.
+- Only the policy's result rule applies: no operation is observed, because no
+  root handler runs.
+- `--json` prints one `jacquard-model-eval-v1` object: per result its name,
+  key, status, reason or refusal diagnostics, and typed outcome.
+- The exit status is 3 when a result is refused, else 2 when a result failed,
+  was impossible, exhausted or numerically failed, or ran out of fuel, else 0.
+  A document error exits 1 before anything runs.
 
 ### 3.4 Evaluation and invalidation
 
@@ -318,8 +376,15 @@ The owner adopted the recommended option of each decision.
   this at the key level (`test/test_model_doc.ml`): an assumption, a helper
   reached by some entries, an input, a seed, a bound and the policy each change
   exactly the dependent keys, while an unrelated definition and a respelled
-  equal literal change none.
-- A fresh evaluation equals the cached result byte for byte.
+  equal literal change none. The entry's call labels alone and the argument
+  order each change exactly the affected key. Slice 2 shows the same at the
+  command level (`test/cli/model-eval.t`) for an assumption, an input, a seed
+  and a helper edit.
+- A fresh evaluation equals the cached result byte for byte. Slice 2 checks
+  this by evaluating into a second cache and comparing every file.
 - Missing snapshots and cycles fail clearly; Secret-bearing and non-hermetic
-  results are refused caching with a stated reason.
+  results are refused caching with a stated reason. Cycles cannot be written
+  (results are not arguments, E1802). Slice 2 refuses to cache fuel-bound,
+  opaque, truncated, excluded and granted results, each with its reason.
+  Snapshots are slice 3.
 - `explain` names every differing key component.
