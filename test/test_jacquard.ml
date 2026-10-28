@@ -105,6 +105,7 @@ let () =
       ("cram-status", Test_cram_status.suite);
       ("behavior-review", Test_behavior_review.suite);
       ("exploration-log", Test_exploration_log.suite);
+      ("model-doc", Test_model_doc.suite);
       ("surface-lex", Test_surface_lex.suite);
       ("surface-parse", Test_surface_parse.suite);
       ("surface-patterns", Test_surface_patterns.suite);
