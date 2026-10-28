@@ -116,6 +116,28 @@ Each edit recomputes exactly the results that depend on it.
   broken: cached
     failure arithmetic
 
+Changing only the entry's call labels, or the policy, also recomputes exactly
+what depends on it.
+
+  $ sed -i 's/^scale(n, k) =/scale(n, by: k) =/' m.jac
+  $ jacquard model eval doc.model > labels.out; grep ':' labels.out
+  scaled: fresh
+  shifted: cached
+  echoed: cached
+  flip: cached
+  flip-lw: cached
+  broken: cached
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=4096 interface=none\nunlisted=ignore\noperations=0\n' > small.policy
+  $ sed -i 's/^source m.jac$/source m.jac\npolicy small.policy/' doc.model
+  $ jacquard model eval doc.model > policy.out; grep ':' policy.out
+  scaled: fresh
+  shifted: fresh
+  echoed: fresh
+  flip: fresh
+  flip-lw: fresh
+  broken: fresh
+  $ sed -i '/^policy small.policy$/d' doc.model
+
 A corrupt cache file is ignored with a warning and replaced.
 
   $ for f in .jacquard/model-cache/outcomes/*; do echo garbage > "$f"; done
@@ -217,3 +239,142 @@ A file that is not a regular file is refused without blocking.
     Cause: input note (line 3) ./pipe.txt cannot be read: not a regular file
     Next step: Check that the file exists, is a regular file within the size limit, and is valid.
   [1]
+
+`jacquard model explain DOC [RESULT]` says whether each result is current,
+names every key component that changed since its last evaluation, and what
+changed at its last recomputation, from the cache's history and snapshots.
+
+  $ mkdir ex && cd ex
+  $ cat > m.jac <<'JAC'
+  > helper(x) = add(x, 2)
+  > scale(n, k) = helper(add(n, k))
+  > echo(t) = t
+  > JAC
+  $ printf 'hi\n' > note.txt
+  $ cat > doc.model <<'DOC'
+  > jacquard-model format=1
+  > source m.jac
+  > assumption base = 3
+  > input note text note.txt
+  > result scaled entry scale args base,4 driver run fuel=10000
+  > result echoed entry echo args note driver run fuel=10000
+  > DOC
+  $ jacquard model explain doc.model
+  scaled: never evaluated
+  echoed: never evaluated
+  $ jacquard model eval doc.model > /dev/null
+  $ jacquard model explain doc.model > a.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' a.out
+  scaled: current (evaluated TIME)
+  echoed: current (evaluated TIME)
+  $ sed -i 's/base = 3/base = 5/' doc.model
+  $ printf 'bye!\n' > note.txt
+  $ jacquard model explain doc.model > b.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' b.out
+  scaled: stale (last evaluated TIME)
+    assumption base: 3 -> 5
+  echoed: stale (last evaluated TIME)
+    input note: 3 bytes -> 5 bytes
+  $ jacquard model eval doc.model > /dev/null
+  $ sed -i 's/add(x, 2)/add(x, 9)/' m.jac
+  $ sed -i 's/args base,4 driver run fuel=10000/args base,4 driver run fuel=20000/' doc.model
+  $ jacquard model explain doc.model scaled > c.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' c.out
+  scaled: stale (last evaluated TIME)
+    entry scale changed
+    fuel: 10000 -> 20000
+    last change (TIME):
+      assumption base: 3 -> 5
+
+A pruned snapshot is shown as unavailable, never guessed: an unchanged result
+whose snapshots are gone is unknown, not current. An unreadable history is
+reported as such, and the next evaluation keeps every record before the damage.
+
+  $ jacquard model eval doc.model > /dev/null
+  $ rm .jacquard/model-cache/snapshots/*
+  $ jacquard model explain doc.model scaled > u.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' u.out
+  scaled: unknown (snapshots gone: assumption base, inline 4, policy)
+    last change (TIME):
+      entry scale changed
+      fuel: 10000 -> 20000
+      snapshots gone: assumption base, inline 4, policy
+Evaluating again restores the snapshots, so the unchanged result is current.
+
+  $ jacquard model eval doc.model > /dev/null
+  $ jacquard model explain doc.model scaled > v.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' v.out
+  scaled: current (evaluated TIME)
+    last change (TIME):
+      entry scale changed
+      fuel: 10000 -> 20000
+  $ rm .jacquard/model-cache/snapshots/*
+  $ sed -i 's/base = 5/base = 7/' doc.model
+  $ jacquard model explain doc.model scaled > d.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' d.out
+  scaled: stale (last evaluated TIME)
+    assumption base: (unavailable) -> 7
+    snapshots gone: assumption base, inline 4, policy
+    last change (TIME):
+      entry scale changed
+      fuel: 10000 -> 20000
+      snapshots gone: assumption base, inline 4, policy
+  $ for h in .jacquard/model-cache/history/*/echoed; do echo junk >> "$h"; done
+  $ jacquard model explain doc.model echoed
+  echoed: history unavailable (bad frame)
+  $ printf 'hello\n' > note.txt
+  $ jacquard model eval doc.model > /dev/null 2> repair.err; grep -c W1803 repair.err; grep -o 'kept' repair.err
+  1
+  kept
+  kept
+  $ jacquard model explain doc.model echoed > r.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' r.out
+  echoed: current (evaluated TIME)
+    last change (TIME):
+      input note: (unavailable) -> 6 bytes
+      snapshots gone: input note
+  $ jacquard model explain doc.model nope
+  error[E1802]: The model document has no such result.
+    Cause: doc.model declares no result "nope"
+    Next step: Name a result the document declares.
+  [1]
+  $ for h in .jacquard/model-cache/history/*/scaled; do cp "$h" scaled.bak; s=$(ls .jacquard/model-cache/snapshots | head -1); sed -i -E "s/^policy-snapshot [0-9a-f]+$/policy-snapshot $s/" "$h"; done
+  $ jacquard model explain doc.model scaled
+  scaled: history unavailable (a record's policy snapshot is not its policy)
+  $ for h in .jacquard/model-cache/history/*/scaled; do cp scaled.bak "$h"; done
+  $ for h in .jacquard/model-cache/history/*/echoed; do printf 'entry bytes=36\njacquard-model-history format=2\nnew\n\n' > "$h"; cp "$h" newer.bak; done
+  $ jacquard model eval doc.model > /dev/null 2> newer.err; grep -o 'W180[0-9]' newer.err; grep -o 'another format' newer.err
+  W1802
+  another format
+  $ for h in .jacquard/model-cache/history/*/echoed; do cmp "$h" newer.bak && echo untouched; done
+  untouched
+  $ jacquard model explain doc.model --json > e.json; grep -o '"freshness":"[a-z-]*"' e.json
+  "freshness":"current"
+  "freshness":"history-unavailable"
+  $ stat -c %a .jacquard/model-cache/history/*/scaled
+  600
+
+An equal respelling of an assumption keeps the key; after its old snapshot is
+pruned, the next evaluation refreshes the history, so the result is current
+again and its last change is still the recomputation before the respelling.
+
+  $ sed -i 's/base = 7/base = (7)/' doc.model
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ rm .jacquard/model-cache/snapshots/*
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ jacquard model explain doc.model scaled > s.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' s.out
+  scaled: current (evaluated TIME)
+    last change (TIME):
+      assumption base: (unavailable) -> (7)
+      snapshots gone: assumption base
+
+A predecessor whose policy snapshot is gone is flagged under its last change,
+and the JSON names each field once.
+
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=4096 interface=none\nunlisted=ignore\noperations=0\n' > a.policy
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=8192 interface=none\nunlisted=ignore\noperations=0\n' > b.policy
+  $ sed -i 's/^source m.jac$/source m.jac\npolicy a.policy/' doc.model
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ sed -i 's/^policy a.policy$/policy b.policy/' doc.model
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ rm ".jacquard/model-cache/snapshots/$(sha256sum a.policy | cut -c1-64)"
+  $ jacquard model explain doc.model scaled > p.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' p.out
+  scaled: current (evaluated TIME)
+    last change (TIME):
+      policy changed
+      snapshots gone: policy
+  $ jacquard model explain doc.model --json > j.json; grep -o '"missing"' j.json | wc -l
+  3

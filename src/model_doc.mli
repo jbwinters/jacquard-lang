@@ -86,6 +86,14 @@ val default_policy : Observation_policy.t
 
 (** {1 Resolving a document against its source} *)
 
+type binding = {
+  b_name : string;  (** the assumption, input or term name, or an inline literal's text *)
+  b_kind : string;  (** ["assumption"], ["inline"], ["input"] or ["term"] *)
+  b_content : string option;
+      (** what a snapshot retains: an assumption's source text, an inline literal, an input's bytes;
+          [None] for a term *)
+}
+
 type resolved = {
   decl : result_decl;
   dependency : dependency;
@@ -94,6 +102,7 @@ type resolved = {
   world : Hash.t list;
       (** effects the entry's row requires beyond what the driver handles: they need a root grant,
           and such a result is never cached *)
+  bindings : binding list;  (** one per argument, in order *)
 }
 
 type prepared = {

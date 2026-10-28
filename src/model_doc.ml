@@ -413,11 +413,14 @@ let default_policy =
 
 (* --- resolving a document against its source --- *)
 
+type binding = { b_name : string; b_kind : string; b_content : string option }
+
 type resolved = {
   decl : result_decl;
   dependency : dependency;
   application : Kernel.expr;
   world : Hash.t list;
+  bindings : binding list;
 }
 
 type prepared = {
@@ -429,7 +432,7 @@ type prepared = {
 }
 
 (* one descriptor, opened without blocking (a FIFO must not hang the read): fstat it, then read
-   at most the limit plus one byte, so a file that changes while it is read is judged by what was
+   until more than the limit has arrived (at most one chunk past it), so a file that changes while it is read is judged by what was
    actually read *)
 let read_bounded ~limit path =
   let unreadable e = Error (`Unreadable (Unix.error_message e)) in
@@ -619,14 +622,22 @@ let prepare ~prelude_dir ~root ~file doc =
                     ~what:(Printf.sprintf "inline argument %s" text)
                     text
                 in
-                Ok (e, Assumption h)
+                Ok ((e, Assumption h), { b_name = text; b_kind = "inline"; b_content = Some text })
             | Named n -> (
                 match List.assoc_opt n assumptions with
-                | Some (e, h) -> Ok (e, Assumption h)
+                | Some (e, h) ->
+                    let text =
+                      List.find_map
+                        (fun (m, t, _) -> if m = n then Some t else None)
+                        doc.assumptions
+                    in
+                    Ok ((e, Assumption h), { b_name = n; b_kind = "assumption"; b_content = text })
                 | None -> (
                     match List.assoc_opt n inputs with
                     | Some bytes ->
-                        Ok (node (Kernel.Lit (Kernel.LText bytes)), Input (Hash.of_string bytes))
+                        Ok
+                          ( (node (Kernel.Lit (Kernel.LText bytes)), Input (Hash.of_string bytes)),
+                            { b_name = n; b_kind = "input"; b_content = Some bytes } )
                     | None -> (
                         if List.exists (fun (o : result_decl) -> o.r_name = n) doc.results then
                           refuse ~code:"E1802"
@@ -637,14 +648,15 @@ let prepare ~prelude_dir ~root ~file doc =
                           match exported n with
                           | Some t ->
                               Ok
-                                ( node (Kernel.Ref (t.Interface.hash, Kernel.Term)),
-                                  Term
-                                    {
-                                      term = t.Interface.hash;
-                                      signature =
-                                        signature_hash
-                                          (Option.value t.Interface.signature ~default:"");
-                                    } )
+                                ( ( node (Kernel.Ref (t.Interface.hash, Kernel.Term)),
+                                    Term
+                                      {
+                                        term = t.Interface.hash;
+                                        signature =
+                                          signature_hash
+                                            (Option.value t.Interface.signature ~default:"");
+                                      } ),
+                                  { b_name = n; b_kind = "term"; b_content = None } )
                           | None ->
                               refuse ~code:"E1802"
                                 "line %d: result %s: %S is not an assumption, an input, or an \
@@ -654,7 +666,7 @@ let prepare ~prelude_dir ~root ~file doc =
           Ok (v :: acc))
         (Ok []) r.r_arguments
     in
-    let args = List.rev args in
+    let args, bindings = List.split (List.rev args) in
     let application =
       node (Kernel.App (node (Kernel.Ref (export.Interface.hash, Kernel.Term)), List.map fst args))
     in
@@ -687,7 +699,7 @@ let prepare ~prelude_dir ~root ~file doc =
         arguments = List.map snd args;
       }
     in
-    Ok { decl = r; dependency; application; world }
+    Ok { decl = r; dependency; application; world; bindings }
   in
   let* resolved =
     List.fold_left
