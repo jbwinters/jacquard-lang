@@ -341,7 +341,10 @@ guessed. Host 13 consumes `--json` of both commands.
   each input's bytes and the canonical policy, named by their HASH_V0, written
   atomically when absent or when the file no longer holds its content, on every
   evaluation that records history, including one whose key is unchanged, so a
-  pruned snapshot is restored by the next evaluation.
+  pruned snapshot is restored by the next evaluation. When the key is unchanged
+  but the latest record names a snapshot that is gone (an equal respelling of an
+  assumption keeps the key and changes its text), a refresh record with the same
+  key is appended, naming the current snapshots.
 - `jacquard model explain DOC [RESULT] [--cache DIR] [--json]` checks the
   source and computes each result's current record without evaluating. A
   result is `never evaluated`, `current (evaluated T)`, `unknown (snapshots
@@ -351,8 +354,10 @@ guessed. Host 13 consumes `--json` of both commands.
   `history unavailable (REASON)`. Policies are compared by their identity in the
   dependency record; a policy snapshot that is present but is not that policy
   makes the history unavailable.
-  When a result has an earlier record, `last change (T):` lists what differed
-  between it and the latest. Components are the entry (implementation, or a
+  When a result has an earlier record under another key, `last change (T):`
+  lists what differed between the last such record and the latest, at the time
+  of the first record under the latest key (refresh records are not changes),
+  followed by `snapshots gone:` for that earlier record's missing snapshots. Components are the entry (implementation, or a
   different entry name), its signature and call labels, the prelude, Core,
   driver, fuel, policy, the argument count, an argument's kind or name, and an
   argument's value: an assumption or inline literal as `before -> after` text,

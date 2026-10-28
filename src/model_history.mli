@@ -78,7 +78,10 @@ type explanation = {
           with an unchanged key and missing snapshots is [Unknown] *)
   freshness : freshness;
   transition : (string * change list) option;
-      (** the latest record against its predecessor: the latest record's time and its changes *)
+      (** the latest record against the last record with another key: the time of the first record
+          under the latest key, and the changes *)
+  transition_missing : string list;
+      (** that earlier record's dependencies whose snapshots are gone *)
 }
 
 val explain : cache:string -> document:Hash.t -> Model_doc.prepared -> explanation list

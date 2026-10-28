@@ -236,14 +236,19 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
         | records, None -> Ok (records, None)
         | records, Some (offset, reason) -> Ok (records, Some (String.sub bytes 0 offset, reason)))
   in
+  (* another format version: the marker followed by a complete version line other than 1 *)
   let other_format bytes =
-    let marker = "jacquard-model-history format=" in
+    let marker = "\njacquard-model-history format=" in
     let m = String.length marker and n = String.length bytes in
     let rec scan i =
-      i + m <= n
-      && (String.sub bytes i m = marker
-          && not (i + m + 2 <= n && String.sub bytes (i + m) 2 = "1\n")
-         || scan (i + 1))
+      if i + m > n then false
+      else if String.sub bytes i m = marker then
+        match String.index_from_opt bytes (i + m) '\n' with
+        | Some e ->
+            let v = String.sub bytes (i + m) (e - i - m) in
+            (v <> "1" && v <> "" && String.for_all (fun c -> c >= '0' && c <= '9') v) || scan (i + 1)
+        | None -> false
+      else scan (i + 1)
     in
     scan 0
   in
@@ -281,8 +286,17 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
   in
   let latest = match List.rev history with r :: _ -> Some r | [] -> None in
   let frame bytes = Printf.sprintf "entry bytes=%d\n%s\n" (String.length bytes) bytes in
+  (* the latest record still names a snapshot that is gone (an equal respelling of an
+     assumption keeps the key but changes its text): refresh it with a record naming the
+     current snapshots *)
+  let stale_refs (l : record) =
+    List.exists
+      (fun b -> match b.snapshot with Some h -> read_snapshot ~cache h = None | None -> false)
+      l.bindings
+    || read_snapshot ~cache l.policy_snapshot = None
+  in
   match latest with
-  | Some l when Hash.equal l.key key -> (
+  | Some l when Hash.equal l.key key && not (stale_refs l) -> (
       match damage with
       | None -> Ok None
       | Some (kept, _) -> Result.map (fun () -> note) (Model_eval.write_atomic path kept))
@@ -331,6 +345,7 @@ type explanation = {
   missing : string list;
   freshness : freshness;
   transition : (string * change list) option;
+  transition_missing : string list;
 }
 
 (* one side of a comparison: a record, or the document as it is now *)
@@ -474,6 +489,7 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
           missing = [];
           freshness = Unavailable reason;
           transition = None;
+          transition_missing = [];
         }
     | Ok history -> (
         match List.rev history with
@@ -486,6 +502,7 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
               missing = [];
               freshness = Never_evaluated;
               transition = None;
+              transition_missing = [];
             }
         | latest :: earlier -> (
             (* a policy snapshot that is present must be the policy its record names *)
@@ -499,10 +516,7 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                         (Hash.equal (Observation_policy.identity p) rc.dependency.Model_doc.policy)
                   | Error _ -> true)
             in
-            match
-              List.find_opt policy_mismatch
-                (latest :: (match earlier with p :: _ -> [ p ] | [] -> []))
-            with
+            match List.find_opt policy_mismatch history with
             | Some _ ->
                 {
                   result = name;
@@ -512,27 +526,39 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                   missing = [];
                   freshness = Unavailable "a record's policy snapshot is not its policy";
                   transition = None;
+                  transition_missing = [];
                 }
             | None ->
                 (* a dependency whose snapshot is gone is never assumed current, and is always named *)
-                let gone =
+                let gone_of (rc : record) =
                   List.filter_map
                     (fun b ->
                       match b.snapshot with
                       | Some h when read_snapshot ~cache h = None -> Some (b.kind ^ " " ^ b.name)
                       | _ -> None)
-                    latest.bindings
-                  @ if read_snapshot ~cache latest.policy_snapshot = None then [ "policy" ] else []
+                    rc.bindings
+                  @ if read_snapshot ~cache rc.policy_snapshot = None then [ "policy" ] else []
                 in
+                let gone = gone_of latest in
                 let freshness =
                   if Hash.equal latest.key (Model_doc.key r.Model_doc.dependency) then
                     if gone = [] then Current else Unknown gone
                   else Stale (differences (of_record latest) now_)
                 in
-                let transition =
-                  match earlier with
-                  | prev :: _ -> Some (latest.time, differences (of_record prev) (of_record latest))
-                  | [] -> None
+                (* records refreshing the latest key are one recomputation: the transition is
+                   from the last record with another key, at the run's first record *)
+                let rec split run = function
+                  | rc :: rest when Hash.equal rc.key latest.key -> split (rc :: run) rest
+                  | rest -> (run, rest)
+                in
+                let run, before = split [ latest ] earlier in
+                let first = List.hd run in
+                let transition, transition_missing =
+                  match before with
+                  | prev :: _ ->
+                      ( Some (first.time, differences (of_record prev) (of_record latest)),
+                        gone_of prev )
+                  | [] -> (None, [])
                 in
                 {
                   result = name;
@@ -542,6 +568,7 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                   missing = gone;
                   freshness;
                   transition;
+                  transition_missing;
                 }))
   in
   List.map one prepared.Model_doc.resolved
@@ -577,7 +604,10 @@ let render_text e =
     match e.transition with
     | None -> []
     | Some (time, cs) ->
-        Printf.sprintf "  last change (%s):" time :: List.map (fun c -> "    " ^ change_text c) cs
+        (Printf.sprintf "  last change (%s):" time :: List.map (fun c -> "    " ^ change_text c) cs)
+        @
+        if e.transition_missing = [] then []
+        else [ "    snapshots gone: " ^ String.concat ", " e.transition_missing ]
   in
   (head :: stale) @ transition
 
@@ -597,7 +627,7 @@ let to_json es =
       match e.freshness with
       | Current -> ("current", [])
       | Stale cs -> ("stale", [ ("changes", `List (List.map change_json cs)) ])
-      | Unknown gone -> ("unknown", [ ("missing", `List (List.map (fun g -> `String g) gone)) ])
+      | Unknown _ -> ("unknown", [])
       | Never_evaluated -> ("never-evaluated", [])
       | Unavailable reason -> ("history-unavailable", [ ("reason", `String reason) ])
     in
@@ -616,7 +646,12 @@ let to_json es =
             match e.transition with
             | None -> `Null
             | Some (t, cs) ->
-                `Assoc [ ("at", `String t); ("changes", `List (List.map change_json cs)) ] );
+                `Assoc
+                  [
+                    ("at", `String t);
+                    ("changes", `List (List.map change_json cs));
+                    ("missing", `List (List.map (fun m -> `String m) e.transition_missing));
+                  ] );
         ])
   in
   Yojson.Safe.to_string

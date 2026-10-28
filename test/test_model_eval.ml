@@ -104,6 +104,16 @@ let record =
     dependency = history_dependency;
   }
 
+let input_dependency =
+  {
+    history_dependency with
+    Model_doc.arguments =
+      [
+        Model_doc.Input (Hash.of_string "bytes");
+        Model_doc.Term { term = Hash.of_string "t"; signature = Hash.of_string "s" };
+      ];
+  }
+
 let frame r =
   let b = Model_history.serialize_record r in
   Printf.sprintf "entry bytes=%d\n%s\n" (String.length b) b
@@ -157,15 +167,8 @@ let test_history_strict () =
              };
              { Model_history.kind = "term"; name = "helper"; snapshot = None };
            ];
-         dependency =
-           {
-             history_dependency with
-             Model_doc.arguments =
-               [
-                 Model_doc.Input (Hash.of_string "bytes");
-                 Model_doc.Term { term = Hash.of_string "t"; signature = Hash.of_string "s" };
-               ];
-           };
+         dependency = input_dependency;
+         key = Model_doc.key input_dependency;
        });
   refused "a missing binding"
     (reframe { record with Model_history.bindings = [ List.hd record.Model_history.bindings ] });

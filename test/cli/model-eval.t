@@ -294,6 +294,7 @@ reported as such, and the next evaluation keeps every record before the damage.
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
+      snapshots gone: assumption base, inline 4, policy
 Evaluating again restores the snapshots, so the unchanged result is current.
 
   $ jacquard model eval doc.model > /dev/null
@@ -311,6 +312,7 @@ Evaluating again restores the snapshots, so the unchanged result is current.
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
+      snapshots gone: assumption base, inline 4, policy
   $ for h in .jacquard/model-cache/history/*/echoed; do echo junk >> "$h"; done
   $ jacquard model explain doc.model echoed
   echoed: history unavailable (bad frame)
@@ -323,6 +325,7 @@ Evaluating again restores the snapshots, so the unchanged result is current.
   echoed: current (evaluated TIME)
     last change (TIME):
       input note: (unavailable) -> 6 bytes
+      snapshots gone: input note
   $ jacquard model explain doc.model nope
   error[E1802]: The model document has no such result.
     Cause: doc.model declares no result "nope"
@@ -343,3 +346,35 @@ Evaluating again restores the snapshots, so the unchanged result is current.
   "freshness":"history-unavailable"
   $ stat -c %a .jacquard/model-cache/history/*/scaled
   600
+
+An equal respelling of an assumption keeps the key; after its old snapshot is
+pruned, the next evaluation refreshes the history, so the result is current
+again and its last change is still the recomputation before the respelling.
+
+  $ sed -i 's/base = 7/base = (7)/' doc.model
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ rm .jacquard/model-cache/snapshots/*
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ jacquard model explain doc.model scaled > s.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' s.out
+  scaled: current (evaluated TIME)
+    last change (TIME):
+      assumption base: (unavailable) -> (7)
+      snapshots gone: assumption base
+
+A predecessor whose policy snapshot is gone is flagged under its last change,
+and the JSON names each field once.
+
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=4096 interface=none\nunlisted=ignore\noperations=0\n' > a.policy
+  $ printf 'jacquard-observation-policy format=1\nresult=compare field-bytes=8192 interface=none\nunlisted=ignore\noperations=0\n' > b.policy
+  $ sed -i 's/^source m.jac$/source m.jac\npolicy a.policy/' doc.model
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ sed -i 's/^policy a.policy$/policy b.policy/' doc.model
+  $ jacquard model eval doc.model > /dev/null 2>&1
+  $ rm ".jacquard/model-cache/snapshots/$(sha256sum a.policy | cut -c1-64)"
+  $ jacquard model explain doc.model scaled > p.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' p.out
+  scaled: current (evaluated TIME)
+    last change (TIME):
+      policy changed
+      snapshots gone: policy
+  $ jacquard model explain doc.model --json > j.json; grep -o '"missing"' j.json | wc -l
+  3
