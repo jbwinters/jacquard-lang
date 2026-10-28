@@ -45,6 +45,7 @@ type status =
 type evaluated = { name : string; key : Hash.t; status : status; outcome : outcome option }
 
 val evaluate :
+  ?record:(Model_doc.resolved -> outcome:string -> (unit, string) result) ->
   ctx:Eval.ctx ->
   allows:string list ->
   seed:int ->
@@ -59,7 +60,16 @@ val evaluate :
     printing through [out]) and nothing is read from or written to the cache. [cache], when present,
     is the cache directory: a stored outcome whose record matches is served; a corrupt or foreign
     file is ignored with W1800 and replaced; a failed write is W1801 and leaves the result
-    [Uncacheable "write-failed"]. Files are created owner-only and written atomically. *)
+    [Uncacheable "write-failed"]. Files are created owner-only and written atomically. [record] is
+    called for every result that has an outcome when [cache] is present and [allows] is empty, with
+    its status and outcome tag; its failure is W1802. *)
+
+val make_dirs : string -> unit
+(** [make_dirs dir] creates [dir] and its missing parents with mode 0700. *)
+
+val write_atomic : string -> string -> (unit, string) result
+(** [write_atomic path bytes] writes [bytes] to an owner-only temporary file beside [path], syncs
+    it, and renames it onto [path]. *)
 
 val render_text : evaluated -> string list
 (** The human rendering: a [NAME: STATUS] line, then indented outcome lines. *)

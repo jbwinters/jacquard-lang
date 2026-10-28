@@ -6,8 +6,10 @@
   validation against the source, and the dependency record and key
   (`src/model_doc.ml`, E1800-E1805). Slice 2 implements `jacquard model eval`,
   `model-result-v1` and the cache (`src/model_eval.ml`, E1806, W1800, W1801;
-  §3.3a). History, snapshots and `jacquard model explain` (slice 3) follow. §7
-  lists what each slice proves.
+  §3.3a). Slice 3a implements history, snapshots of assumptions, inputs and the
+  policy, and `jacquard model explain` (`src/model_history.ml`, W1802; §3.5a).
+  Retaining each entry's reachable declarations, so `explain` can name the
+  callee that changed, is slice 3b. §7 lists what each slice proves.
 - Task: MODEL.1. Consumers: EXP.5 (`scenario-v1` is a MODEL.1 artifact plus
   forks), UNC.3 (assumption sets), the host's decision documents (APP.3), and
   MODEL.2 (measured incremental computation).
@@ -243,8 +245,8 @@ reader accepts only canonical bytes holding a cacheable outcome.
   the result), the opaque kind of an unsupported field (`closure`, `secret`,
   ...), `truncated`, `missing`, `failure`, `root-grants`, `no-cache` and
   `write-failed`; a field whose projection ran out of fuel reports `fuel`. A
-  `Secret` can only come from a root grant, so a result holding one is never
-  cached twice over. The value is
+  `Secret` can only come from a root grant, and a granted document is never
+  cached; a `Secret` value would also render as `unsupported`. The value is
   the data-v1 rendering, the same text whether fresh or cached.
 - A result whose entry needs a root grant that was not given is refused
   (E1806) without running. `--allow` installs the named grants for every
@@ -314,7 +316,40 @@ summary: stale (input forecast changed since the last evaluation)
 ```
 
 A missing snapshot (a pruned cache) is reported as `history unavailable`, never
-guessed. Host 13 consumes `--format json` of both commands.
+guessed. Host 13 consumes `--json` of both commands.
+
+### 3.5a The implemented history and `explain` (slice 3a)
+
+- `model eval` with a cache (and without `--allow`) appends a
+  `jacquard-model-history-v1` record to `history/<document>/<result>` whenever
+  a result has an outcome under a key that differs from its latest record's, so
+  each record marks a recomputation; a cached rerun adds nothing. `<document>`
+  is HASH_V0 of the document's canonical absolute path. A record names its
+  time (UTC, to the second), the entry, the key and the previous record's key,
+  the status and outcome tag, the source digest and interface identity, the
+  policy snapshot, each argument's kind, name and snapshot, and the dependency
+  record. Records are framed `entry bytes=N`, an LF, the record and an LF, and
+  appended owner-only; an unreadable history is replaced by one holding only
+  the new record. A failed write is W1802.
+- `snapshots/<hex>` holds each assumption's source text, each inline literal,
+  each input's bytes and the canonical policy, named by their HASH_V0, written
+  atomically and only when absent.
+- `jacquard model explain DOC [RESULT] [--cache DIR] [--json]` checks the
+  source and computes each result's current record without evaluating. A
+  result is `never evaluated`, `current (evaluated T)`, `stale (last evaluated
+  T)` followed by every differing component, or `history unavailable (REASON)`.
+  When a result has an earlier record, `last change (T):` lists what differed
+  between it and the latest. Components are the entry (implementation, or a
+  different entry name), its signature and call labels, the prelude, Core,
+  driver, fuel, policy, the argument count, an argument's kind or name, and an
+  argument's value: an assumption or inline literal as `before -> after` text,
+  an input as byte counts, a term argument as changed. A pruned snapshot
+  renders as `(unavailable)`.
+- `--json` prints one `jacquard-model-explain-v1` object: per result its name,
+  freshness, `evaluated_at`, changes (each with `component`, `subject`,
+  `before` and `after`) and `last_transition`.
+- Until slice 3b, an entry or term argument change is named but not explained
+  callee by callee.
 
 ### 3.6 Consumers
 
@@ -324,7 +359,7 @@ guessed. Host 13 consumes `--format json` of both commands.
   replay handler; the record format already represents it.
 - **UNC.3** passes worlds and utility functions as term arguments and assumption
   sets as sibling results.
-- **Host 13** reads `model eval --format json` and `model explain --format json`.
+- **Host 13** reads `model eval --json` and `model explain --json`.
 
 ### 3.7 Failure modes
 
@@ -333,7 +368,7 @@ guessed. Host 13 consumes `--format json` of both commands.
 | a named input file is missing or not UTF-8 for `text` | diagnostic before evaluation, naming the input |
 | an assumption does not check at the parameter type, or is not closed and pure | diagnostic before evaluation |
 | an unknown name in `args`, or a result named as an argument | diagnostic before evaluation |
-| the entry's row needs a grant | `uncacheable world-effect`; runs only with `--allow` |
+| the entry's row needs a grant | refused (E1806) without running; with `--allow` it runs as `uncacheable (root-grants)` |
 | a projection that is not entirely `data` | shown, `uncacheable <field kind>` |
 | a corrupt or foreign cache file | ignored and recomputed, with a warning; never trusted |
 | the Core version, engine, driver or fuel model changes | every key changes; nothing stale is served |
@@ -397,4 +432,6 @@ The owner adopted the recommended option of each decision.
   (results are not arguments, E1802). Slice 2 refuses to cache fuel-bound,
   opaque, truncated, excluded and granted results, each with its reason.
   Snapshots are slice 3.
-- `explain` names every differing key component.
+- `explain` names every differing key component. Slice 3a does, from the
+  history and snapshots (`test/cli/model-eval.t`); naming the callee inside a
+  changed entry is slice 3b.

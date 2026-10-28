@@ -4358,7 +4358,14 @@ let model_eval_cmd file prelude allows seed cache no_cache json =
       | Error ds -> print_diags ds
       | Ok (_, ctx) ->
           let results, warnings =
-            Model_eval.evaluate ~ctx ~allows ~seed ~cache
+            let record =
+              match cache with
+              | Some cache ->
+                  let document = Model_history.document_identity file in
+                  fun r ~outcome -> Model_history.append ~cache ~document prepared r ~outcome
+              | None -> fun _ ~outcome:_ -> Ok ()
+            in
+            Model_eval.evaluate ~record ~ctx ~allows ~seed ~cache
               ~out:(if json then prerr_string else print_string)
               prepared
           in
@@ -4391,7 +4398,68 @@ let model_eval_cmd file prelude allows seed cache no_cache json =
           in
           if refused then exit_unhandled else if failed then exit_runtime else ok)
 
+let model_explain_cmd file prelude result cache json =
+  let prelude_dir = prelude_dir_of prelude in
+  let cache =
+    match cache with
+    | Some dir -> dir
+    | None -> Filename.concat (Filename.dirname file) (Filename.concat ".jacquard" "model-cache")
+  in
+  let prepared =
+    match Model_doc.read file with
+    | Error ds -> Error ds
+    | Ok doc -> Model_doc.prepare ~prelude_dir ~root:(fresh_check_root ()) ~file doc
+  in
+  match prepared with
+  | Error ds -> print_diags ds
+  | Ok prepared -> (
+      let explanations =
+        Model_history.explain ~cache ~document:(Model_history.document_identity file) prepared
+      in
+      let selected =
+        match result with
+        | None -> Ok explanations
+        | Some name -> (
+            match
+              List.filter
+                (fun (e : Model_history.explanation) -> e.Model_history.result = name)
+                explanations
+            with
+            | [] ->
+                Error
+                  (cli_diagnostic ~code:"E1802" ~summary:"The model document has no such result."
+                     ~hint:"Name a result the document declares."
+                     (Printf.sprintf "%s declares no result %S" file name))
+            | es -> Ok es)
+      in
+      match selected with
+      | Error d -> print_diags [ d ]
+      | Ok es ->
+          if json then print_endline (Model_history.to_json es)
+          else List.iter (fun e -> List.iter print_endline (Model_history.render_text e)) es;
+          ok)
+
 let model_t =
+  let explain =
+    Cmd.v
+      (Cmd.info "explain"
+         ~doc:
+           "Say whether each result is current, which key components changed since its last \
+            evaluation, and what changed at its last recomputation.")
+      Term.(
+        const (configure_diagnostics model_explain_cmd)
+        $ diagnostic_format_arg
+        $ Arg.(required & pos 0 (some file) None & info [] ~docv:"MODEL")
+        $ prelude_arg
+        $ Arg.(value & pos 1 (some string) None & info [] ~docv:"RESULT")
+        $ Arg.(
+            value
+            & opt (some string) None
+            & info [ "cache" ] ~docv:"DIR"
+                ~doc:"Cache directory (default: .jacquard/model-cache beside the document).")
+        $ Arg.(
+            value & flag & info [ "json" ] ~doc:"Print one jacquard-model-explain-v1 JSON object."))
+  in
   let eval =
     Cmd.v
       (Cmd.info "eval"
@@ -4419,7 +4487,7 @@ let model_t =
   in
   Cmd.group
     (Cmd.info "model" ~doc:"Model documents with explicit dependencies and cached results.")
-    [ eval ]
+    [ eval; explain ]
 
 let main =
   Cmd.group

@@ -171,6 +171,9 @@ let warning ~code cause =
     | "W1800" ->
         ( "A model cache file was ignored.",
           "Nothing is needed: the result was recomputed and the file replaced." )
+    | "W1802" ->
+        ( "A model result's history could not be written.",
+          "Check that the cache directory is writable; the result itself is unaffected." )
     | "W1801" ->
         ( "A model result could not be written to the cache.",
           "Check that the cache directory is writable; the result itself is unaffected." )
@@ -319,7 +322,21 @@ let write_atomic path bytes =
     (try Sys.remove tmp with Sys_error _ -> ());
     Error (Printexc.to_string e)
 
-let evaluate ~ctx ~allows ~seed ~cache ~out (prepared : Model_doc.prepared) =
+let outcome_tag = function
+  | Value _ -> "value"
+  | Posterior _ -> "posterior"
+  | Inference_failure { failure; _ } -> "inference-" ^ failure
+  | Failure code -> "failure-" ^ code
+  | Incomplete -> "incomplete"
+
+let status_tag = function
+  | Fresh -> "fresh"
+  | Cached -> "cached"
+  | Uncacheable reason -> "uncacheable-" ^ reason
+  | Refused _ -> "refused"
+
+let evaluate ?(record = fun _ ~outcome:_ -> Ok ()) ~ctx ~allows ~seed ~cache ~out
+    (prepared : Model_doc.prepared) =
   let warnings = ref [] in
   let warn ~code cause = warnings := warning ~code cause :: !warnings in
   let granted = Frontend.granted_effects prepared.Model_doc.store allows in
@@ -387,7 +404,19 @@ let evaluate ~ctx ~allows ~seed ~cache ~out (prepared : Model_doc.prepared) =
               in
               { name; key; status; outcome = Some outcome })
   in
-  let results = List.map one prepared.Model_doc.resolved in
+  let results =
+    List.map2
+      (fun r e ->
+        (match (e.outcome, allows, cache) with
+        | Some outcome, [], Some _ -> (
+            match record r ~outcome:(status_tag e.status ^ " " ^ outcome_tag outcome) with
+            | Ok () -> ()
+            | Error reason -> warn ~code:"W1802" (Printf.sprintf "result %s: %s" e.name reason))
+        | _ -> ());
+        e)
+      prepared.Model_doc.resolved
+      (List.map one prepared.Model_doc.resolved)
+  in
   (results, List.rev !warnings)
 
 (* --- rendering --- *)

@@ -626,13 +626,14 @@ reported before any result is evaluated.
 |---|---|---|
 | E1800 | the document is malformed: a wrong header, a missing or repeated `source` or `policy` line, an unknown line or driver, a missing, repeated or unknown driver setting, a noncanonical number, an absolute path, a carriage return, or a document over 64 KiB | `result r entry f args a driver run fuel=010` |
 | E1801 | a name is declared twice across the document's assumptions, inputs and results | `input note ...` and `result note ...` |
-| E1802 | a result argument names no assumption, input or exported term; names a result (results are not arguments in model-v1); or a declared name (an assumption, input or result) is also an exported term of the source | `args summary` where `summary` is a result |
+| E1802 | a result argument names no assumption, input or exported term; names a result (results are not arguments in model-v1); or a declared name (an assumption, input or result) is also an exported term of the source; or `model explain` names a result the document does not declare | `args summary` where `summary` is a result |
 | E1803 | an assumption (or an inline numeric argument) is not closed literal data: it does not parse or resolve, computes (an unapplied constructor with fields included), or uses a sealed constructor of an opaque type | `assumption step = add(1, 3)` |
 | E1804 | the document, or a named source, input or policy file, is missing, not a regular file or over 16 MiB; an input is not UTF-8; or the policy is not canonical `observation-policy-v1` or is pinned to another interface | `input note text absent.txt` |
 | E1805 | a result's entry is not an exported term of the source, or the entry does not check when applied to the result's arguments | `entry scale args note` where `scale` takes `Int` |
 | E1806 | `jacquard model eval`: a result's entry needs a root grant (for example `console`) that `--allow` did not give; the result is not run | `result greeted entry greet ...` where `greet` prints |
 | W1800 | a model cache file is unreadable, malformed, or records another result; it is ignored, and the result is recomputed and stored again | an edited `outcomes/<key>` |
 | W1801 | a model result could not be written to the cache; the result is shown as `uncacheable (write-failed)` | a read-only cache directory |
+| W1802 | a model result's history record or snapshot could not be written; the result itself is unaffected | a read-only `history/` directory |
 
 ## Appendix: the W5.3 audit (ten message rewrites)
 

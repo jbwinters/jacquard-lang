@@ -882,3 +882,15 @@ bounded file reads. `model-eval.t` pins fresh and cached runs, byte equality
 with a fresh cache, per-axis invalidation, corruption, the refusal set,
 `--allow`, `--no-cache` and JSON; `test_model_eval.ml` adds three cases. The
 source inventory is now `1212 / 81 / 56`.
+
+MODEL.1 slice 3a adds evaluation history and `jacquard model explain DOC
+[RESULT]` (`src/model_history.ml`, `docs/designs/model-dependencies.md`
+§3.5a). With a cache, `model eval` appends an owner-only history record per
+result whenever its key changes, and snapshots assumption text, inputs and the
+policy by content. `explain` computes each result's current dependency record
+without evaluating and reports it as never evaluated, current, stale with every
+differing key component, or history unavailable, plus what changed at its last
+recomputation; a pruned snapshot is shown as unavailable. `model-eval.t` adds
+the explain transcript and command-level invalidation for call labels and the
+policy; `test_model_eval.ml` adds two history-format cases. The source
+inventory is now `1214 / 81 / 56`.

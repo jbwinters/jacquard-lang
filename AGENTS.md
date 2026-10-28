@@ -177,7 +177,8 @@ When adding valid corpus files, regenerate the golden hashes with
 - Model documents (MODEL.1): `src/model_doc.mli` (jacquard-model-v1 parser,
   validation against the checked source, dependency records and keys),
   `src/model_eval.mli` (evaluation, model-result-v1, the result cache),
-  `jacquard model eval`; `docs/designs/model-dependencies.md`,
+  `src/model_history.mli` (history records, snapshots, `model explain`),
+  `jacquard model eval|explain`; `docs/designs/model-dependencies.md`,
   `test/test_model_doc.ml`, `test/test_model_eval.ml`, `test/cli/model-eval.t`.
 - Dist and inference: `prelude/06-dist.jqd`, `prelude/13-dist-lib.jqd`,
   `src/infer_dist.ml`, `test/test_infer.ml`.

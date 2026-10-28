@@ -1,0 +1,470 @@
+(* MODEL.1 history, snapshots and explanations (docs/designs/model-dependencies.md §3.5). *)
+
+let ( let* ) = Result.bind
+let hex = Hash.to_hex
+
+let document_identity file =
+  let path =
+    try Unix.realpath file
+    with Unix.Unix_error _ ->
+      if Filename.is_relative file then Filename.concat (Sys.getcwd ()) file else file
+  in
+  Hash.of_string ("jacquard-model-document-v1\000" ^ path)
+
+type binding = { kind : string; name : string; snapshot : Hash.t option }
+
+type record = {
+  time : string;
+  entry_name : string;
+  key : Hash.t;
+  previous : Hash.t option;
+  outcome : string;
+  source : Hash.t;
+  interface : Hash.t;
+  policy_snapshot : Hash.t;
+  bindings : binding list;
+  dependency : Model_doc.dependency;
+}
+
+let header = "jacquard-model-history format=1"
+let opt_hex = function Some h -> hex h | None -> "none"
+
+let serialize_record r =
+  let buf = Buffer.create 512 in
+  let line fmt = Printf.ksprintf (fun s -> Buffer.add_string buf (s ^ "\n")) fmt in
+  line "%s" header;
+  line "time %s" r.time;
+  line "entry-name %s" r.entry_name;
+  line "key %s" (hex r.key);
+  line "previous %s" (opt_hex r.previous);
+  line "outcome %s" r.outcome;
+  line "source %s interface %s" (hex r.source) (hex r.interface);
+  line "policy-snapshot %s" (hex r.policy_snapshot);
+  line "bindings %d" (List.length r.bindings);
+  List.iteri
+    (fun i b -> line "binding %d %s %s snapshot %s" i b.kind b.name (opt_hex b.snapshot))
+    r.bindings;
+  Buffer.add_string buf (Model_doc.serialize_dependency r.dependency);
+  Buffer.contents buf
+
+let natural s =
+  if s <> "" && String.for_all (fun c -> c >= '0' && c <= '9') s && (s = "0" || s.[0] <> '0') then
+    int_of_string_opt s
+  else None
+
+let parse_record bytes =
+  let fail fmt = Printf.ksprintf (fun m -> Error m) fmt in
+  let hash s = match Hash.of_canonical_hex s with Some h -> Ok h | None -> fail "bad hash" in
+  let opt s = if s = "none" then Ok None else Result.map Option.some (hash s) in
+  let lines = String.split_on_char '\n' bytes in
+  let after prefix l =
+    if String.starts_with ~prefix l then
+      Ok (String.sub l (String.length prefix) (String.length l - String.length prefix))
+    else fail "expected %S" prefix
+  in
+  match lines with
+  | h :: time :: entry :: key :: previous :: outcome :: provenance :: policy :: count :: rest
+    when h = header ->
+      let* time = after "time " time in
+      let* entry_name = after "entry-name " entry in
+      let* key = Result.bind (after "key " key) hash in
+      let* previous = Result.bind (after "previous " previous) opt in
+      let* outcome = after "outcome " outcome in
+      let* source, interface =
+        match String.split_on_char ' ' provenance with
+        | [ "source"; s; "interface"; i ] ->
+            let* s = hash s in
+            let* i = hash i in
+            Ok (s, i)
+        | _ -> fail "bad provenance line"
+      in
+      let* policy_snapshot = Result.bind (after "policy-snapshot " policy) hash in
+      let* n =
+        Result.bind (after "bindings " count) (fun s ->
+            Option.to_result ~none:"bad count" (natural s))
+      in
+      if List.length rest < n then fail "missing bindings"
+      else
+        let binding_lines = List.filteri (fun i _ -> i < n) rest in
+        let* bindings =
+          List.fold_right
+            (fun (i, l) acc ->
+              let* acc = acc in
+              match String.split_on_char ' ' l with
+              | [ "binding"; j; kind; name; "snapshot"; s ] when j = string_of_int i ->
+                  let* snapshot = opt s in
+                  Ok ({ kind; name; snapshot } :: acc)
+              | _ -> fail "bad binding line")
+            (List.mapi (fun i l -> (i, l)) binding_lines)
+            (Ok [])
+        in
+        let dependency_text = String.concat "\n" (List.filteri (fun i _ -> i >= n) rest) in
+        let* dependency = Model_doc.parse_dependency dependency_text in
+        let r =
+          {
+            time;
+            entry_name;
+            key;
+            previous;
+            outcome;
+            source;
+            interface;
+            policy_snapshot;
+            bindings;
+            dependency;
+          }
+        in
+        if serialize_record r = bytes then Ok r else fail "noncanonical record"
+  | _ -> fail "not a history record"
+
+let parse_history bytes =
+  let n = String.length bytes in
+  let rec go pos acc =
+    if pos = n then Ok (List.rev acc)
+    else
+      match String.index_from_opt bytes pos '\n' with
+      | None -> Error "truncated frame"
+      | Some j -> (
+          let l = String.sub bytes pos (j - pos) in
+          match String.split_on_char '=' l with
+          | [ "entry bytes"; k ] -> (
+              match natural k with
+              | Some k when k < n - j - 1 && bytes.[j + 1 + k] = '\n' ->
+                  let* r = parse_record (String.sub bytes (j + 1) k) in
+                  go (j + 2 + k) (r :: acc)
+              | _ -> Error "bad frame length")
+          | _ -> Error "bad frame")
+  in
+  go 0 []
+
+let history_path ~cache ~document name =
+  Filename.concat (Filename.concat (Filename.concat cache "history") (hex document)) name
+
+let snapshot_path ~cache h = Filename.concat (Filename.concat cache "snapshots") (hex h)
+
+let read_history ~cache ~document name =
+  match Model_doc.read_bounded ~limit:(64 * 1024 * 1024) (history_path ~cache ~document name) with
+  | Error `Absent -> Ok []
+  | Error (`Unreadable reason) -> Error reason
+  | Ok bytes -> parse_history bytes
+
+let read_snapshot ~cache h =
+  match Model_doc.read_bounded ~limit:(16 * 1024 * 1024) (snapshot_path ~cache h) with
+  | Ok bytes when Hash.equal (Hash.of_string bytes) h -> Some bytes
+  | _ -> None
+
+let now () =
+  let t = Unix.gmtime (Unix.time ()) in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (t.Unix.tm_year + 1900) (t.Unix.tm_mon + 1)
+    t.Unix.tm_mday t.Unix.tm_hour t.Unix.tm_min t.Unix.tm_sec
+
+let write_snapshot ~cache content =
+  let h = Hash.of_string content in
+  let path = snapshot_path ~cache h in
+  if Sys.file_exists path then Ok h
+  else Result.map (fun () -> h) (Model_eval.write_atomic path content)
+
+let append_frame path bytes =
+  try
+    Model_eval.make_dirs (Filename.dirname path);
+    let fd =
+      Unix.openfile path [ Unix.O_WRONLY; Unix.O_APPEND; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+    in
+    Fun.protect
+      ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+      (fun () ->
+        let frame = Printf.sprintf "entry bytes=%d\n%s\n" (String.length bytes) bytes in
+        let b = Bytes.unsafe_of_string frame in
+        let rec go off =
+          if off < Bytes.length b then go (off + Unix.write fd b off (Bytes.length b - off))
+        in
+        go 0;
+        Unix.fsync fd);
+    Ok ()
+  with (Unix.Unix_error _ | Sys_error _) as e -> Error (Printexc.to_string e)
+
+let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resolved) ~outcome =
+  let name = r.Model_doc.decl.Model_doc.r_name in
+  let key = Model_doc.key r.Model_doc.dependency in
+  let path = history_path ~cache ~document name in
+  let history, replace =
+    match read_history ~cache ~document name with Ok h -> (h, false) | Error _ -> ([], true)
+  in
+  let latest = match List.rev history with r :: _ -> Some r | [] -> None in
+  match latest with
+  | Some l when Hash.equal l.key key -> Ok ()
+  | _ ->
+      let* bindings =
+        List.fold_right
+          (fun (b : Model_doc.binding) acc ->
+            let* acc = acc in
+            let* snapshot =
+              match b.Model_doc.b_content with
+              | None -> Ok None
+              | Some c -> Result.map Option.some (write_snapshot ~cache c)
+            in
+            Ok ({ kind = b.Model_doc.b_kind; name = b.Model_doc.b_name; snapshot } :: acc))
+          r.Model_doc.bindings (Ok [])
+      in
+      let* policy_snapshot =
+        write_snapshot ~cache (Observation_policy.serialize prepared.Model_doc.policy)
+      in
+      let record =
+        {
+          time = now ();
+          entry_name = r.Model_doc.decl.Model_doc.r_entry;
+          key;
+          previous = Option.map (fun l -> l.key) latest;
+          outcome;
+          source = Frontend.Checked.source_digest prepared.Model_doc.artifact;
+          interface = Interface.identity (Frontend.Checked.interface prepared.Model_doc.artifact);
+          policy_snapshot;
+          bindings;
+          dependency = r.Model_doc.dependency;
+        }
+      in
+      let bytes = serialize_record record in
+      if replace then
+        Model_eval.write_atomic path
+          (Printf.sprintf "entry bytes=%d\n%s\n" (String.length bytes) bytes)
+      else append_frame path bytes
+
+(* --- explanations --- *)
+
+type change = {
+  component : string;
+  subject : string option;
+  before : string option;
+  after : string option;
+}
+
+type freshness = Current | Stale of change list | Never_evaluated | Unavailable of string
+
+type explanation = {
+  result : string;
+  evaluated_at : string option;
+  freshness : freshness;
+  transition : (string * change list) option;
+}
+
+(* one side of a comparison: a record, or the document as it is now *)
+type side = {
+  entry : string;
+  dep : Model_doc.dependency;
+  binds : binding list;
+  policy : Hash.t;
+  content : Hash.t -> string option;
+}
+
+let driver_text (d : Model_doc.dependency) =
+  match d.Model_doc.driver with
+  | Model_doc.Run -> "run"
+  | Model_doc.Enumerate { max_branches } -> Printf.sprintf "enumerate max-branches=%d" max_branches
+  | Model_doc.Lw { seed; samples } -> Printf.sprintf "lw seed=%d samples=%d" seed samples
+
+let shown content = function
+  | None -> "(unavailable)"
+  | Some h -> ( match content h with Some text -> text | None -> "(unavailable)")
+
+let byte_count content = function
+  | None -> "(unavailable)"
+  | Some h -> (
+      match content h with
+      | Some bytes -> Printf.sprintf "%d bytes" (String.length bytes)
+      | None -> "(unavailable)")
+
+let differences old_ now_ =
+  let change ?subject ?before ?after component = { component; subject; before; after } in
+  let o = old_.dep and n = now_.dep in
+  let some c b = if c then [ b ] else [] in
+  let entry =
+    some
+      ((not (Hash.equal o.Model_doc.entry n.Model_doc.entry)) || old_.entry <> now_.entry)
+      (if old_.entry <> now_.entry then change ~before:old_.entry ~after:now_.entry "entry"
+       else change ~subject:now_.entry "entry")
+  in
+  let fixed =
+    some
+      (not (Hash.equal o.Model_doc.signature n.Model_doc.signature))
+      (change ~subject:now_.entry "signature")
+    @ some (o.Model_doc.labels <> n.Model_doc.labels) (change ~subject:now_.entry "labels")
+    @ some (o.Model_doc.prelude <> n.Model_doc.prelude) (change "prelude")
+    @ some
+        (o.Model_doc.core <> n.Model_doc.core)
+        (change ~before:o.Model_doc.core ~after:n.Model_doc.core "core")
+    @ some
+        (driver_text o <> driver_text n)
+        (change ~before:(driver_text o) ~after:(driver_text n) "driver")
+    @ some
+        (o.Model_doc.fuel <> n.Model_doc.fuel)
+        (change ~before:(string_of_int o.Model_doc.fuel) ~after:(string_of_int n.Model_doc.fuel)
+           "fuel")
+    @ some (not (Hash.equal old_.policy now_.policy)) (change "policy")
+  in
+  let oa = o.Model_doc.arguments and na = n.Model_doc.arguments in
+  let count =
+    some
+      (List.length oa <> List.length na)
+      (change
+         ~before:(string_of_int (List.length oa))
+         ~after:(string_of_int (List.length na))
+         "arguments")
+  in
+  let rec pairs i ob nb oi ni =
+    match (ob, nb, oi, ni) with
+    | b0 :: ob, b1 :: nb, i0 :: oi, i1 :: ni ->
+        let here =
+          if b0.kind <> b1.kind || b0.name <> b1.name then
+            [
+              change ~subject:(Printf.sprintf "argument %d" i)
+                ~before:(b0.kind ^ " " ^ b0.name)
+                ~after:(b1.kind ^ " " ^ b1.name)
+                "argument";
+            ]
+          else if i0 = i1 then []
+          else
+            match b1.kind with
+            | "assumption" | "inline" ->
+                [
+                  change ~subject:b1.name ~before:(shown old_.content b0.snapshot)
+                    ~after:(shown now_.content b1.snapshot) b1.kind;
+                ]
+            | "input" ->
+                [
+                  change ~subject:b1.name
+                    ~before:(byte_count old_.content b0.snapshot)
+                    ~after:(byte_count now_.content b1.snapshot)
+                    "input";
+                ]
+            | kind -> [ change ~subject:b1.name kind ]
+        in
+        here @ pairs (i + 1) ob nb oi ni
+    | _ -> []
+  in
+  entry @ fixed @ count @ pairs 0 old_.binds now_.binds oa na
+
+let explain ~cache ~document (prepared : Model_doc.prepared) =
+  let policy_bytes = Observation_policy.serialize prepared.Model_doc.policy in
+  let one (r : Model_doc.resolved) =
+    let name = r.Model_doc.decl.Model_doc.r_name in
+    let current_contents =
+      policy_bytes
+      :: List.filter_map (fun (b : Model_doc.binding) -> b.Model_doc.b_content) r.Model_doc.bindings
+    in
+    let now_ =
+      {
+        entry = r.Model_doc.decl.Model_doc.r_entry;
+        dep = r.Model_doc.dependency;
+        binds =
+          List.map
+            (fun (b : Model_doc.binding) ->
+              {
+                kind = b.Model_doc.b_kind;
+                name = b.Model_doc.b_name;
+                snapshot = Option.map Hash.of_string b.Model_doc.b_content;
+              })
+            r.Model_doc.bindings;
+        policy = Hash.of_string policy_bytes;
+        content =
+          (fun h ->
+            match List.find_opt (fun c -> Hash.equal (Hash.of_string c) h) current_contents with
+            | Some c -> Some c
+            | None -> read_snapshot ~cache h);
+      }
+    in
+    let of_record (rc : record) =
+      {
+        entry = rc.entry_name;
+        dep = rc.dependency;
+        binds = rc.bindings;
+        policy = rc.policy_snapshot;
+        content = read_snapshot ~cache;
+      }
+    in
+    match read_history ~cache ~document name with
+    | Error reason ->
+        { result = name; evaluated_at = None; freshness = Unavailable reason; transition = None }
+    | Ok history -> (
+        match List.rev history with
+        | [] ->
+            { result = name; evaluated_at = None; freshness = Never_evaluated; transition = None }
+        | latest :: earlier ->
+            let freshness =
+              if Hash.equal latest.key (Model_doc.key r.Model_doc.dependency) then Current
+              else Stale (differences (of_record latest) now_)
+            in
+            let transition =
+              match earlier with
+              | prev :: _ -> Some (latest.time, differences (of_record prev) (of_record latest))
+              | [] -> None
+            in
+            { result = name; evaluated_at = Some latest.time; freshness; transition })
+  in
+  List.map one prepared.Model_doc.resolved
+
+let change_text c =
+  let subject = match c.subject with Some s -> " " ^ s | None -> "" in
+  match (c.before, c.after) with
+  | Some b, Some a -> Printf.sprintf "%s%s: %s -> %s" c.component subject b a
+  | _ -> Printf.sprintf "%s%s changed" c.component subject
+
+let render_text e =
+  let head =
+    match e.freshness with
+    | Current ->
+        Printf.sprintf "%s: current (evaluated %s)" e.result
+          (Option.value e.evaluated_at ~default:"?")
+    | Stale _ ->
+        Printf.sprintf "%s: stale (last evaluated %s)" e.result
+          (Option.value e.evaluated_at ~default:"?")
+    | Never_evaluated -> Printf.sprintf "%s: never evaluated" e.result
+    | Unavailable reason -> Printf.sprintf "%s: history unavailable (%s)" e.result reason
+  in
+  let stale =
+    match e.freshness with Stale cs -> List.map (fun c -> "  " ^ change_text c) cs | _ -> []
+  in
+  let transition =
+    match e.transition with
+    | None -> []
+    | Some (time, cs) ->
+        Printf.sprintf "  last change (%s):" time :: List.map (fun c -> "    " ^ change_text c) cs
+  in
+  (head :: stale) @ transition
+
+let change_json c =
+  let o = function Some s -> `String s | None -> `Null in
+  `Assoc
+    [
+      ("component", `String c.component);
+      ("subject", o c.subject);
+      ("before", o c.before);
+      ("after", o c.after);
+    ]
+
+let to_json es =
+  let one e =
+    let freshness, extra =
+      match e.freshness with
+      | Current -> ("current", [])
+      | Stale cs -> ("stale", [ ("changes", `List (List.map change_json cs)) ])
+      | Never_evaluated -> ("never-evaluated", [])
+      | Unavailable reason -> ("history-unavailable", [ ("reason", `String reason) ])
+    in
+    `Assoc
+      ([
+         ("name", `String e.result);
+         ("freshness", `String freshness);
+         ("evaluated_at", match e.evaluated_at with Some t -> `String t | None -> `Null);
+       ]
+      @ extra
+      @ [
+          ( "last_transition",
+            match e.transition with
+            | None -> `Null
+            | Some (t, cs) ->
+                `Assoc [ ("at", `String t); ("changes", `List (List.map change_json cs)) ] );
+        ])
+  in
+  Yojson.Safe.to_string
+    (`Assoc
+       [ ("format", `String "jacquard-model-explain-v1"); ("results", `List (List.map one es)) ])
