@@ -283,11 +283,17 @@ changed at its last recomputation, from the cache's history and snapshots.
     last change (TIME):
       assumption base: 3 -> 5
 
-A pruned snapshot is shown as unavailable, never guessed; an unreadable
-history is reported as such.
+A pruned snapshot is shown as unavailable, never guessed: an unchanged result
+whose snapshots are gone is unknown, not current. An unreadable history is
+reported as such, and the next evaluation keeps every record before the damage.
 
   $ jacquard model eval doc.model > /dev/null
   $ rm .jacquard/model-cache/snapshots/*
+  $ jacquard model explain doc.model scaled > u.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' u.out
+  scaled: unknown (snapshots gone: assumption base, inline 4, policy)
+    last change (TIME):
+      entry scale changed
+      fuel: 10000 -> 20000
   $ sed -i 's/base = 5/base = 7/' doc.model
   $ jacquard model explain doc.model scaled > d.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' d.out
   scaled: stale (last evaluated TIME)
@@ -298,13 +304,22 @@ history is reported as such.
   $ for h in .jacquard/model-cache/history/*/echoed; do echo junk >> "$h"; done
   $ jacquard model explain doc.model echoed
   echoed: history unavailable (bad frame)
+  $ printf 'hello\n' > note.txt
+  $ jacquard model eval doc.model > /dev/null 2> repair.err; grep -c W1803 repair.err; grep -o 'kept' repair.err
+  1
+  kept
+  kept
+  $ jacquard model explain doc.model echoed > r.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' r.out
+  echoed: current (evaluated TIME)
+    last change (TIME):
+      input note: (unavailable) -> 6 bytes
   $ jacquard model explain doc.model nope
   error[E1802]: The model document has no such result.
     Cause: doc.model declares no result "nope"
     Next step: Name a result the document declares.
   [1]
   $ jacquard model explain doc.model --json > e.json; grep -o '"freshness":"[a-z-]*"' e.json
-  "freshness":"stale"
-  "freshness":"history-unavailable"
+  "freshness":"current"
+  "freshness":"current"
   $ stat -c %a .jacquard/model-cache/history/*/scaled
   600

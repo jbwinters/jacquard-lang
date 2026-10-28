@@ -171,6 +171,9 @@ let warning ~code cause =
     | "W1800" ->
         ( "A model cache file was ignored.",
           "Nothing is needed: the result was recomputed and the file replaced." )
+    | "W1803" ->
+        ( "A damaged model history was repaired.",
+          "Nothing is needed: the records before the damage were kept and the new one appended." )
     | "W1802" ->
         ( "A model result's history could not be written.",
           "Check that the cache directory is writable; the result itself is unaffected." )
@@ -335,7 +338,7 @@ let status_tag = function
   | Uncacheable reason -> "uncacheable-" ^ reason
   | Refused _ -> "refused"
 
-let evaluate ?(record = fun _ ~outcome:_ -> Ok ()) ~ctx ~allows ~seed ~cache ~out
+let evaluate ?(record = fun _ ~outcome:_ -> Ok None) ~ctx ~allows ~seed ~cache ~out
     (prepared : Model_doc.prepared) =
   let warnings = ref [] in
   let warn ~code cause = warnings := warning ~code cause :: !warnings in
@@ -410,7 +413,8 @@ let evaluate ?(record = fun _ ~outcome:_ -> Ok ()) ~ctx ~allows ~seed ~cache ~ou
         (match (e.outcome, allows, cache) with
         | Some outcome, [], Some _ -> (
             match record r ~outcome:(status_tag e.status ^ " " ^ outcome_tag outcome) with
-            | Ok () -> ()
+            | Ok None -> ()
+            | Ok (Some note) -> warn ~code:"W1803" (Printf.sprintf "result %s: %s" e.name note)
             | Error reason -> warn ~code:"W1802" (Printf.sprintf "result %s: %s" e.name reason))
         | _ -> ());
         e)

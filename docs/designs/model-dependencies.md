@@ -329,15 +329,21 @@ guessed. Host 13 consumes `--json` of both commands.
   the status and outcome tag, the source digest and interface identity, the
   policy snapshot, each argument's kind, name and snapshot, and the dependency
   record. Records are framed `entry bytes=N`, an LF, the record and an LF, and
-  appended owner-only; an unreadable history is replaced by one holding only
-  the new record. A failed write is W1802.
+  appended owner-only under an exclusive lock on a sibling `.lock` file, held
+  across reading the latest record, deciding, and writing. A record whose key
+  is not its own dependency record's, or whose bindings do not match its
+  arguments, is malformed. A history with a malformed or torn frame keeps every
+  record before it and is rewritten atomically (W1803); one that cannot be read
+  at all is left untouched (W1802), as is any failed write.
 - `snapshots/<hex>` holds each assumption's source text, each inline literal,
   each input's bytes and the canonical policy, named by their HASH_V0, written
-  atomically and only when absent.
+  atomically when absent or when the file no longer holds its content.
 - `jacquard model explain DOC [RESULT] [--cache DIR] [--json]` checks the
   source and computes each result's current record without evaluating. A
-  result is `never evaluated`, `current (evaluated T)`, `stale (last evaluated
-  T)` followed by every differing component, or `history unavailable (REASON)`.
+  result is `never evaluated`, `current (evaluated T)`, `unknown (snapshots
+  gone: ...)` when its key is unchanged but a snapshot its latest record names
+  is missing (never assumed current), `stale (last evaluated T)` followed by
+  every differing component, or `history unavailable (REASON)`.
   When a result has an earlier record, `last change (T):` lists what differed
   between it and the latest. Components are the entry (implementation, or a
   different entry name), its signature and call labels, the prelude, Core,

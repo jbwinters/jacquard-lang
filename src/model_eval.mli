@@ -45,7 +45,7 @@ type status =
 type evaluated = { name : string; key : Hash.t; status : status; outcome : outcome option }
 
 val evaluate :
-  ?record:(Model_doc.resolved -> outcome:string -> (unit, string) result) ->
+  ?record:(Model_doc.resolved -> outcome:string -> (string option, string) result) ->
   ctx:Eval.ctx ->
   allows:string list ->
   seed:int ->
@@ -62,7 +62,7 @@ val evaluate :
     file is ignored with W1800 and replaced; a failed write is W1801 and leaves the result
     [Uncacheable "write-failed"]. Files are created owner-only and written atomically. [record] is
     called for every result that has an outcome when [cache] is present and [allows] is empty, with
-    its status and outcome tag; its failure is W1802. *)
+    its status and outcome tag; its failure is W1802, and a note it returns is W1803. *)
 
 val make_dirs : string -> unit
 (** [make_dirs dir] creates [dir] and its missing parents with mode 0700. *)

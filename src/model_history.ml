@@ -114,28 +114,48 @@ let parse_record bytes =
             dependency;
           }
         in
-        if serialize_record r = bytes then Ok r else fail "noncanonical record"
+        let consistent (b : binding) (a : Model_doc.argument_identity) =
+          match (b.kind, a) with
+          | ("assumption" | "inline"), Model_doc.Assumption _ -> b.snapshot <> None
+          | "input", Model_doc.Input _ -> b.snapshot <> None
+          | "term", Model_doc.Term _ -> b.snapshot = None
+          | _ -> false
+        in
+        if serialize_record r <> bytes then fail "noncanonical record"
+        else if not (Hash.equal key (Model_doc.key dependency)) then
+          fail "the record's key does not match its dependency record"
+        else if
+          List.length bindings <> List.length dependency.Model_doc.arguments
+          || not (List.for_all2 consistent bindings dependency.Model_doc.arguments)
+        then fail "the record's bindings do not match its arguments"
+        else Ok r
   | _ -> fail "not a history record"
 
-let parse_history bytes =
+(* the records before the first bad frame, and that frame's offset and the reason *)
+let parse_prefix bytes =
   let n = String.length bytes in
   let rec go pos acc =
-    if pos = n then Ok (List.rev acc)
+    let stop reason = (List.rev acc, Some (pos, reason)) in
+    if pos = n then (List.rev acc, None)
     else
       match String.index_from_opt bytes pos '\n' with
-      | None -> Error "truncated frame"
+      | None -> stop "truncated frame"
       | Some j -> (
           let l = String.sub bytes pos (j - pos) in
           match String.split_on_char '=' l with
           | [ "entry bytes"; k ] -> (
               match natural k with
-              | Some k when k < n - j - 1 && bytes.[j + 1 + k] = '\n' ->
-                  let* r = parse_record (String.sub bytes (j + 1) k) in
-                  go (j + 2 + k) (r :: acc)
-              | _ -> Error "bad frame length")
-          | _ -> Error "bad frame")
+              | Some k when k < n - j - 1 && bytes.[j + 1 + k] = '\n' -> (
+                  match parse_record (String.sub bytes (j + 1) k) with
+                  | Ok r -> go (j + 2 + k) (r :: acc)
+                  | Error reason -> stop reason)
+              | _ -> stop "bad frame length")
+          | _ -> stop "bad frame")
   in
   go 0 []
+
+let parse_history bytes =
+  match parse_prefix bytes with records, None -> Ok records | _, Some (_, reason) -> Error reason
 
 let history_path ~cache ~document name =
   Filename.concat (Filename.concat (Filename.concat cache "history") (hex document)) name
@@ -161,7 +181,8 @@ let now () =
 let write_snapshot ~cache content =
   let h = Hash.of_string content in
   let path = snapshot_path ~cache h in
-  if Sys.file_exists path then Ok h
+  (* an existing snapshot is kept only when it still holds its content *)
+  if read_snapshot ~cache h <> None then Ok h
   else Result.map (fun () -> h) (Model_eval.write_atomic path content)
 
 let append_frame path bytes =
@@ -183,17 +204,52 @@ let append_frame path bytes =
     Ok ()
   with (Unix.Unix_error _ | Sys_error _) as e -> Error (Printexc.to_string e)
 
+(* one writer at a time per history: the read, the decision and the write happen under an
+   exclusive lock on a sibling lock file *)
+let with_lock path f =
+  match
+    Model_eval.make_dirs (Filename.dirname path);
+    Unix.openfile (path ^ ".lock") [ Unix.O_RDWR; Unix.O_CREAT; Unix.O_CLOEXEC ] 0o600
+  with
+  | exception ((Unix.Unix_error _ | Sys_error _) as e) -> Error (Printexc.to_string e)
+  | fd ->
+      Fun.protect
+        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+        (fun () ->
+          match Unix.lockf fd Unix.F_LOCK 0 with
+          | exception Unix.Unix_error (e, _, _) -> Error (Unix.error_message e)
+          | () -> f ())
+
 let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resolved) ~outcome =
   let name = r.Model_doc.decl.Model_doc.r_name in
-  let key = Model_doc.key r.Model_doc.dependency in
   let path = history_path ~cache ~document name in
-  let history, replace =
-    match read_history ~cache ~document name with Ok h -> (h, false) | Error _ -> ([], true)
+  with_lock path @@ fun () ->
+  let key = Model_doc.key r.Model_doc.dependency in
+  (* a damaged history keeps every record before the damage; an unreadable one is left alone *)
+  let* history, damage =
+    match Model_doc.read_bounded ~limit:(64 * 1024 * 1024) path with
+    | Error `Absent -> Ok ([], None)
+    | Error (`Unreadable reason) -> Error reason
+    | Ok bytes -> (
+        match parse_prefix bytes with
+        | records, None -> Ok (records, None)
+        | records, Some (offset, reason) -> Ok (records, Some (String.sub bytes 0 offset, reason)))
+  in
+  let note =
+    Option.map
+      (fun (_, reason) ->
+        Printf.sprintf "the history was damaged (%s); its %d earlier record(s) were kept" reason
+          (List.length history))
+      damage
   in
   let latest = match List.rev history with r :: _ -> Some r | [] -> None in
+  let frame bytes = Printf.sprintf "entry bytes=%d\n%s\n" (String.length bytes) bytes in
   match latest with
-  | Some l when Hash.equal l.key key -> Ok ()
-  | _ ->
+  | Some l when Hash.equal l.key key -> (
+      match damage with
+      | None -> Ok None
+      | Some (kept, _) -> Result.map (fun () -> note) (Model_eval.write_atomic path kept))
+  | _ -> (
       let* bindings =
         List.fold_right
           (fun (b : Model_doc.binding) acc ->
@@ -224,10 +280,10 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
         }
       in
       let bytes = serialize_record record in
-      if replace then
-        Model_eval.write_atomic path
-          (Printf.sprintf "entry bytes=%d\n%s\n" (String.length bytes) bytes)
-      else append_frame path bytes
+      match damage with
+      | Some (kept, _) ->
+          Result.map (fun () -> note) (Model_eval.write_atomic path (kept ^ frame bytes))
+      | None -> Result.map (fun () -> None) (append_frame path bytes))
 
 (* --- explanations --- *)
 
@@ -238,7 +294,12 @@ type change = {
   after : string option;
 }
 
-type freshness = Current | Stale of change list | Never_evaluated | Unavailable of string
+type freshness =
+  | Current
+  | Unknown of string list
+  | Stale of change list
+  | Never_evaluated
+  | Unavailable of string
 
 type explanation = {
   result : string;
@@ -390,7 +451,18 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
             { result = name; evaluated_at = None; freshness = Never_evaluated; transition = None }
         | latest :: earlier ->
             let freshness =
-              if Hash.equal latest.key (Model_doc.key r.Model_doc.dependency) then Current
+              if Hash.equal latest.key (Model_doc.key r.Model_doc.dependency) then
+                (* the key is unchanged, but a dependency whose snapshot is gone is unknown *)
+                let gone =
+                  List.filter_map
+                    (fun b ->
+                      match b.snapshot with
+                      | Some h when read_snapshot ~cache h = None -> Some (b.kind ^ " " ^ b.name)
+                      | _ -> None)
+                    latest.bindings
+                  @ if read_snapshot ~cache latest.policy_snapshot = None then [ "policy" ] else []
+                in
+                if gone = [] then Current else Unknown gone
               else Stale (differences (of_record latest) now_)
             in
             let transition =
@@ -417,6 +489,8 @@ let render_text e =
     | Stale _ ->
         Printf.sprintf "%s: stale (last evaluated %s)" e.result
           (Option.value e.evaluated_at ~default:"?")
+    | Unknown gone ->
+        Printf.sprintf "%s: unknown (snapshots gone: %s)" e.result (String.concat ", " gone)
     | Never_evaluated -> Printf.sprintf "%s: never evaluated" e.result
     | Unavailable reason -> Printf.sprintf "%s: history unavailable (%s)" e.result reason
   in
@@ -447,6 +521,7 @@ let to_json es =
       match e.freshness with
       | Current -> ("current", [])
       | Stale cs -> ("stale", [ ("changes", `List (List.map change_json cs)) ])
+      | Unknown gone -> ("unknown", [ ("missing", `List (List.map (fun g -> `String g) gone)) ])
       | Never_evaluated -> ("never-evaluated", [])
       | Unavailable reason -> ("history-unavailable", [ ("reason", `String reason) ])
     in

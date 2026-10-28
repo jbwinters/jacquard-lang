@@ -4363,7 +4363,7 @@ let model_eval_cmd file prelude allows seed cache no_cache json =
               | Some cache ->
                   let document = Model_history.document_identity file in
                   fun r ~outcome -> Model_history.append ~cache ~document prepared r ~outcome
-              | None -> fun _ ~outcome:_ -> Ok ()
+              | None -> fun _ ~outcome:_ -> Ok None
             in
             Model_eval.evaluate ~record ~ctx ~allows ~seed ~cache
               ~out:(if json then prerr_string else print_string)

@@ -31,7 +31,8 @@ val serialize_record : record -> string
 
 val parse_history : string -> (record list, string) result
 (** [parse_history bytes] reads a whole history file, oldest record first; any malformed or
-    noncanonical record refuses the file. *)
+    noncanonical record, a record whose key is not its dependency record's, or whose bindings do not
+    match its arguments, refuses the file. *)
 
 val append :
   cache:string ->
@@ -39,11 +40,13 @@ val append :
   Model_doc.prepared ->
   Model_doc.resolved ->
   outcome:string ->
-  (unit, string) result
+  (string option, string) result
 (** [append ~cache ~document prepared resolved ~outcome] writes the result's snapshots (owner-only,
     atomically, when absent) and appends a record when the result has no history or its latest
-    record has another key. An unreadable history is replaced by a history holding only the new
-    record. *)
+    record has another key, holding an exclusive lock on a sibling [.lock] file across the read, the
+    decision and the write. A history with a damaged frame keeps every record before it, is
+    rewritten atomically, and the result carries a note saying so; a history that cannot be read at
+    all is left untouched and refused. *)
 
 (** {1 Explanations} *)
 
@@ -58,6 +61,9 @@ type change = {
 
 type freshness =
   | Current
+  | Unknown of string list
+      (** the key is unchanged, but these dependencies' snapshots are gone, so the result is never
+          assumed current *)
   | Stale of change list  (** every differing key component *)
   | Never_evaluated
   | Unavailable of string  (** the history cannot be read; never guessed *)

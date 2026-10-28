@@ -78,11 +78,19 @@ let test_strict_parse () =
     |> Str.global_replace (Str.regexp_string "data bytes=1") "data bytes=4611686018427387903");
   refused "foreign record" ("x" ^ bytes)
 
+let history_dependency =
+  {
+    dependency with
+    Model_doc.arguments =
+      dependency.Model_doc.arguments
+      @ [ Model_doc.Term { term = Hash.of_string "t"; signature = Hash.of_string "s" } ];
+  }
+
 let record =
   {
     Model_history.time = "2026-10-28T05:56:31Z";
     entry_name = "scale";
-    key = Model_doc.key dependency;
+    key = Model_doc.key history_dependency;
     previous = Some (Hash.of_string "older");
     outcome = "fresh value";
     source = Hash.of_string "source";
@@ -93,13 +101,7 @@ let record =
         { Model_history.kind = "assumption"; name = "base"; snapshot = Some (Hash.of_string "3") };
         { Model_history.kind = "term"; name = "helper"; snapshot = None };
       ];
-    dependency =
-      {
-        dependency with
-        Model_doc.arguments =
-          dependency.Model_doc.arguments
-          @ [ Model_doc.Term { term = Hash.of_string "t"; signature = Hash.of_string "s" } ];
-      };
+    dependency = history_dependency;
   }
 
 let frame r =
@@ -129,6 +131,21 @@ let test_history_strict () =
     (Str.global_replace (Str.regexp "entry bytes=[0-9]*") "entry bytes=4611686018427387903" bytes);
   refused "binding count" (replace "bindings 2" "bindings 3");
   refused "binding order" (replace "binding 1 term" "binding 0 term");
+  let reframe r = frame r in
+  refused "a key that is not the dependency record's"
+    (reframe { record with Model_history.key = Hash.of_string "another" });
+  refused "a binding kind that does not match its argument"
+    (reframe
+       {
+         record with
+         Model_history.bindings =
+           [
+             { Model_history.kind = "input"; name = "base"; snapshot = Some (Hash.of_string "3") };
+             { Model_history.kind = "term"; name = "helper"; snapshot = None };
+           ];
+       });
+  refused "a missing binding"
+    (reframe { record with Model_history.bindings = [ List.hd record.Model_history.bindings ] });
   Alcotest.(check bool)
     "an empty history is no records" true
     (Model_history.parse_history "" = Ok [])
