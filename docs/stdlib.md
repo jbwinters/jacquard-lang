@@ -637,7 +637,15 @@ dist.pmf        : (Distribution a, a, Eq a) ->{} Real
 dist.enumerate  : (() ->{Dist | e} a) ->{| e} List (a, Real)     -- normalized, unmerged
 dist.tally      : (List (a, Real), Eq a) ->{} List (a, Real)   -- merge equal outcomes
 dist.sample-lw  : (() ->{Dist | e} a, Int, Int) ->{| e} List (a, Real)  -- seed, count
+dist.named      : (Text, Distribution a) ->{Dist | e} a           -- exactly sample; recordings name the draw
 ```
+
+`dist.named(name, d)` is `sample(d)` under every handler: the inference
+drivers, a root `dist` grant and Warp see the same model. A recording run
+(`jacquard run --record`, `docs/exploration-log.md`) also records the name, so
+the draw is addressed by `(name, k)`, the k-th draw under that name, instead of
+by its position. The name is a debugging handle, not an identity; renaming it
+changes the term's hash as any literal would.
 
 The `-v1` drivers return a typed outcome instead of a bare list. The two drivers
 use one classification, and `jacquard infer` applies it too:

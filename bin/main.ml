@@ -552,9 +552,15 @@ and record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache
         Store.retain_source_declarations store;
         let status =
           match
-            Eval.with_observer ctx (Exploration_log.on_event recorder) (fun () ->
-                run_in ~session ~source file allows (Some seed) infer_cache origin dry_run
-                  schedule_record schedule_replay schedule_fork fuel syntax)
+            let named =
+              match Prelude_identity.lookup_kind store "dist.named" Resolve.KTerm with
+              | Some { Resolve.hash; _ } -> Some hash
+              | None -> None
+            in
+            Eval.with_named_choices ctx named (fun () ->
+                Eval.with_observer ctx (Exploration_log.on_event recorder) (fun () ->
+                    run_in ~session ~source file allows (Some seed) infer_cache origin dry_run
+                      schedule_record schedule_replay schedule_fork fuel syntax))
           with
           | status -> status
           | exception Exploration_log.Bound_reached bound ->

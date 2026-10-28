@@ -42,6 +42,9 @@ type event =
       site : Span.t option;
           (** the source span of the application that performed the operation, when the evaluator
               knows it: trace metadata, never part of a value or identity *)
+      choice : string option;
+          (** EXP.2: the name a [dist.named] call gave this [sample] (then [site] is that call's
+              span), in a recording run only: trace metadata like [site] *)
     }
       (** An operation crossed every language handler and reached the root, before any root handler
           ran or a driver captured it. [name] is display-only; [operation] is its identity. The

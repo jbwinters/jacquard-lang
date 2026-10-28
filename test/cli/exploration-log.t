@@ -24,7 +24,7 @@ Recording changes nothing the run prints or returns.
   600
   $ cat coin.log
   jacquard-exploration-log format=1
-  program source=29c1f7c0d493a4d92ed093198ab04adb7936d853c5f8e89d803895cfcde96eee core=0.3.0 prelude=6b4babd3897011541335843ccfaa17cc59b83a5b09bd9b4c658d9359b9388b22 engine=interpreter
+  program source=29c1f7c0d493a4d92ed093198ab04adb7936d853c5f8e89d803895cfcde96eee core=0.3.0 prelude=000fd6c94590094253e7d1a86206744dfe4a3db827f1e7d0bfb332e1afebd985 engine=interpreter
   seed 3
   grants bytes=12
   console,dist
@@ -258,3 +258,98 @@ newline, so each result follows the printed name).
   qafter.jac:1:32-1:47
   site bytes=20
   qafter.jac:3:31-3:45
+
+Named choices (EXP.2). `dist.named(name, d)` is exactly `sample(d)`: the
+enumeration and likelihood-weighting drivers, a seeded root `dist` grant and
+Warp see the same model.
+
+  $ cat > named.jac <<'JAC'
+  > model() = if dist.named("rain", Bernoulli(0.3)) then add(dist.named("die", UniformInt(1, 2)), 10) else dist.named("die", UniformInt(1, 3))
+  > 
+  > model()
+  > JAC
+  $ sed 's/dist.named("[a-z]*", \([^)]*)\))/sample(\1)/g' named.jac > unnamed.jac
+  $ jacquard infer enumerate named.jac > named.enum; jacquard infer enumerate unnamed.jac > unnamed.enum; cmp named.enum unnamed.enum && echo same
+  same
+  $ jacquard infer lw named.jac --seed 5 --samples 200 > named.lw; jacquard infer lw unnamed.jac --seed 5 --samples 200 > unnamed.lw; cmp named.lw unnamed.lw && echo same
+  same
+  $ jacquard run named.jac --allow dist --seed 9 > named.run; jacquard run unnamed.jac --allow dist --seed 9 > unnamed.run; cmp named.run unnamed.run && echo same
+  same
+  $ cat > named-tests.jac <<'JAC'
+  > named-model() = if dist.named("rain", Bernoulli(0.3)) then dist.named("die", UniformInt(1, 2)) else dist.named("die", UniformInt(1, 3))
+  > 
+  > sample-model() = if sample(Bernoulli(0.3)) then sample(UniformInt(1, 2)) else sample(UniformInt(1, 3))
+  > 
+  > same-posterior = case("enumerate sees the same model", fn () -> check.true(text.eq?(debug.inspect(dist.enumerate(named-model)), debug.inspect(dist.enumerate(sample-model))), "posterior"))
+  > 
+  > named-draws = prop("named draws", fn () -> { let x = dist.named("x", UniformInt(1, 6)); check.true(lt(0, x), "positive") })
+  > JAC
+  $ jacquard test named-tests.jac --seed 7 --no-cache
+  PASS named-draws/named draws (prop: 100 cases, seed 7)
+  PASS same-posterior/enumerate sees the same model (1 check)
+  2 passed, 0 failed, 0 skipped, 0 refused
+
+A recording names each draw (name, k), k counting earlier draws under that
+name, at the dist.named call site; an unnamed sample keeps no name and is
+addressed by its position. The output is the same as without --record.
+
+  $ cat > dice.jac <<'JAC'
+  > roll(n) = if eq(n, 0) then 0 else add(dist.named("die", UniformInt(1, 6)), roll(sub(n, 1)))
+  > 
+  > add(roll(2), sample(UniformInt(1, 6)))
+  > JAC
+  $ jacquard run dice.jac --allow dist --seed 3 > dice.plain
+  $ jacquard run dice.jac --allow dist --seed 3 --record dice.log > dice.recorded; cmp dice.recorded dice.plain && echo same
+  same
+  $ grep -A1 -E '^(step|choice-name)' dice.log | grep -v -E '^(--|name|site)' | cut -d' ' -f1-3
+  step index=0 kind=choice
+  choice-name draw=0 bytes=3
+  die
+  step index=1 kind=choice
+  choice-name draw=1 bytes=3
+  die
+  step index=2 kind=choice
+  $ grep -A1 '^site' dice.log | grep -v '^--'
+  site bytes=18
+  dice.jac:1:39-1:74
+  site bytes=18
+  dice.jac:1:39-1:74
+  site bytes=18
+  dice.jac:3:14-3:38
+
+A choice an in-language driver handles never reaches the root, so it is not a
+step and leaves no pending name behind for a later root draw.
+
+  $ cat > inner.jac <<'JAC'
+  > coin() = dist.named("coin", Bernoulli(0.5))
+  > 
+  > (dist.enumerate(coin), sample(Bernoulli(0.5)))
+  > JAC
+  $ jacquard run inner.jac --allow dist --seed 1 --record inner.log > /dev/null; echo "exit=$?"
+  exit=0
+  $ grep -c '^step' inner.log; grep -c '^choice-name' inner.log || true
+  1
+  0
+
+A name is redacted like any field: an exposed secret inside it is not recorded,
+and the draw count still follows the name as written.
+
+  $ cat > named-secret.jac <<'JAC'
+  > pick() = {
+  >   let plain = secret.expose(secret.read(secret-ref("deploy-token", None)))
+  >   let a = dist.named(text.concat("pick-", plain), UniformInt(1, 2))
+  >   let b = dist.named(text.concat("pick-", plain), UniformInt(1, 2))
+  >   add(a, b)
+  > }
+  > 
+  > pick()
+  > JAC
+  $ env "$key=hunter2zz" jacquard run named-secret.jac --allow secret --allow dist --seed 1 --record ns.log > /dev/null; echo "exit=$?"
+  exit=0
+  $ grep -c hunter2zz ns.log || true
+  0
+  $ grep -A1 '^choice-name' ns.log | grep -v '^--'
+  choice-name draw=0 bytes=22
+  pick-<secret redacted>
+  choice-name draw=1 bytes=22
+  pick-<secret redacted>

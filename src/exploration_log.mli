@@ -44,6 +44,9 @@ type entry = {
   e_operation : Hash.t;
   e_name : string;
   e_site : string option;  (** [file:line:col-line:col] *)
+  e_choice : (string * int) option;
+      (** EXP.2: a [dist.named] choice's name (redacted like a field) and k, its draw count under
+          that name before this step (from 0); [None] for an unnamed, position-addressed step *)
   e_arguments : (int * Observation_transcript.field) list;
   e_result : Observation_transcript.field option;
   e_output : Observation_transcript.field option;  (** output, limited like any field *)

@@ -44,3 +44,12 @@
 ; driver cannot be written in Jacquard without an RNG effect the design declines to
 ; add (randomness IS Dist). Returns the normalized empirical posterior.
 (defterm ((binding dist.sample-lw () (quote (builtin-marker dist.sample-lw)))))
+
+; EXP.2 named choice: exactly `sample` under every handler. A recording run
+; (`jacquard run --record`) also records the name with the draw, so a choice is
+; addressed by (name, k) for the k-th draw under that name rather than by its
+; position. The name is a debugging handle, not an identity.
+(defterm ((binding dist.named
+  ((tforall ((tvar a)) ((rvar e))
+    (tarrow ((tref text) (tapp (tref distribution) (tvar a))) (row (eref dist) e) (tvar a))))
+  (lam ((pvar name) (pvar d)) (app (var sample) (var d))))))

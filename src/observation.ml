@@ -17,6 +17,7 @@ type event =
       name : string;
       arguments : value list Lazy.t;
       site : Span.t option;
+      choice : string option;
     }
   | Output of { call : int; operation : Hash.t; bytes : string }
   | Result of { call : int; operation : Hash.t; result : (value, Runtime_err.t) result Lazy.t }

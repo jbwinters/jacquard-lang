@@ -1,13 +1,14 @@
 open Jacquard
 module L = Exploration_log
 
-let entry index kind ?site ?result ?output arguments =
+let entry index kind ?site ?choice ?result ?output arguments =
   {
     L.e_index = index;
     e_kind = kind;
     e_operation = Hash.of_string ("op-" ^ string_of_int index);
     e_name = "op " ^ string_of_int index;
     e_site = site;
+    e_choice = choice;
     e_arguments = arguments;
     e_result = result;
     e_output = output;
@@ -25,7 +26,8 @@ let sample_log =
     output_recorded = true;
     entries =
       [
-        entry 0 L.Choice_step ~site:"m.jac:1:10-1:32" ~result:(Observation_transcript.Data "true")
+        entry 0 L.Choice_step ~site:"m.jac:1:10-1:32" ~choice:("rain\nodd name", 2)
+          ~result:(Observation_transcript.Data "true")
           [ (0, Observation_transcript.Data "bernoulli(0.5)") ];
         entry 1 L.Operation_step
           ~output:(Observation_transcript.Truncated { total = 99; prefix = "line\nwith newline" })
@@ -73,6 +75,18 @@ let test_strict_parse () =
     (Str.global_replace (Str.regexp_string "argument index=2") "argument index=-2" bytes);
   refused "truncated total within prefix"
     (Str.global_replace (Str.regexp_string "truncated total=9000") "truncated total=3" bytes);
+  refused "negative draw"
+    (Str.global_replace (Str.regexp_string "choice-name draw=2") "choice-name draw=-2" bytes);
+  refused "a choice name on an operation step"
+    (L.serialize
+       {
+         sample_log with
+         entries =
+           List.map
+             (fun (e : L.entry) ->
+               if e.L.e_index = 1 then { e with L.e_choice = Some ("n", 0) } else e)
+             sample_log.entries;
+       });
   refused "oversized frame"
     (Str.global_replace (Str.regexp_string "name bytes=4") "name bytes=4611686018427387903" bytes)
 

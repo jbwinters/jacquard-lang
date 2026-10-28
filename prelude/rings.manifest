@@ -273,6 +273,7 @@ dist.tally-insert 2
 dist.tally 2
 dist.pmf 2
 dist.sample-lw 2
+dist.named 2
 # --- 14-world (ring 3)
 println 3
 console.ask 3
