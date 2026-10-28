@@ -279,6 +279,7 @@ changed at its last recomputation, from the cache's history and snapshots.
   $ jacquard model explain doc.model scaled > c.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' c.out
   scaled: stale (last evaluated TIME)
     entry scale changed
+    callee helper changed
     fuel: 10000 -> 20000
     last change (TIME):
       assumption base: 3 -> 5
@@ -378,3 +379,43 @@ and the JSON names each field once.
       snapshots gone: policy
   $ jacquard model explain doc.model --json > j.json; grep -o '"missing"' j.json | wc -l
   3
+
+`explain` names the callees that changed inside a changed entry or term
+argument, from the closure manifests the history retains.
+
+  $ cd .. && mkdir cal && cd cal
+  $ cat > m.jac <<'JAC'
+  > inc(x) = add(x, 1)
+  > dbl(x) = add(x, x)
+  > twice(f, n) = f(f(n))
+  > step(n) = inc(n)
+  > JAC
+  $ printf 'jacquard-model format=1\nsource m.jac\nresult r entry twice args step,1 driver run fuel=10000\n' > doc.model
+  $ jacquard model eval doc.model
+  r: fresh
+    value 3
+  $ sed -i 's/add(x, 1)/add(x, 2)/' m.jac
+  $ jacquard model explain doc.model > a.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' a.out
+  r: stale (last evaluated TIME)
+    term step changed
+    callee inc changed
+  $ jacquard model eval doc.model > /dev/null
+  $ sed -i 's/^step(n) = inc(n)$/step(n) = dbl(inc(n))/' m.jac
+  $ jacquard model explain doc.model > b.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' b.out
+  r: stale (last evaluated TIME)
+    term step changed
+    callee dbl added
+    last change (TIME):
+      term step changed
+      callee inc changed
+
+Repeated evaluations of an unchanged result add no history, and the JSON of an
+unknown result names its missing snapshots once.
+
+  $ jacquard model eval doc.model > /dev/null; jacquard model eval doc.model > /dev/null; jacquard model eval doc.model > /dev/null
+  $ grep -c '^entry bytes=' .jacquard/model-cache/history/*/r
+  3
+  $ rm .jacquard/model-cache/snapshots/*
+  $ jacquard model explain doc.model --json > u.json; grep -o '"freshness":"[a-z-]*"' u.json; grep -o '"missing"' u.json | wc -l
+  "freshness":"unknown"
+  2

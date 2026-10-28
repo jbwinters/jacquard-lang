@@ -894,3 +894,13 @@ recomputation; a pruned snapshot is shown as unavailable. `model-eval.t` adds
 the explain transcript and command-level invalidation for call labels and the
 policy; `test_model_eval.ml` adds two history-format cases. The source
 inventory is now `1214 / 81 / 56`.
+
+MODEL.1 slice 3b completes `jacquard model explain`
+(`docs/designs/model-dependencies.md` §3.5a). Each history record now names the
+closure manifest of its entry and of each term argument: every reachable
+declaration with its names and a retained snapshot of its body. When an entry
+or term argument changes, `explain` lists the callees that changed, were added
+or were removed. A refresh record no longer moves a result's evaluation time,
+outcome or previous key. `model-eval.t` pins callee naming through a term
+argument, stable history length over repeated evaluations, and the JSON of an
+unknown result. The source inventory is unchanged (`1214 / 81 / 56`).

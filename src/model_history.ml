@@ -16,6 +16,7 @@ type binding = { kind : string; name : string; snapshot : Hash.t option }
 type record = {
   time : string;
   entry_name : string;
+  entry_closure : Hash.t option;
   key : Hash.t;
   previous : Hash.t option;
   outcome : string;
@@ -35,6 +36,7 @@ let serialize_record r =
   line "%s" header;
   line "time %s" r.time;
   line "entry-name %s" r.entry_name;
+  line "entry-closure %s" (opt_hex r.entry_closure);
   line "key %s" (hex r.key);
   line "previous %s" (opt_hex r.previous);
   line "outcome %s" r.outcome;
@@ -63,10 +65,12 @@ let parse_record bytes =
     else fail "expected %S" prefix
   in
   match lines with
-  | h :: time :: entry :: key :: previous :: outcome :: provenance :: policy :: count :: rest
+  | h :: time :: entry :: closure :: key :: previous :: outcome :: provenance :: policy :: count
+    :: rest
     when h = header ->
       let* time = after "time " time in
       let* entry_name = after "entry-name " entry in
+      let* entry_closure = Result.bind (after "entry-closure " closure) opt in
       let* key = Result.bind (after "key " key) hash in
       let* previous = Result.bind (after "previous " previous) opt in
       let* outcome = after "outcome " outcome in
@@ -104,6 +108,7 @@ let parse_record bytes =
           {
             time;
             entry_name;
+            entry_closure;
             key;
             previous;
             outcome;
@@ -119,7 +124,7 @@ let parse_record bytes =
           | ("assumption" | "inline"), Model_doc.Assumption _ -> b.snapshot <> None
           | "input", Model_doc.Input h -> (
               match b.snapshot with Some s -> Hash.equal s h | None -> false)
-          | "term", Model_doc.Term _ -> b.snapshot = None
+          | "term", Model_doc.Term _ -> true
           | _ -> false
         in
         if serialize_record r <> bytes then fail "noncanonical record"
@@ -221,6 +226,56 @@ let with_lock path f =
           | exception Unix.Unix_error (e, _, _) -> Error (Unix.error_message e)
           | () -> f ())
 
+(* the closure manifest of a term: every declaration it reaches, each with the names bound to it
+   and a snapshot of its stored bytes, sorted; and the bodies to retain *)
+let closure ~(store : Store.t) root =
+  let names = Hashtbl.create 64 in
+  List.iter
+    (fun (name, (e : Resolve.entry)) ->
+      match Store.locate_internal store e.Resolve.hash with
+      | Ok l -> Hashtbl.add names (hex l.Store.decl_hash) name
+      | Error _ -> ())
+    (Store.names store);
+  let seen = Hashtbl.create 64 in
+  let rec visit acc h =
+    match Store.locate_internal store h with
+    | Error _ -> acc
+    | Ok l ->
+        let d = hex l.Store.decl_hash in
+        if Hashtbl.mem seen d then acc
+        else (
+          Hashtbl.add seen d ();
+          List.fold_left visit (l.Store.decl_hash :: acc) (Store.decl_refs l.Store.decl))
+  in
+  let bodies =
+    List.filter_map
+      (fun d ->
+        match Model_doc.read_bounded ~limit:(16 * 1024 * 1024) (Store.object_path store d) with
+        | Ok body -> Some (d, body)
+        | Error _ -> None)
+      (visit [] root)
+  in
+  let lines =
+    List.concat_map
+      (fun (d, body) ->
+        List.map
+          (fun n -> Printf.sprintf "%s %s %s" n (hex d) (hex (Hash.of_string body)))
+          (Hashtbl.find_all names (hex d)))
+      bodies
+    |> List.sort_uniq compare
+  in
+  ( "jacquard-model-closure format=1\n" ^ String.concat "" (List.map (fun l -> l ^ "\n") lines),
+    List.map snd bodies )
+
+let parse_closure text =
+  match String.split_on_char '\n' text with
+  | "jacquard-model-closure format=1" :: rest ->
+      Some
+        (List.filter_map
+           (fun l -> match String.split_on_char ' ' l with [ n; d; _ ] -> Some (n, d) | _ -> None)
+           rest)
+  | _ -> None
+
 let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resolved) ~outcome =
   let name = r.Model_doc.decl.Model_doc.r_name in
   let path = history_path ~cache ~document name in
@@ -277,6 +332,30 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
   let* policy_snapshot =
     write_snapshot ~cache (Observation_policy.serialize prepared.Model_doc.policy)
   in
+  (* the entry's and each term argument's closure: bodies and manifest, retained *)
+  let write_closure h =
+    let text, bodies = closure ~store:prepared.Model_doc.store h in
+    let* () =
+      List.fold_left
+        (fun acc body ->
+          let* () = acc in
+          Result.map ignore (write_snapshot ~cache body))
+        (Ok ()) bodies
+    in
+    write_snapshot ~cache text
+  in
+  let* entry_closure = write_closure r.Model_doc.dependency.Model_doc.entry in
+  let* bindings =
+    List.fold_right2
+      (fun b a acc ->
+        let* acc = acc in
+        match a with
+        | Model_doc.Term { term; _ } ->
+            let* m = write_closure term in
+            Ok ({ b with snapshot = Some m } :: acc)
+        | _ -> Ok (b :: acc))
+      bindings r.Model_doc.dependency.Model_doc.arguments (Ok [])
+  in
   let note =
     Option.map
       (fun (_, reason) ->
@@ -294,6 +373,7 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
       (fun b -> match b.snapshot with Some h -> read_snapshot ~cache h = None | None -> false)
       l.bindings
     || read_snapshot ~cache l.policy_snapshot = None
+    || match l.entry_closure with Some h -> read_snapshot ~cache h = None | None -> true
   in
   match latest with
   | Some l when Hash.equal l.key key && not (stale_refs l) -> (
@@ -305,6 +385,7 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
         {
           time = now ();
           entry_name = r.Model_doc.decl.Model_doc.r_entry;
+          entry_closure = Some entry_closure;
           key;
           previous = Option.map (fun l -> l.key) latest;
           outcome;
@@ -351,6 +432,7 @@ type explanation = {
 (* one side of a comparison: a record, or the document as it is now *)
 type side = {
   entry : string;
+  entry_closure : Hash.t option;
   dep : Model_doc.dependency;
   binds : binding list;
   content : Hash.t -> string option;
@@ -375,6 +457,27 @@ let byte_count content = function
 
 let differences old_ now_ =
   let change ?subject ?before ?after component = { component; subject; before; after } in
+  (* the named declarations that differ between two closure manifests, the root's own name aside *)
+  let callees ~root old_c new_c =
+    let manifest side = function
+      | None -> None
+      | Some h -> Option.bind (side.content h) parse_closure
+    in
+    match (manifest old_ old_c, manifest now_ new_c) with
+    | Some o, Some n ->
+        let names = List.sort_uniq compare (List.map fst o @ List.map fst n) in
+        List.filter_map
+          (fun name ->
+            if name = root then None
+            else
+              match (List.assoc_opt name o, List.assoc_opt name n) with
+              | Some a, Some b when a <> b -> Some (change ~subject:name "callee")
+              | None, Some _ -> Some (change ~subject:name ~after:"added" "callee")
+              | Some _, None -> Some (change ~subject:name ~after:"removed" "callee")
+              | _ -> None)
+          names
+    | _ -> []
+  in
   let o = old_.dep and n = now_.dep in
   let some c b = if c then [ b ] else [] in
   let entry =
@@ -382,6 +485,9 @@ let differences old_ now_ =
       ((not (Hash.equal o.Model_doc.entry n.Model_doc.entry)) || old_.entry <> now_.entry)
       (if old_.entry <> now_.entry then change ~before:old_.entry ~after:now_.entry "entry"
        else change ~subject:now_.entry "entry")
+    @
+    if Hash.equal o.Model_doc.entry n.Model_doc.entry then []
+    else callees ~root:now_.entry old_.entry_closure now_.entry_closure
   in
   let fixed =
     some
@@ -436,7 +542,7 @@ let differences old_ now_ =
                     ~after:(byte_count now_.content b1.snapshot)
                     "input";
                 ]
-            | kind -> [ change ~subject:b1.name kind ]
+            | kind -> change ~subject:b1.name kind :: callees ~root:b1.name b0.snapshot b1.snapshot
         in
         here @ pairs (i + 1) ob nb oi ni
     | _ -> []
@@ -447,23 +553,34 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
   let policy_bytes = Observation_policy.serialize prepared.Model_doc.policy in
   let one (r : Model_doc.resolved) =
     let name = r.Model_doc.decl.Model_doc.r_name in
+    let manifest h = fst (closure ~store:prepared.Model_doc.store h) in
+    let entry_manifest = manifest r.Model_doc.dependency.Model_doc.entry in
+    let term_manifests =
+      List.map
+        (function Model_doc.Term { term; _ } -> Some (manifest term) | _ -> None)
+        r.Model_doc.dependency.Model_doc.arguments
+    in
     let current_contents =
-      policy_bytes
-      :: List.filter_map (fun (b : Model_doc.binding) -> b.Model_doc.b_content) r.Model_doc.bindings
+      (policy_bytes :: entry_manifest :: List.filter_map Fun.id term_manifests)
+      @ List.filter_map (fun (b : Model_doc.binding) -> b.Model_doc.b_content) r.Model_doc.bindings
     in
     let now_ =
       {
         entry = r.Model_doc.decl.Model_doc.r_entry;
+        entry_closure = Some (Hash.of_string entry_manifest);
         dep = r.Model_doc.dependency;
         binds =
-          List.map
-            (fun (b : Model_doc.binding) ->
+          List.map2
+            (fun (b : Model_doc.binding) m ->
               {
                 kind = b.Model_doc.b_kind;
                 name = b.Model_doc.b_name;
-                snapshot = Option.map Hash.of_string b.Model_doc.b_content;
+                snapshot =
+                  (match m with
+                  | Some text -> Some (Hash.of_string text)
+                  | None -> Option.map Hash.of_string b.Model_doc.b_content);
               })
-            r.Model_doc.bindings;
+            r.Model_doc.bindings term_manifests;
         content =
           (fun h ->
             match List.find_opt (fun c -> Hash.equal (Hash.of_string c) h) current_contents with
@@ -474,6 +591,7 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
     let of_record (rc : record) =
       {
         entry = rc.entry_name;
+        entry_closure = rc.entry_closure;
         dep = rc.dependency;
         binds = rc.bindings;
         content = read_snapshot ~cache;
@@ -560,11 +678,12 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                         gone_of prev )
                   | [] -> (None, [])
                 in
+                (* a refresh is not a recomputation: report the run's first record *)
                 {
                   result = name;
-                  evaluated_at = Some latest.time;
-                  outcome = Some latest.outcome;
-                  previous = latest.previous;
+                  evaluated_at = Some first.time;
+                  outcome = Some first.outcome;
+                  previous = first.previous;
                   missing = gone;
                   freshness;
                   transition;
@@ -577,6 +696,7 @@ let change_text c =
   let subject = match c.subject with Some s -> " " ^ s | None -> "" in
   match (c.before, c.after) with
   | Some b, Some a -> Printf.sprintf "%s%s: %s -> %s" c.component subject b a
+  | None, Some status -> Printf.sprintf "%s%s %s" c.component subject status
   | _ -> Printf.sprintf "%s%s changed" c.component subject
 
 let render_text e =

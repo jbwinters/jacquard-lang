@@ -90,6 +90,7 @@ let record =
   {
     Model_history.time = "2026-10-28T05:56:31Z";
     entry_name = "scale";
+    entry_closure = Some (Hash.of_string "closure");
     key = Model_doc.key history_dependency;
     previous = Some (Hash.of_string "older");
     outcome = "fresh value";

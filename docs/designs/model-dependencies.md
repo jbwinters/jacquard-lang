@@ -8,8 +8,8 @@
   `model-result-v1` and the cache (`src/model_eval.ml`, E1806, W1800, W1801;
   §3.3a). Slice 3a implements history, snapshots of assumptions, inputs and the
   policy, and `jacquard model explain` (`src/model_history.ml`, W1802; §3.5a).
-  Retaining each entry's reachable declarations, so `explain` can name the
-  callee that changed, is slice 3b. §7 lists what each slice proves.
+  Slice 3b retains each entry's and term argument's reachable declarations and
+  names the callees that changed (§3.5a). §7 lists what each slice proves.
 - Task: MODEL.1. Consumers: EXP.5 (`scenario-v1` is a MODEL.1 artifact plus
   forks), UNC.3 (assumption sets), the host's decision documents (APP.3), and
   MODEL.2 (measured incremental computation).
@@ -367,8 +367,20 @@ guessed. Host 13 consumes `--json` of both commands.
   freshness, `evaluated_at`, the latest record's `outcome` and `previous` key,
   `missing` snapshots, changes (each with `component`, `subject`, `before` and
   `after`) and `last_transition`.
-- Until slice 3b, an entry or term argument change is named but not explained
-  callee by callee.
+- Slice 3b: each record also names the entry's **closure manifest**, and a
+  term argument's snapshot is its closure manifest. A manifest
+  (`jacquard-model-closure format=1`) lists, sorted, every declaration the
+  term reaches as `NAME DECL-HASH BODY-SNAPSHOT`, one line per name bound to
+  it, and each declaration's stored bytes are retained as a snapshot (decision
+  5). When the entry or a term argument changed, `explain` compares the two
+  manifests and lists `callee NAME changed`, `callee NAME added` or `callee
+  NAME removed` for every named declaration other than the root itself. Without
+  both manifests (a pruned snapshot, or a record from before 3b) only the
+  change itself is named.
+- `current (evaluated T)`, the JSON `outcome` and `previous` come from the
+  first record under the latest key, so refresh records do not move them. The
+  `after` side of a change renders the latest record's snapshot, which for a
+  respelled assumption is its current spelling.
 
 ### 3.6 Consumers
 
@@ -452,5 +464,5 @@ The owner adopted the recommended option of each decision.
   opaque, truncated, excluded and granted results, each with its reason.
   Snapshots are slice 3.
 - `explain` names every differing key component. Slice 3a does, from the
-  history and snapshots (`test/cli/model-eval.t`); naming the callee inside a
-  changed entry is slice 3b.
+  history and snapshots, and slice 3b names the callees that changed inside a
+  changed entry or term argument (`test/cli/model-eval.t`).
