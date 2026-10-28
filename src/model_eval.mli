@@ -54,12 +54,12 @@ val evaluate :
   evaluated list * Diag.t list
 (** [evaluate ~ctx ~allows ~seed ~cache ~out prepared] evaluates every result in document order and
     returns them with cache warnings. [ctx] must be a session over [prepared]'s store. Without
-    [allows] no root handler is installed; a result whose entry needs a grant is [Refused] with the
-    checker's E0814 diagnostics. With [allows] the named grants are installed for every result
-    (seeded with [seed], printing through [out]) and nothing is read from or written to the cache.
-    [cache], when present, is the cache directory: a stored outcome whose record matches is served;
-    a corrupt or foreign file is ignored with W1800 and replaced; a failed write is W1801 and leaves
-    the result [Uncacheable "write-failed"]. Files are created owner-only and written atomically. *)
+    [allows] no root handler is installed; a result whose entry needs a grant is [Refused] with
+    E1806. With [allows] the named grants are installed for every result (seeded with [seed],
+    printing through [out]) and nothing is read from or written to the cache. [cache], when present,
+    is the cache directory: a stored outcome whose record matches is served; a corrupt or foreign
+    file is ignored with W1800 and replaced; a failed write is W1801 and leaves the result
+    [Uncacheable "write-failed"]. Files are created owner-only and written atomically. *)
 
 val render_text : evaluated -> string list
 (** The human rendering: a [NAME: STATUS] line, then indented outcome lines. *)

@@ -183,7 +183,9 @@ tagged outcome:
 | `failure code=C` | a deterministic runtime failure (including `unhandled`) | yes |
 | `incomplete bound=fuel` | the budget ran out, during evaluation or projection (E0919) | **no**: fuel incompleteness is not a verdict (computation-fuel §5) |
 
-Host JSON carries the same tags.
+Host JSON carries the same tags. §3.3a gives the exact implemented encoding,
+which writes inference outcomes as `posterior` (with its entries) or
+`inference <failure>`.
 
 A result's outcome is cached only when it is fully replayable:
 
@@ -239,7 +241,10 @@ reader accepts only canonical bytes holding a cacheable outcome.
 - Each result is printed as `NAME: fresh|cached|uncacheable (REASON)|refused`
   with its outcome. Reasons are `fuel`, `result-excluded` (the policy ignores
   the result), the opaque kind of an unsupported field (`closure`, `secret`,
-  ...), `truncated`, `root-grants`, `no-cache` and `write-failed`. The value is
+  ...), `truncated`, `missing`, `failure`, `root-grants`, `no-cache` and
+  `write-failed`; a field whose projection ran out of fuel reports `fuel`. A
+  `Secret` can only come from a root grant, so a result holding one is never
+  cached twice over. The value is
   the data-v1 rendering, the same text whether fresh or cached.
 - A result whose entry needs a root grant that was not given is refused
   (E1806) without running. `--allow` installs the named grants for every
@@ -247,15 +252,20 @@ reader accepts only canonical bytes holding a cacheable outcome.
   whole document.
 - Only the policy's result rule applies: no operation is observed, because no
   root handler runs.
-- `--json` prints one `jacquard-model-eval-v1` object: per result its name,
-  key, status, reason or refusal diagnostics, and typed outcome.
+- `--json` prints one `jacquard-model-eval-v1` object on stdout: per result its
+  name, key, status, reason or refusal diagnostics, and typed outcome. Output
+  the program prints under `--allow console` then goes to stderr.
+- The key names the Core release (`core 0.3.0`). A development build that
+  changes evaluation without a version change can serve outcomes an earlier
+  build stored; clear the cache, or use `--no-cache`, when working on the
+  evaluator itself.
 - The exit status is 3 when a result is refused, else 2 when a result failed,
   was impossible, exhausted or numerically failed, or ran out of fuel, else 0.
   A document error exits 1 before anything runs.
 
 ### 3.4 Evaluation and invalidation
 
-`jacquard model eval DOC [--cache DIR] [--format json]`:
+`jacquard model eval DOC [--cache DIR] [--json]`:
 
 1. checks the source once (RF.1), reads every input once, and computes every
    result's dependency record and key;

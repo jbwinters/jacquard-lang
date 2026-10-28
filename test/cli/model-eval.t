@@ -197,3 +197,23 @@ Document errors are reported before anything runs.
     Cause: line 3: result r: "base" is not an assumption, an input, or an exported term
     Next step: Declare the name, rename the clashing declaration, or export the term from the source.
   [1]
+
+With `--json`, output the program prints goes to stderr, so stdout holds only
+the JSON object.
+
+  $ jacquard model eval world.model --cache w3 --allow console --json > allow.json 2> allow.err; echo "exit=$?"
+  exit=0
+  $ cat allow.err
+  bye
+  $ head -c 34 allow.json; echo
+  {"format":"jacquard-model-eval-v1"
+
+A file that is not a regular file is refused without blocking.
+
+  $ mkfifo pipe.txt
+  $ sed 's/note.txt/pipe.txt/' world.model > fifo.model
+  $ timeout 10 jacquard model eval fifo.model
+  error[E1804]: A file the model document names cannot be used.
+    Cause: input note (line 3) ./pipe.txt cannot be read: not a regular file
+    Next step: Check that the file exists, is a regular file within the size limit, and is valid.
+  [1]

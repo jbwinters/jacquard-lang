@@ -91,7 +91,8 @@ let parse bytes =
         | None -> fail "truncated line"
       in
       let take k =
-        if k < 0 || !pos + k + 1 > n || bytes.[!pos + k] <> '\n' then fail "bad payload length"
+        (* compare against what remains, so a huge declared length cannot overflow *)
+        if k < 0 || k >= n - !pos || bytes.[!pos + k] <> '\n' then fail "bad payload length"
         else
           let s = String.sub bytes !pos k in
           pos := !pos + k + 1;
@@ -220,7 +221,9 @@ let run_one ~ctx ~allows ~seed ~out ~policy (r : Model_doc.resolved) =
         Some (Observation_transcript.field_of_value policy (Observation.of_value v))
   in
   let classify ~sampled = function
-    | Error ds -> if is_fuel ds then Incomplete else Failure (code_of (List.hd ds))
+    | Error ds -> (
+        if is_fuel ds then Incomplete
+        else match ds with d :: _ -> Failure (code_of d) | [] -> Failure "uncoded")
     | Ok { Infer_dist.result; metadata } -> (
         let explored = metadata.Infer_dist.explored in
         match result with
@@ -280,14 +283,10 @@ let run_one ~ctx ~allows ~seed ~out ~policy (r : Model_doc.resolved) =
 let max_cache_file = 64 * 1024 * 1024
 
 let read_cache path =
-  match Unix.stat path with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> `Absent
-  | { Unix.st_kind = Unix.S_REG; st_size; _ } when st_size <= max_cache_file -> (
-      match In_channel.with_open_bin path In_channel.input_all with
-      | bytes -> `Bytes bytes
-      | exception Sys_error reason -> `Unreadable reason)
-  | _ -> `Unreadable "not a regular file within the size limit"
-  | exception Unix.Unix_error (e, _, _) -> `Unreadable (Unix.error_message e)
+  match Model_doc.read_bounded ~limit:max_cache_file path with
+  | Ok bytes -> `Bytes bytes
+  | Error `Absent -> `Absent
+  | Error (`Unreadable reason) -> `Unreadable reason
 
 let rec make_dirs dir =
   if not (Sys.file_exists dir) then (

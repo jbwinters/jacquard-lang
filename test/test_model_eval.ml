@@ -73,6 +73,9 @@ let test_strict_parse () =
   refused "noncanonical probability" (replace "p=0.69999999999999996" "p=0.7");
   refused "payload length" (replace "data bytes=8" "data bytes=9");
   refused "no outcome" (Model_doc.serialize_dependency dependency);
+  refused "an overflowing payload length"
+    (E.serialize dependency (E.Value (Some (T.Data "x")))
+    |> Str.global_replace (Str.regexp_string "data bytes=1") "data bytes=4611686018427387903");
   refused "foreign record" ("x" ^ bytes)
 
 let suite =

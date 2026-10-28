@@ -4358,7 +4358,9 @@ let model_eval_cmd file prelude allows seed cache no_cache json =
       | Error ds -> print_diags ds
       | Ok (_, ctx) ->
           let results, warnings =
-            Model_eval.evaluate ~ctx ~allows ~seed ~cache ~out:print_string prepared
+            Model_eval.evaluate ~ctx ~allows ~seed ~cache
+              ~out:(if json then prerr_string else print_string)
+              prepared
           in
           print_warnings warnings;
           if json then print_endline (Model_eval.to_json results)

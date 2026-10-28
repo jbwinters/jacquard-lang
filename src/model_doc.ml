@@ -428,37 +428,40 @@ type prepared = {
   resolved : resolved list;
 }
 
-(* one descriptor: fstat it, then read at most the limit plus one byte, so a file that changes
-   while it is read is judged by what was actually read *)
-let read_regular ~what path =
-  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0 with
-  | exception Unix.Unix_error (e, _, _) ->
-      refuse ~code:"E1804" "%s %s cannot be read: %s" what path (Unix.error_message e)
+(* one descriptor, opened without blocking (a FIFO must not hang the read): fstat it, then read
+   at most the limit plus one byte, so a file that changes while it is read is judged by what was
+   actually read *)
+let read_bounded ~limit path =
+  let unreadable e = Error (`Unreadable (Unix.error_message e)) in
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error `Absent
+  | exception Unix.Unix_error (e, _, _) -> unreadable e
   | fd ->
       Fun.protect
         ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
         (fun () ->
           match Unix.fstat fd with
-          | exception Unix.Unix_error (e, _, _) ->
-              refuse ~code:"E1804" "%s %s cannot be read: %s" what path (Unix.error_message e)
+          | exception Unix.Unix_error (e, _, _) -> unreadable e
           | { Unix.st_kind = Unix.S_REG; _ } -> (
               let buf = Buffer.create 4096 and chunk = Bytes.create 65536 in
               let rec go () =
-                if Buffer.length buf > max_input_bytes then `Too_large
+                if Buffer.length buf > limit then
+                  Error (`Unreadable (Printf.sprintf "larger than %d bytes" limit))
                 else
                   match Unix.read fd chunk 0 (Bytes.length chunk) with
-                  | 0 -> `Done
+                  | 0 -> Ok (Buffer.contents buf)
                   | n ->
                       Buffer.add_subbytes buf chunk 0 n;
                       go ()
               in
-              match go () with
-              | `Done -> Ok (Buffer.contents buf)
-              | `Too_large ->
-                  refuse ~code:"E1804" "%s %s is larger than %d bytes" what path max_input_bytes
-              | exception Unix.Unix_error (e, _, _) ->
-                  refuse ~code:"E1804" "%s %s cannot be read: %s" what path (Unix.error_message e))
-          | _ -> refuse ~code:"E1804" "%s %s is not a regular file" what path)
+              try go () with Unix.Unix_error (e, _, _) -> unreadable e)
+          | _ -> Error (`Unreadable "not a regular file"))
+
+let read_regular ~what path =
+  match read_bounded ~limit:max_input_bytes path with
+  | Ok bytes -> Ok bytes
+  | Error `Absent -> refuse ~code:"E1804" "%s %s does not exist" what path
+  | Error (`Unreadable reason) -> refuse ~code:"E1804" "%s %s cannot be read: %s" what path reason
 
 let read file =
   let* text = read_regular ~what:"model document" file in
