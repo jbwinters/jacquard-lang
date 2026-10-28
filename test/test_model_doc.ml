@@ -3,6 +3,14 @@ module M = Model_doc
 
 let prelude_dir = "../prelude"
 
+let rec remove_tree path =
+  match (Unix.lstat path).Unix.st_kind with
+  | Unix.S_DIR ->
+      Array.iter (fun n -> remove_tree (Filename.concat path n)) (Sys.readdir path);
+      Unix.rmdir path
+  | _ -> Unix.unlink path
+  | exception Unix.Unix_error _ -> ()
+
 let fresh_dir =
   let serial = ref 0 in
   fun label ->
@@ -12,6 +20,7 @@ let fresh_dir =
         (Printf.sprintf "jacquard-model-%s-%d-%d" label (Unix.getpid ()) !serial)
     in
     Unix.mkdir dir 0o700;
+    at_exit (fun () -> remove_tree dir);
     dir
 
 let write dir name contents =
@@ -125,6 +134,7 @@ let test_parse_refusals () =
     (replace "driver run fuel=1000\nresult shifted" "driver gibbs fuel=1000\nresult shifted");
   refused "carriage return" "E1800" (replace "\n" "\r\n");
   refused "bad name" "E1800" (replace "assumption base" "assumption Base");
+  refused "absolute path" "E1800" (replace "source m.jac" "source /etc/m.jac");
   refused "no results" "E1800" "jacquard-model format=1\nsource m.jac\nassumption a = 1\n"
 
 let sample_dependency =
@@ -164,6 +174,20 @@ let test_dependency_record () =
        (Hash.to_hex (Hash.of_string "a"))
        (String.uppercase_ascii (Hash.to_hex (Hash.of_string "a"))));
   refused "other driver version" (replace "model-driver-v1" "model-driver-v2");
+  let labels l = M.key { sample_dependency with M.labels = l } in
+  Alcotest.(check bool)
+    "a label named positional is not positional" false
+    (Hash.equal (labels None) (labels (Some [ Some "positional" ])));
+  Alcotest.(check bool)
+    "a positional slot is not positional-only" false
+    (Hash.equal (labels None) (labels (Some [ None ])));
+  List.iter
+    (fun l ->
+      let b = M.serialize_dependency { sample_dependency with M.labels = l } in
+      match M.parse_dependency b with
+      | Ok d -> Alcotest.(check string) "labels round trip" b (M.serialize_dependency d)
+      | Error m -> Alcotest.failf "labels: %s" m)
+    [ None; Some []; Some [ Some "positional"; None ] ];
   let k = M.key sample_dependency in
   Alcotest.(check bool)
     "fuel enters the key" false
@@ -214,6 +238,10 @@ let test_invalidation () =
     (keys (prepared ~src:(replace "add(x, 1)" "add(x, 5)" source) "inv-other"));
   changed "a helper scale and apply reach" [ "scaled"; "applied" ]
     (keys (prepared ~src:(replace "add(x, 2)" "add(x, 7)" source) "inv-helper"));
+  changed "the entry's call labels only" [ "scaled" ]
+    (keys (prepared ~src:(replace "scale(n, k)" "scale(n, by: k)" source) "inv-labels"));
+  changed "argument order" [ "scaled" ]
+    (keys (prepared ~doc:(replace "args base,step" "args step,base" document) "inv-order"));
   changed "an unrelated new definition" []
     (keys (prepared ~src:(source ^ "unused(x) = x\n") "inv-unrelated"));
   changed "the input" [ "echoed"; "greeted" ]
@@ -252,6 +280,26 @@ let test_refusals () =
     ();
   refused "a computed assumption" "E1803" ~cause:"computes"
     ~doc:(replace "step = 4" "step = add(1, 3)")
+    ();
+  refused "an exponent literal is a name" "E1802" ~doc:(replace "helper,5" "helper,5e2") ();
+  refused "an unapplied constructor with fields" "E1803" ~cause:"computes"
+    ~doc:(replace "step = 4" "step = Some")
+    ();
+  refused "a result named like an exported term" "E1802"
+    ~doc:(replace "result echoed entry echo" "result echo entry echo")
+    ();
+  let pinned =
+    match
+      Observation_policy.make ~result:Observation_policy.Compare ~field_bytes:64 ~unlisted:None
+        ~interface:(Some (Hash.of_string "another interface"))
+        []
+    with
+    | Ok p -> Observation_policy.serialize p
+    | Error _ -> Alcotest.fail "policy"
+  in
+  refused "a policy pinned to another interface" "E1804"
+    ~files:[ ("p.policy", pinned) ]
+    ~doc:(replace "source m.jac" "source m.jac\npolicy p.policy")
     ();
   refused "an assumption that does not parse" "E1803" ~doc:(replace "step = 4" "step = (") ();
   refused "a sealed constructor" "E1803" ~cause:"sealed constructor"

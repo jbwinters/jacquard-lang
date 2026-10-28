@@ -44,6 +44,13 @@ val parse : file:string -> string -> (t, Diag.t list) result
     and canonical numbers. Blank lines and lines starting with [#] are ignored. Refused with E1800
     (malformed) or E1801 (a repeated name). *)
 
+val read_bounded : limit:int -> string -> (string, [ `Absent | `Unreadable of string ]) result
+(** [read_bounded ~limit path] reads a regular file through one descriptor opened without blocking,
+    refusing a missing file, any other kind of file, and more than [limit] bytes. *)
+
+val read : string -> (t, Diag.t list) result
+(** [read file] reads a regular file (E1804 when it cannot be read) and {!parse}s it. *)
+
 (** {1 Dependency records} *)
 
 type argument_identity =

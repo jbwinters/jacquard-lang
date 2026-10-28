@@ -79,7 +79,7 @@ let valid_name s =
 (* a term name or a path: one token, no comma *)
 let valid_token s = s <> "" && all (fun c -> c > ' ' && c <> ',' && c <> '\x7f') s
 
-(* -?D+(.D+)?([eE][-+]?D+)? *)
+(* -?D+(.D+)?, the surface lexer's numeric literals *)
 let numeric s =
   let n = String.length s in
   let digits i =
@@ -92,18 +92,9 @@ let numeric s =
   let start = if n > 0 && s.[0] = '-' then 1 else 0 in
   match digits start with
   | None -> false
-  | Some i -> (
-      let i =
-        if i < n && s.[i] = '.' then match digits (i + 1) with Some j -> Some j | None -> None
-        else Some i
-      in
-      match i with
-      | None -> false
-      | Some i when i = n -> true
-      | Some i when s.[i] = 'e' || s.[i] = 'E' -> (
-          let k = if i + 1 < n && (s.[i + 1] = '-' || s.[i + 1] = '+') then i + 2 else i + 1 in
-          match digits k with Some j -> j = n | None -> false)
-      | Some _ -> false)
+  | Some i when i = n -> true
+  | Some i when s.[i] = '.' -> digits (i + 1) = Some n
+  | Some _ -> false
 
 let words line = List.filter (fun w -> w <> "") (String.split_on_char ' ' line)
 
@@ -206,6 +197,10 @@ let parse ~file text =
           | l :: rest -> (
               let next doc = go doc (line + 1) rest in
               match words l with
+              | ([ ("source" | "policy" | "input"); _ ] | [ "input"; _; _; _ ])
+                when List.exists (fun w -> not (Filename.is_relative w)) (List.tl (words l)) ->
+                  refuse ~code:"E1800" "line %d: paths are relative to the document's directory"
+                    line
               | [ "source"; path ] when valid_token path ->
                   if doc.source <> "" then refuse ~code:"E1800" "line %d: a second source line" line
                   else next { doc with source = path }
@@ -257,9 +252,11 @@ type dependency = {
 let record_header = "jacquard-model-dependency format=1"
 let hex = Hash.to_hex
 
+(* [positional], or a bracketed slot list: [+label] names a slot, [-] leaves it positional *)
 let labels_text = function
   | None -> "positional"
-  | Some slots -> String.concat "," (List.map (function Some l -> l | None -> "_") slots)
+  | Some slots ->
+      "[" ^ String.concat "," (List.map (function Some l -> "+" ^ l | None -> "-") slots) ^ "]"
 
 let driver_text fuel = function
   | Run -> Printf.sprintf "driver run fuel=%d" fuel
@@ -298,11 +295,23 @@ let parse_dependency bytes =
   let token s = s <> "" && String.for_all (fun c -> c > ' ' && c < '\x7f') s in
   let parse_labels = function
     | "positional" -> Ok None
-    | s ->
-        let slots = String.split_on_char ',' s in
-        if List.for_all (fun l -> l <> "" && token l) slots then
-          Ok (Some (List.map (function "_" -> None | l -> Some l) slots))
-        else fail "bad labels %S" s
+    | "[]" -> Ok (Some [])
+    | s when String.length s >= 2 && s.[0] = '[' && s.[String.length s - 1] = ']' ->
+        let slots = String.split_on_char ',' (String.sub s 1 (String.length s - 2)) in
+        let slot = function
+          | "-" -> Ok None
+          | l when String.length l > 1 && l.[0] = '+' && token l ->
+              Ok (Some (String.sub l 1 (String.length l - 1)))
+          | _ -> fail "bad labels %S" s
+        in
+        List.fold_right
+          (fun l acc ->
+            let* acc = acc in
+            let* v = slot l in
+            Ok (v :: acc))
+          slots (Ok [])
+        |> Result.map Option.some
+    | s -> fail "bad labels %S" s
   in
   let parse_argument i line =
     match words line with
@@ -419,34 +428,59 @@ type prepared = {
   resolved : resolved list;
 }
 
-let read_limited ~what path =
-  match
-    In_channel.with_open_bin path (fun ic ->
-        let length = In_channel.length ic in
-        if Int64.compare length (Int64.of_int max_input_bytes) > 0 then Error `Too_large
-        else Ok (really_input_string ic (Int64.to_int length)))
-  with
-  | Ok bytes -> Ok bytes
-  | Error `Too_large ->
-      refuse ~code:"E1804" "%s %s is larger than %d bytes" what path max_input_bytes
-  | exception Sys_error reason -> refuse ~code:"E1804" "%s cannot be read: %s" what reason
+(* one descriptor, opened without blocking (a FIFO must not hang the read): fstat it, then read
+   at most the limit plus one byte, so a file that changes while it is read is judged by what was
+   actually read *)
+let read_bounded ~limit path =
+  let unreadable e = Error (`Unreadable (Unix.error_message e)) in
+  match Unix.openfile path [ Unix.O_RDONLY; Unix.O_NONBLOCK; Unix.O_CLOEXEC ] 0 with
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Error `Absent
+  | exception Unix.Unix_error (e, _, _) -> unreadable e
+  | fd ->
+      Fun.protect
+        ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+        (fun () ->
+          match Unix.fstat fd with
+          | exception Unix.Unix_error (e, _, _) -> unreadable e
+          | { Unix.st_kind = Unix.S_REG; _ } -> (
+              let buf = Buffer.create 4096 and chunk = Bytes.create 65536 in
+              let rec go () =
+                if Buffer.length buf > limit then
+                  Error (`Unreadable (Printf.sprintf "larger than %d bytes" limit))
+                else
+                  match Unix.read fd chunk 0 (Bytes.length chunk) with
+                  | 0 -> Ok (Buffer.contents buf)
+                  | n ->
+                      Buffer.add_subbytes buf chunk 0 n;
+                      go ()
+              in
+              try go () with Unix.Unix_error (e, _, _) -> unreadable e)
+          | _ -> Error (`Unreadable "not a regular file"))
 
 let read_regular ~what path =
-  match Unix.stat path with
-  | { Unix.st_kind = Unix.S_REG; _ } -> read_limited ~what path
-  | _ -> refuse ~code:"E1804" "%s %s is not a regular file" what path
-  | exception Unix.Unix_error (e, _, _) ->
-      refuse ~code:"E1804" "%s %s cannot be read: %s" what path (Unix.error_message e)
+  match read_bounded ~limit:max_input_bytes path with
+  | Ok bytes -> Ok bytes
+  | Error `Absent -> refuse ~code:"E1804" "%s %s does not exist" what path
+  | Error (`Unreadable reason) -> refuse ~code:"E1804" "%s %s cannot be read: %s" what path reason
+
+let read file =
+  let* text = read_regular ~what:"model document" file in
+  parse ~file text
 
 let node it = { Kernel.it; meta = Meta.empty }
 
 (* closed literal data: literals, constructors, constructor applications and tuples over them *)
-let rec literal_data (e : Kernel.expr) =
+let rec literal_data ~checker (e : Kernel.expr) =
   match e.Kernel.it with
-  | Kernel.Lit _ | Kernel.Ref (_, Kernel.Con) -> true
+  | Kernel.Lit _ -> true
+  | Kernel.Ref (con, Kernel.Con) -> (
+      (* a constructor with fields, unapplied, is a function value *)
+      match Check.force_constructor checker con with
+      | Ok scheme -> ( match Types.repr scheme.Types.ty with Types.TArrow _ -> false | _ -> true)
+      | Error _ -> false)
   | Kernel.App ({ Kernel.it = Kernel.Ref (_, Kernel.Con); _ }, args) | Kernel.Tuple args ->
-      List.for_all literal_data args
-  | Kernel.Ann (e, _) -> literal_data e
+      List.for_all (literal_data ~checker) args
+  | Kernel.Ann (e, _) -> literal_data ~checker e
   | _ -> false
 
 let resolve_assumption ~store ~checker ~line ~what text =
@@ -474,7 +508,7 @@ let resolve_assumption ~store ~checker ~line ~what text =
                   refuse ~code:"E1803"
                     "line %d: %s uses `%s`, a sealed constructor of the opaque type `%s`" line what
                     con_name type_name
-              | [] when not (literal_data e) ->
+              | [] when not (literal_data ~checker e) ->
                   refuse ~code:"E1803"
                     "line %d: %s computes; only literals and constructors applied to them are \
                      allowed"
@@ -531,12 +565,20 @@ let prepare ~prelude_dir ~root ~file doc =
   let exported name = Interface.find interface name Resolve.KTerm in
   let* () =
     match
-      List.find_opt (fun (name, _, _) -> exported name <> None) (doc.assumptions @ doc.inputs)
+      List.find_opt
+        (fun (name, _, _) -> exported name <> None)
+        (doc.assumptions @ doc.inputs
+        @ List.map (fun (r : result_decl) -> (r.r_name, "", r.r_line)) doc.results)
     with
     | Some (name, _, line) ->
         refuse ~code:"E1802" "line %d: %S is both declared here and an exported term of the source"
           line name
     | None -> Ok ()
+  in
+  let* () =
+    match Observation_policy.check_interface policy ~identity:(Interface.identity interface) with
+    | Ok () -> Ok ()
+    | Error ds -> Error (diagnostic ~code:"E1804" "the policy is pinned to another interface" :: ds)
   in
   let* assumptions =
     List.fold_left

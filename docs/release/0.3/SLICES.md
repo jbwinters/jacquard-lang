@@ -864,3 +864,21 @@ record with its domain-separated key. Refusals are E1800-E1805. No command uses
 it yet; `jacquard model eval` and `explain` follow. `test_model_doc.ml` adds six
 cases, including key-level invalidation for each dependency axis. The source
 inventory is now `1209 / 80 / 56`.
+
+MODEL.1 slice 2 adds `jacquard model eval DOC` (`src/model_eval.ml`,
+`docs/designs/model-dependencies.md` §3.3a). Each result runs as one
+invocation under its driver and fuel budget with no root handler, and its
+outcome is projected under the document's policy inside that budget. A fully
+replayable outcome is stored as `model-result-v1` under its dependency key,
+owner-only and atomically, in `.jacquard/model-cache/`, and is served while the
+key is unchanged. Fuel-bound, opaque, truncated, excluded and granted results
+are shown with their reason and never stored; an entry that needs a root grant
+is refused (E1806) unless `--allow` is given, which disables the cache. Corrupt
+cache files are ignored and replaced (W1800). The slice also tightens the
+slice 1 format: an injective call-label encoding, relative paths only, no
+unapplied constructors with fields in assumptions, result names checked
+against exported terms, the policy's interface pin, and single-descriptor
+bounded file reads. `model-eval.t` pins fresh and cached runs, byte equality
+with a fresh cache, per-axis invalidation, corruption, the refusal set,
+`--allow`, `--no-cache` and JSON; `test_model_eval.ml` adds three cases. The
+source inventory is now `1212 / 81 / 56`.
