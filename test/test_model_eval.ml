@@ -130,6 +130,17 @@ let test_history_round_trip () =
   | Ok _ -> Alcotest.fail "expected two records"
   | Error m -> Alcotest.failf "parse failed: %s" m
 
+(* a record written before closure manifests existed has no entry-closure line, and still parses *)
+let test_history_without_closure () =
+  let old = { record with Model_history.entry_closure = None } in
+  let bytes = frame old in
+  Alcotest.(check bool)
+    "no entry-closure line" false
+    (Str.string_match (Str.regexp ".*entry-closure") bytes 0);
+  match Model_history.parse_history bytes with
+  | Ok [ r ] -> Alcotest.(check string) "round trip" bytes (frame r)
+  | _ -> Alcotest.fail "a record without a closure did not parse"
+
 let test_history_strict () =
   let bytes = frame record in
   let refused label input =
@@ -181,6 +192,7 @@ let suite =
   [
     Alcotest.test_case "model history round trip" `Quick test_history_round_trip;
     Alcotest.test_case "model history strict parse" `Quick test_history_strict;
+    Alcotest.test_case "model history without closures" `Quick test_history_without_closure;
     Alcotest.test_case "model-result round trip" `Quick test_round_trip;
     Alcotest.test_case "model-result refuses uncacheable outcomes" `Quick test_uncacheable;
     Alcotest.test_case "model-result strict parse" `Quick test_strict_parse;

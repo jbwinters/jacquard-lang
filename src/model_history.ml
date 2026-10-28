@@ -36,7 +36,8 @@ let serialize_record r =
   line "%s" header;
   line "time %s" r.time;
   line "entry-name %s" r.entry_name;
-  line "entry-closure %s" (opt_hex r.entry_closure);
+  (* records written before closures existed have no entry-closure line, and still parse *)
+  Option.iter (fun h -> line "entry-closure %s" (hex h)) r.entry_closure;
   line "key %s" (hex r.key);
   line "previous %s" (opt_hex r.previous);
   line "outcome %s" r.outcome;
@@ -64,13 +65,23 @@ let parse_record bytes =
       Ok (String.sub l (String.length prefix) (String.length l - String.length prefix))
     else fail "expected %S" prefix
   in
+  let closure, lines =
+    match lines with
+    | h :: t :: e :: c :: rest when String.starts_with ~prefix:"entry-closure " c ->
+        (Some c, h :: t :: e :: rest)
+    | _ -> (None, lines)
+  in
   match lines with
-  | h :: time :: entry :: closure :: key :: previous :: outcome :: provenance :: policy :: count
-    :: rest
+  | h :: time :: entry :: key :: previous :: outcome :: provenance :: policy :: count :: rest
     when h = header ->
       let* time = after "time " time in
       let* entry_name = after "entry-name " entry in
-      let* entry_closure = Result.bind (after "entry-closure " closure) opt in
+      let* entry_closure =
+        match closure with
+        | None -> Ok None
+        | Some c ->
+            Result.bind (after "entry-closure " c) (fun s -> Result.map Option.some (hash s))
+      in
       let* key = Result.bind (after "key " key) hash in
       let* previous = Result.bind (after "previous " previous) opt in
       let* outcome = after "outcome " outcome in
@@ -226,53 +237,68 @@ let with_lock path f =
           | exception Unix.Unix_error (e, _, _) -> Error (Unix.error_message e)
           | () -> f ())
 
-(* the closure manifest of a term: every declaration it reaches, each with the names bound to it
-   and a snapshot of its stored bytes, sorted; and the bodies to retain *)
+let kind_text = function
+  | Resolve.KTerm -> "term"
+  | Resolve.KCon -> "con"
+  | Resolve.KOp -> "op"
+  | Resolve.KType -> "type"
+  | Resolve.KEffect -> "effect"
+
+(* the closure manifest of a term: every declaration it reaches, one line per (name, kind) bound
+   to a member of it, or one unnamed line, each with a snapshot of its stored bytes ("none" when
+   they cannot be read), sorted; and the bodies to retain *)
 let closure ~(store : Store.t) root =
-  let names = Hashtbl.create 64 in
+  let owner = Hashtbl.create 256 in
+  List.iter (fun (h, (d, _)) -> Hashtbl.replace owner (hex h) d) store.Store.index;
+  let names = Hashtbl.create 256 in
   List.iter
     (fun (name, (e : Resolve.entry)) ->
-      match Store.locate_internal store e.Resolve.hash with
-      | Ok l -> Hashtbl.add names (hex l.Store.decl_hash) name
-      | Error _ -> ())
+      match Hashtbl.find_opt owner (hex e.Resolve.hash) with
+      | Some d -> Hashtbl.add names (hex d) (name, kind_text e.Resolve.kind)
+      | None -> ())
     (Store.names store);
   let seen = Hashtbl.create 64 in
   let rec visit acc h =
-    match Store.locate_internal store h with
-    | Error _ -> acc
-    | Ok l ->
-        let d = hex l.Store.decl_hash in
-        if Hashtbl.mem seen d then acc
-        else (
-          Hashtbl.add seen d ();
-          List.fold_left visit (l.Store.decl_hash :: acc) (Store.decl_refs l.Store.decl))
+    let d = match Hashtbl.find_opt owner (hex h) with Some d -> hex d | None -> hex h in
+    if Hashtbl.mem seen d then acc
+    else (
+      Hashtbl.add seen d ();
+      match Store.locate_internal store h with
+      | Error _ -> acc
+      | Ok l -> List.fold_left visit (l.Store.decl_hash :: acc) (Store.decl_refs l.Store.decl))
   in
+  let decls = visit [] root in
   let bodies =
-    List.filter_map
+    List.map
       (fun d ->
         match Model_doc.read_bounded ~limit:(16 * 1024 * 1024) (Store.object_path store d) with
-        | Ok body -> Some (d, body)
-        | Error _ -> None)
-      (visit [] root)
+        | Ok body -> (d, Some body)
+        | Error _ -> (d, None))
+      decls
   in
   let lines =
     List.concat_map
       (fun (d, body) ->
-        List.map
-          (fun n -> Printf.sprintf "%s %s %s" n (hex d) (hex (Hash.of_string body)))
-          (Hashtbl.find_all names (hex d)))
+        let b = match body with Some b -> hex (Hash.of_string b) | None -> "none" in
+        match Hashtbl.find_all names (hex d) with
+        | [] -> [ Printf.sprintf "- - %s %s" (hex d) b ]
+        | ns -> List.map (fun (n, k) -> Printf.sprintf "%s %s %s %s" n k (hex d) b) ns)
       bodies
     |> List.sort_uniq compare
   in
   ( "jacquard-model-closure format=1\n" ^ String.concat "" (List.map (fun l -> l ^ "\n") lines),
-    List.map snd bodies )
+    List.filter_map snd bodies )
 
+(* ((name, kind), decl, body) per line; unnamed lines have name "-" *)
 let parse_closure text =
   match String.split_on_char '\n' text with
   | "jacquard-model-closure format=1" :: rest ->
       Some
         (List.filter_map
-           (fun l -> match String.split_on_char ' ' l with [ n; d; _ ] -> Some (n, d) | _ -> None)
+           (fun l ->
+             match String.split_on_char ' ' l with
+             | [ n; k; d; b ] -> Some ((n, k), d, b)
+             | _ -> None)
            rest)
   | _ -> None
 
@@ -465,17 +491,28 @@ let differences old_ now_ =
     in
     match (manifest old_ old_c, manifest now_ new_c) with
     | Some o, Some n ->
-        let names = List.sort_uniq compare (List.map fst o @ List.map fst n) in
+        let named m = List.filter (fun ((name, _), _, _) -> name <> "-") m in
+        let o = named o and n = named n in
+        (* the root's own declaration, with its group siblings, is the change itself *)
+        let root_decls =
+          List.filter_map (fun ((name, _), d, _) -> if name = root then Some d else None) (o @ n)
+        in
+        let decls m key =
+          List.sort_uniq compare
+            (List.filter_map (fun (k, d, _) -> if k = key then Some d else None) m)
+        in
+        let keys = List.sort_uniq compare (List.map (fun (k, _, _) -> k) (o @ n)) in
         List.filter_map
-          (fun name ->
-            if name = root then None
+          (fun ((name, _) as key) ->
+            let a = decls o key and b = decls n key in
+            if List.exists (fun d -> List.mem d root_decls) (a @ b) then None
             else
-              match (List.assoc_opt name o, List.assoc_opt name n) with
-              | Some a, Some b when a <> b -> Some (change ~subject:name "callee")
-              | None, Some _ -> Some (change ~subject:name ~after:"added" "callee")
-              | Some _, None -> Some (change ~subject:name ~after:"removed" "callee")
+              match (a, b) with
+              | [], _ :: _ -> Some (change ~subject:name ~after:"added" "callee")
+              | _ :: _, [] -> Some (change ~subject:name ~after:"removed" "callee")
+              | a, b when a <> b -> Some (change ~subject:name "callee")
               | _ -> None)
-          names
+          keys
     | _ -> []
   in
   let o = old_.dep and n = now_.dep in
@@ -648,14 +685,43 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                 }
             | None ->
                 (* a dependency whose snapshot is gone is never assumed current, and is always named *)
+                (* a manifest's retained bodies count as its snapshots *)
+                let bodies_gone what manifest =
+                  match Option.bind manifest parse_closure with
+                  | None -> []
+                  | Some lines ->
+                      if
+                        List.exists
+                          (fun (_, _, b) ->
+                            b = "none"
+                            ||
+                            match Hash.of_canonical_hex b with
+                            | Some h -> read_snapshot ~cache h = None
+                            | None -> true)
+                          lines
+                      then [ what ^ " declarations" ]
+                      else []
+                in
                 let gone_of (rc : record) =
-                  List.filter_map
+                  List.concat_map
                     (fun b ->
                       match b.snapshot with
-                      | Some h when read_snapshot ~cache h = None -> Some (b.kind ^ " " ^ b.name)
-                      | _ -> None)
+                      | Some h -> (
+                          match read_snapshot ~cache h with
+                          | None -> [ b.kind ^ " " ^ b.name ]
+                          | Some text when b.kind = "term" ->
+                              bodies_gone ("term " ^ b.name) (Some text)
+                          | Some _ -> [])
+                      | None -> [])
                     rc.bindings
-                  @ if read_snapshot ~cache rc.policy_snapshot = None then [ "policy" ] else []
+                  @ (if read_snapshot ~cache rc.policy_snapshot = None then [ "policy" ] else [])
+                  @
+                  match rc.entry_closure with
+                  | None -> []
+                  | Some h -> (
+                      match read_snapshot ~cache h with
+                      | None -> [ "entry " ^ rc.entry_name ]
+                      | Some text -> bodies_gone ("entry " ^ rc.entry_name) (Some text))
                 in
                 let gone = gone_of latest in
                 let freshness =

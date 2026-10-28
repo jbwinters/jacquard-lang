@@ -291,11 +291,11 @@ reported as such, and the next evaluation keeps every record before the damage.
   $ jacquard model eval doc.model > /dev/null
   $ rm .jacquard/model-cache/snapshots/*
   $ jacquard model explain doc.model scaled > u.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' u.out
-  scaled: unknown (snapshots gone: assumption base, inline 4, policy)
+  scaled: unknown (snapshots gone: assumption base, inline 4, policy, entry scale)
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
-      snapshots gone: assumption base, inline 4, policy
+      snapshots gone: assumption base, inline 4, policy, entry scale
 Evaluating again restores the snapshots, so the unchanged result is current.
 
   $ jacquard model eval doc.model > /dev/null
@@ -304,16 +304,17 @@ Evaluating again restores the snapshots, so the unchanged result is current.
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
+      snapshots gone: entry scale
   $ rm .jacquard/model-cache/snapshots/*
   $ sed -i 's/base = 5/base = 7/' doc.model
   $ jacquard model explain doc.model scaled > d.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' d.out
   scaled: stale (last evaluated TIME)
     assumption base: (unavailable) -> 7
-    snapshots gone: assumption base, inline 4, policy
+    snapshots gone: assumption base, inline 4, policy, entry scale
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
-      snapshots gone: assumption base, inline 4, policy
+      snapshots gone: assumption base, inline 4, policy, entry scale
   $ for h in .jacquard/model-cache/history/*/echoed; do echo junk >> "$h"; done
   $ jacquard model explain doc.model echoed
   echoed: history unavailable (bad frame)
@@ -419,3 +420,36 @@ unknown result names its missing snapshots once.
   $ jacquard model explain doc.model --json > u.json; grep -o '"freshness":"[a-z-]*"' u.json; grep -o '"missing"' u.json | wc -l
   "freshness":"unknown"
   2
+
+Callees are compared by name and kind, so a term and a type sharing a name
+are both followed; pruning one retained declaration body makes an unchanged
+result unknown, and the next evaluation restores it.
+
+  $ cd .. && mkdir kinds && cd kinds
+  $ cat > m.jac <<'JAC'
+  > type Wrap = W Int
+  > wrap(n) = add(n, 4)
+  > go(n) = match W(wrap(n)) { | W(x) -> x }
+  > JAC
+  $ printf 'jacquard-model format=1\nsource m.jac\nresult g entry go args 1 driver run fuel=10000\n' > doc.model
+  $ jacquard model eval doc.model
+  g: fresh
+    value 5
+  $ sed -i 's/add(n, 4)/add(n, 5)/' m.jac
+  $ jacquard model explain doc.model > k.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' k.out
+  g: stale (last evaluated TIME)
+    entry go changed
+    callee wrap changed
+  $ jacquard model eval doc.model > /dev/null
+  $ m=$(grep '^entry-closure ' .jacquard/model-cache/history/*/g | tail -1 | cut -d' ' -f2); body=$(grep '^wrap term ' ".jacquard/model-cache/snapshots/$m" | cut -d' ' -f4); rm ".jacquard/model-cache/snapshots/$body"
+  $ jacquard model explain doc.model > p.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' p.out
+  g: unknown (snapshots gone: entry go declarations)
+    last change (TIME):
+      entry go changed
+      callee wrap changed
+  $ jacquard model eval doc.model > /dev/null
+  $ jacquard model explain doc.model > r.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' r.out
+  g: current (evaluated TIME)
+    last change (TIME):
+      entry go changed
+      callee wrap changed

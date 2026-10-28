@@ -370,13 +370,22 @@ guessed. Host 13 consumes `--json` of both commands.
 - Slice 3b: each record also names the entry's **closure manifest**, and a
   term argument's snapshot is its closure manifest. A manifest
   (`jacquard-model-closure format=1`) lists, sorted, every declaration the
-  term reaches as `NAME DECL-HASH BODY-SNAPSHOT`, one line per name bound to
-  it, and each declaration's stored bytes are retained as a snapshot (decision
-  5). When the entry or a term argument changed, `explain` compares the two
-  manifests and lists `callee NAME changed`, `callee NAME added` or `callee
-  NAME removed` for every named declaration other than the root itself. Without
-  both manifests (a pruned snapshot, or a record from before 3b) only the
-  change itself is named.
+  term reaches as `NAME KIND DECL-HASH BODY-SNAPSHOT`: one line per (name,
+  kind) bound to a member of it, or one `- -` line when nothing names it. Each
+  declaration's stored bytes are retained as a snapshot (decision 5); a body
+  that cannot be read is written `none`. When the entry or a term argument
+  changed, `explain` compares the two manifests by (name, kind), so a term and a
+  type sharing a name are both followed, and lists `callee NAME changed`,
+  `callee NAME added` or `callee NAME removed` for every named declaration
+  except the root's own declaration and its group siblings. Without both
+  manifests (a pruned snapshot, or a record from before 3b, which has no
+  `entry-closure` line and still parses) only the change itself is named.
+- A missing manifest, or a manifest whose retained bodies are not all readable,
+  counts as a missing snapshot (`entry NAME`, `entry NAME declarations`, `term
+  NAME declarations`), so such a result with an unchanged key is `unknown`.
+  Every recorded evaluation rewrites the bodies, restoring them.
+- Owner decision (2026-10-28): naming the changed callees meets §3.5's
+  rendering; a `jac diff` of the retained bodies in `explain` is a follow-up.
 - `current (evaluated T)`, the JSON `outcome` and `previous` come from the
   first record under the latest key, so refresh records do not move them. The
   `after` side of a change renders the latest record's snapshot, which for a
