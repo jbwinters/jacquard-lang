@@ -71,6 +71,11 @@ type freshness =
 type explanation = {
   result : string;
   evaluated_at : string option;  (** the latest record's time *)
+  outcome : string option;  (** the latest record's status and outcome tag *)
+  previous : Hash.t option;  (** the latest record's predecessor key *)
+  missing : string list;
+      (** dependencies of the latest record whose snapshots are gone; always reported, and a result
+          with an unchanged key and missing snapshots is [Unknown] *)
   freshness : freshness;
   transition : (string * change list) option;
       (** the latest record against its predecessor: the latest record's time and its changes *)
@@ -78,8 +83,9 @@ type explanation = {
 
 val explain : cache:string -> document:Hash.t -> Model_doc.prepared -> explanation list
 (** [explain ~cache ~document prepared] compares each result's current dependency record, computed
-    without evaluating, with its latest record, and that record with its predecessor. An assumption
-    or input renders from its snapshots; a missing snapshot renders as ["(unavailable)"]. *)
+    without evaluating, with its latest record (policies by identity), and that record with its
+    predecessor. An assumption or input renders from its snapshots; a missing snapshot renders as
+    ["(unavailable)"]. *)
 
 val render_text : explanation -> string list
 

@@ -117,7 +117,8 @@ let parse_record bytes =
         let consistent (b : binding) (a : Model_doc.argument_identity) =
           match (b.kind, a) with
           | ("assumption" | "inline"), Model_doc.Assumption _ -> b.snapshot <> None
-          | "input", Model_doc.Input _ -> b.snapshot <> None
+          | "input", Model_doc.Input h -> (
+              match b.snapshot with Some s -> Hash.equal s h | None -> false)
           | "term", Model_doc.Term _ -> b.snapshot = None
           | _ -> false
         in
@@ -235,6 +236,42 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
         | records, None -> Ok (records, None)
         | records, Some (offset, reason) -> Ok (records, Some (String.sub bytes 0 offset, reason)))
   in
+  let other_format bytes =
+    let marker = "jacquard-model-history format=" in
+    let m = String.length marker and n = String.length bytes in
+    let rec scan i =
+      i + m <= n
+      && (String.sub bytes i m = marker
+          && not (i + m + 2 <= n && String.sub bytes (i + m) 2 = "1\n")
+         || scan (i + 1))
+    in
+    scan 0
+  in
+  let* () =
+    match damage with
+    | Some _
+      when match Model_doc.read_bounded ~limit:(64 * 1024 * 1024) path with
+           | Ok bytes -> other_format bytes
+           | Error _ -> false ->
+        Error "the history holds a record of another format; it was left untouched"
+    | _ -> Ok ()
+  in
+  (* snapshots are written, or repaired, on every evaluation, so pruning them never sticks *)
+  let* bindings =
+    List.fold_right
+      (fun (b : Model_doc.binding) acc ->
+        let* acc = acc in
+        let* snapshot =
+          match b.Model_doc.b_content with
+          | None -> Ok None
+          | Some c -> Result.map Option.some (write_snapshot ~cache c)
+        in
+        Ok ({ kind = b.Model_doc.b_kind; name = b.Model_doc.b_name; snapshot } :: acc))
+      r.Model_doc.bindings (Ok [])
+  in
+  let* policy_snapshot =
+    write_snapshot ~cache (Observation_policy.serialize prepared.Model_doc.policy)
+  in
   let note =
     Option.map
       (fun (_, reason) ->
@@ -250,21 +287,6 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
       | None -> Ok None
       | Some (kept, _) -> Result.map (fun () -> note) (Model_eval.write_atomic path kept))
   | _ -> (
-      let* bindings =
-        List.fold_right
-          (fun (b : Model_doc.binding) acc ->
-            let* acc = acc in
-            let* snapshot =
-              match b.Model_doc.b_content with
-              | None -> Ok None
-              | Some c -> Result.map Option.some (write_snapshot ~cache c)
-            in
-            Ok ({ kind = b.Model_doc.b_kind; name = b.Model_doc.b_name; snapshot } :: acc))
-          r.Model_doc.bindings (Ok [])
-      in
-      let* policy_snapshot =
-        write_snapshot ~cache (Observation_policy.serialize prepared.Model_doc.policy)
-      in
       let record =
         {
           time = now ();
@@ -304,6 +326,9 @@ type freshness =
 type explanation = {
   result : string;
   evaluated_at : string option;
+  outcome : string option;
+  previous : Hash.t option;
+  missing : string list;
   freshness : freshness;
   transition : (string * change list) option;
 }
@@ -313,7 +338,6 @@ type side = {
   entry : string;
   dep : Model_doc.dependency;
   binds : binding list;
-  policy : Hash.t;
   content : Hash.t -> string option;
 }
 
@@ -360,7 +384,7 @@ let differences old_ now_ =
         (o.Model_doc.fuel <> n.Model_doc.fuel)
         (change ~before:(string_of_int o.Model_doc.fuel) ~after:(string_of_int n.Model_doc.fuel)
            "fuel")
-    @ some (not (Hash.equal old_.policy now_.policy)) (change "policy")
+    @ some (not (Hash.equal o.Model_doc.policy n.Model_doc.policy)) (change "policy")
   in
   let oa = o.Model_doc.arguments and na = n.Model_doc.arguments in
   let count =
@@ -425,7 +449,6 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                 snapshot = Option.map Hash.of_string b.Model_doc.b_content;
               })
             r.Model_doc.bindings;
-        policy = Hash.of_string policy_bytes;
         content =
           (fun h ->
             match List.find_opt (fun c -> Hash.equal (Hash.of_string c) h) current_contents with
@@ -438,21 +461,60 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
         entry = rc.entry_name;
         dep = rc.dependency;
         binds = rc.bindings;
-        policy = rc.policy_snapshot;
         content = read_snapshot ~cache;
       }
     in
     match read_history ~cache ~document name with
     | Error reason ->
-        { result = name; evaluated_at = None; freshness = Unavailable reason; transition = None }
+        {
+          result = name;
+          evaluated_at = None;
+          outcome = None;
+          previous = None;
+          missing = [];
+          freshness = Unavailable reason;
+          transition = None;
+        }
     | Ok history -> (
         match List.rev history with
         | [] ->
-            { result = name; evaluated_at = None; freshness = Never_evaluated; transition = None }
-        | latest :: earlier ->
-            let freshness =
-              if Hash.equal latest.key (Model_doc.key r.Model_doc.dependency) then
-                (* the key is unchanged, but a dependency whose snapshot is gone is unknown *)
+            {
+              result = name;
+              evaluated_at = None;
+              outcome = None;
+              previous = None;
+              missing = [];
+              freshness = Never_evaluated;
+              transition = None;
+            }
+        | latest :: earlier -> (
+            (* a policy snapshot that is present must be the policy its record names *)
+            let policy_mismatch (rc : record) =
+              match read_snapshot ~cache rc.policy_snapshot with
+              | None -> false
+              | Some bytes -> (
+                  match Observation_policy.parse bytes with
+                  | Ok p ->
+                      not
+                        (Hash.equal (Observation_policy.identity p) rc.dependency.Model_doc.policy)
+                  | Error _ -> true)
+            in
+            match
+              List.find_opt policy_mismatch
+                (latest :: (match earlier with p :: _ -> [ p ] | [] -> []))
+            with
+            | Some _ ->
+                {
+                  result = name;
+                  evaluated_at = Some latest.time;
+                  outcome = Some latest.outcome;
+                  previous = latest.previous;
+                  missing = [];
+                  freshness = Unavailable "a record's policy snapshot is not its policy";
+                  transition = None;
+                }
+            | None ->
+                (* a dependency whose snapshot is gone is never assumed current, and is always named *)
                 let gone =
                   List.filter_map
                     (fun b ->
@@ -462,15 +524,25 @@ let explain ~cache ~document (prepared : Model_doc.prepared) =
                     latest.bindings
                   @ if read_snapshot ~cache latest.policy_snapshot = None then [ "policy" ] else []
                 in
-                if gone = [] then Current else Unknown gone
-              else Stale (differences (of_record latest) now_)
-            in
-            let transition =
-              match earlier with
-              | prev :: _ -> Some (latest.time, differences (of_record prev) (of_record latest))
-              | [] -> None
-            in
-            { result = name; evaluated_at = Some latest.time; freshness; transition })
+                let freshness =
+                  if Hash.equal latest.key (Model_doc.key r.Model_doc.dependency) then
+                    if gone = [] then Current else Unknown gone
+                  else Stale (differences (of_record latest) now_)
+                in
+                let transition =
+                  match earlier with
+                  | prev :: _ -> Some (latest.time, differences (of_record prev) (of_record latest))
+                  | [] -> None
+                in
+                {
+                  result = name;
+                  evaluated_at = Some latest.time;
+                  outcome = Some latest.outcome;
+                  previous = latest.previous;
+                  missing = gone;
+                  freshness;
+                  transition;
+                }))
   in
   List.map one prepared.Model_doc.resolved
 
@@ -495,7 +567,11 @@ let render_text e =
     | Unavailable reason -> Printf.sprintf "%s: history unavailable (%s)" e.result reason
   in
   let stale =
-    match e.freshness with Stale cs -> List.map (fun c -> "  " ^ change_text c) cs | _ -> []
+    match e.freshness with
+    | Stale cs ->
+        List.map (fun c -> "  " ^ change_text c) cs
+        @ if e.missing = [] then [] else [ "  snapshots gone: " ^ String.concat ", " e.missing ]
+    | _ -> []
   in
   let transition =
     match e.transition with
@@ -530,6 +606,9 @@ let to_json es =
          ("name", `String e.result);
          ("freshness", `String freshness);
          ("evaluated_at", match e.evaluated_at with Some t -> `String t | None -> `Null);
+         ("outcome", match e.outcome with Some o -> `String o | None -> `Null);
+         ("previous", match e.previous with Some h -> `String (hex h) | None -> `Null);
+         ("missing", `List (List.map (fun m -> `String m) e.missing));
        ]
       @ extra
       @ [

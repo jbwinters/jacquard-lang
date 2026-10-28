@@ -332,18 +332,25 @@ guessed. Host 13 consumes `--json` of both commands.
   appended owner-only under an exclusive lock on a sibling `.lock` file, held
   across reading the latest record, deciding, and writing. A record whose key
   is not its own dependency record's, or whose bindings do not match its
-  arguments, is malformed. A history with a malformed or torn frame keeps every
-  record before it and is rewritten atomically (W1803); one that cannot be read
-  at all is left untouched (W1802), as is any failed write.
+  arguments, or whose input snapshot is not the input's identity, is
+  malformed. A history with a malformed or torn frame keeps every record before
+  it and is rewritten atomically (W1803); one that cannot be read at all, or
+  that holds a record of another format version, is left untouched (W1802), as
+  is any failed write.
 - `snapshots/<hex>` holds each assumption's source text, each inline literal,
   each input's bytes and the canonical policy, named by their HASH_V0, written
-  atomically when absent or when the file no longer holds its content.
+  atomically when absent or when the file no longer holds its content, on every
+  evaluation that records history, including one whose key is unchanged, so a
+  pruned snapshot is restored by the next evaluation.
 - `jacquard model explain DOC [RESULT] [--cache DIR] [--json]` checks the
   source and computes each result's current record without evaluating. A
   result is `never evaluated`, `current (evaluated T)`, `unknown (snapshots
   gone: ...)` when its key is unchanged but a snapshot its latest record names
   is missing (never assumed current), `stale (last evaluated T)` followed by
-  every differing component, or `history unavailable (REASON)`.
+  every differing component and, when any, a `snapshots gone:` line, or
+  `history unavailable (REASON)`. Policies are compared by their identity in the
+  dependency record; a policy snapshot that is present but is not that policy
+  makes the history unavailable.
   When a result has an earlier record, `last change (T):` lists what differed
   between it and the latest. Components are the entry (implementation, or a
   different entry name), its signature and call labels, the prelude, Core,
@@ -352,8 +359,9 @@ guessed. Host 13 consumes `--json` of both commands.
   an input as byte counts, a term argument as changed. A pruned snapshot
   renders as `(unavailable)`.
 - `--json` prints one `jacquard-model-explain-v1` object: per result its name,
-  freshness, `evaluated_at`, changes (each with `component`, `subject`,
-  `before` and `after`) and `last_transition`.
+  freshness, `evaluated_at`, the latest record's `outcome` and `previous` key,
+  `missing` snapshots, changes (each with `component`, `subject`, `before` and
+  `after`) and `last_transition`.
 - Until slice 3b, an entry or term argument change is named but not explained
   callee by callee.
 

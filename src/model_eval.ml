@@ -173,7 +173,7 @@ let warning ~code cause =
           "Nothing is needed: the result was recomputed and the file replaced." )
     | "W1803" ->
         ( "A damaged model history was repaired.",
-          "Nothing is needed: the records before the damage were kept and the new one appended." )
+          "Nothing is needed: the records before the damage were kept." )
     | "W1802" ->
         ( "A model result's history could not be written.",
           "Check that the cache directory is writable; the result itself is unaffected." )

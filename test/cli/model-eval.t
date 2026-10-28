@@ -294,10 +294,20 @@ reported as such, and the next evaluation keeps every record before the damage.
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
+Evaluating again restores the snapshots, so the unchanged result is current.
+
+  $ jacquard model eval doc.model > /dev/null
+  $ jacquard model explain doc.model scaled > v.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' v.out
+  scaled: current (evaluated TIME)
+    last change (TIME):
+      entry scale changed
+      fuel: 10000 -> 20000
+  $ rm .jacquard/model-cache/snapshots/*
   $ sed -i 's/base = 5/base = 7/' doc.model
   $ jacquard model explain doc.model scaled > d.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' d.out
   scaled: stale (last evaluated TIME)
     assumption base: (unavailable) -> 7
+    snapshots gone: assumption base, inline 4, policy
     last change (TIME):
       entry scale changed
       fuel: 10000 -> 20000
@@ -318,8 +328,18 @@ reported as such, and the next evaluation keeps every record before the damage.
     Cause: doc.model declares no result "nope"
     Next step: Name a result the document declares.
   [1]
+  $ for h in .jacquard/model-cache/history/*/scaled; do cp "$h" scaled.bak; s=$(ls .jacquard/model-cache/snapshots | head -1); sed -i -E "s/^policy-snapshot [0-9a-f]+$/policy-snapshot $s/" "$h"; done
+  $ jacquard model explain doc.model scaled
+  scaled: history unavailable (a record's policy snapshot is not its policy)
+  $ for h in .jacquard/model-cache/history/*/scaled; do cp scaled.bak "$h"; done
+  $ for h in .jacquard/model-cache/history/*/echoed; do printf 'entry bytes=36\njacquard-model-history format=2\nnew\n\n' > "$h"; cp "$h" newer.bak; done
+  $ jacquard model eval doc.model > /dev/null 2> newer.err; grep -o 'W180[0-9]' newer.err; grep -o 'another format' newer.err
+  W1802
+  another format
+  $ for h in .jacquard/model-cache/history/*/echoed; do cmp "$h" newer.bak && echo untouched; done
+  untouched
   $ jacquard model explain doc.model --json > e.json; grep -o '"freshness":"[a-z-]*"' e.json
   "freshness":"current"
-  "freshness":"current"
+  "freshness":"history-unavailable"
   $ stat -c %a .jacquard/model-cache/history/*/scaled
   600

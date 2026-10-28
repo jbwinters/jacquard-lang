@@ -144,6 +144,29 @@ let test_history_strict () =
              { Model_history.kind = "term"; name = "helper"; snapshot = None };
            ];
        });
+  refused "an input snapshot that is not its identity"
+    (reframe
+       {
+         record with
+         Model_history.bindings =
+           [
+             {
+               Model_history.kind = "input";
+               name = "note";
+               snapshot = Some (Hash.of_string "other");
+             };
+             { Model_history.kind = "term"; name = "helper"; snapshot = None };
+           ];
+         dependency =
+           {
+             history_dependency with
+             Model_doc.arguments =
+               [
+                 Model_doc.Input (Hash.of_string "bytes");
+                 Model_doc.Term { term = Hash.of_string "t"; signature = Hash.of_string "s" };
+               ];
+           };
+       });
   refused "a missing binding"
     (reframe { record with Model_history.bindings = [ List.hd record.Model_history.bindings ] });
   Alcotest.(check bool)
