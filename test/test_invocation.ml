@@ -426,6 +426,59 @@ let test_alloc_ignores_memo_warmth () =
       Alcotest.(check int) ("warm " ^ source) expected (snd (allocated ctx store source)))
     [ "other"; "derived"; "base"; "spliced"; "other" ]
 
+let test_alloc_nullary_and_driver_resumptions () =
+  let store, ctx = prepared "alloc-nullary" list_program in
+  Alcotest.(check (pair string int))
+    "a nullary constructor costs a cell" ("E0921", 0)
+    (allocated ~budget:0 ctx store "End");
+  Alcotest.(check (pair string int))
+    "and fits in one" ("end", 1)
+    (allocated ~budget:1 ctx store "End");
+  (* exact enumeration resumes captured continuations from the driver: each reinstalled frame
+     costs a cell, so the posterior needs its whole cost *)
+  let model =
+    expression store "{ let c = `op:sample`(Bernoulli(0.5)); size(build(if c then 3 else 4)) }"
+  in
+  let enumerate budget =
+    Eval.with_invocation ?alloc:budget ctx (fun invocation ->
+        let outcome =
+          match Infer_dist.enumerate_v1 ctx (Eval.expr_state model) with
+          | Ok _ -> "posterior"
+          | Error _ -> "incomplete"
+        in
+        (outcome, Eval.alloc_used invocation))
+  in
+  let outcome, cost = enumerate None in
+  Alcotest.(check string) "enumerates" "posterior" outcome;
+  Alcotest.(check (pair string int)) "exact" ("posterior", cost) (enumerate (Some cost));
+  Alcotest.(check string) "one cell short" "incomplete" (fst (enumerate (Some (cost - 1))))
+
+(* with both budgets, a warm memo hit stops exactly where a cold run does *)
+let test_alloc_and_fuel_memo_order () =
+  let outcome ctx store ~fuel ~alloc source =
+    let call = expression store source in
+    Eval.with_invocation ~coverage:false ~fuel ~alloc ctx (fun invocation ->
+        let code =
+          match Eval.run_expr ctx call with
+          | Ok _ -> "value"
+          | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+        in
+        (code, Eval.fuel_used invocation, Eval.alloc_used invocation))
+  in
+  List.iter
+    (fun (fuel, alloc) ->
+      let cold =
+        let store, ctx = prepared "alloc-order-cold" memo_program in
+        outcome ctx store ~fuel ~alloc "spliced"
+      in
+      let store, ctx = prepared "alloc-order-warm" memo_program in
+      ignore (outcome ctx store ~fuel:1_000_000 ~alloc:1_000_000 "spliced");
+      let warm = outcome ctx store ~fuel ~alloc "spliced" in
+      Alcotest.(check (triple string int int))
+        (Printf.sprintf "fuel %d alloc %d" fuel alloc)
+        cold warm)
+    [ (0, 0); (1, 0); (5, 0); (50, 3); (200, 10); (1_000_000, 0); (1_000_000, 5) ]
+
 let test_alloc_exhaustion_is_sticky () =
   let store, ctx = prepared "alloc-sticky" list_program in
   let first = expression store "size(build(30))" and second = expression store "1" in
@@ -1256,6 +1309,10 @@ let suite =
     Alcotest.test_case "allocation is shared by multi-shot branches" `Quick
       test_alloc_is_shared_by_multi_shot_branches;
     Alcotest.test_case "allocation exhaustion is sticky" `Quick test_alloc_exhaustion_is_sticky;
+    Alcotest.test_case "allocation charges nullary values and driver resumptions" `Quick
+      test_alloc_nullary_and_driver_resumptions;
+    Alcotest.test_case "allocation and fuel stop at the same point warm or cold" `Quick
+      test_alloc_and_fuel_memo_order;
     Alcotest.test_case "allocation does not depend on memo warmth" `Quick
       test_alloc_ignores_memo_warmth;
     Alcotest.test_case "natives pay for text payloads" `Quick test_fuel_charges_native_payloads;

@@ -2382,7 +2382,8 @@ let alloc_arg =
         ~doc:
           "Bound the whole run to CELLS of alloc-v1 logical allocation (see \
            docs/designs/allocation-limits.md). Running out stops with E0921: the run is \
-           incomplete, neither a pass nor a failure. Without it allocation is unbounded.")
+           incomplete, neither a pass nor a failure. Without it allocation is unbounded. The \
+           evaluator's own allocation is charged; values built inside natives are not yet.")
 
 let required_seed_arg =
   Arg.(

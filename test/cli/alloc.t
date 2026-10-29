@@ -14,20 +14,20 @@ A bounded run reports the cells it used; the count is the same on every run.
 
   $ jacquard run chain.jac --alloc 100000
   100
-  alloc: 604 of 100000 cell(s) used (alloc-v1)
+  alloc: 605 of 100000 cell(s) used (alloc-v1)
   $ jacquard run chain.jac --alloc 100000 2> again.err > /dev/null; cat again.err
-  alloc: 604 of 100000 cell(s) used (alloc-v1)
+  alloc: 605 of 100000 cell(s) used (alloc-v1)
 
 It completes at exactly its cost, and one cell less is incomplete.
 
-  $ jacquard run chain.jac --alloc 604
+  $ jacquard run chain.jac --alloc 605
   100
-  alloc: 604 of 604 cell(s) used (alloc-v1)
-  $ jacquard run chain.jac --alloc 603
+  alloc: 605 of 605 cell(s) used (alloc-v1)
+  $ jacquard run chain.jac --alloc 604
   error[E0921]: The allocation budget was exhausted
-    Cause: allocation budget exhausted: the alloc-v1 budget of 603 cell(s) ran out before evaluation finished; the result is incomplete
+    Cause: allocation budget exhausted: the alloc-v1 budget of 604 cell(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
-  alloc: 603 of 603 cell(s) used (alloc-v1)
+  alloc: 604 of 604 cell(s) used (alloc-v1)
   [2]
 
 Without `--alloc` nothing changes; with both budgets, the one that runs out

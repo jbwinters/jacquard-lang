@@ -117,22 +117,25 @@ type mutable_graph_snapshot = {
 (* fuel-v1 cost of one memoized term's isolated sub-run (RT.1): its own units, the memoized terms
    it reached, and the invocation epoch in which it was last charged *)
 type memo_charge = {
-  mutable segments : (int * memo_charge) list;
-      (** in the order the cold sub-run charged them: its own fine units before each memoized term
-          it reached, and that term *)
+  mutable segments : (int * int * memo_charge) list;
+      (** in the order the cold sub-run charged them: its own fine units and alloc-v1 cells before
+          each memoized term it reached, and that term *)
   mutable tail : int;  (** its own fine units after the last memoized term *)
+  tail_cells : int;  (** its own cells after the last memoized term *)
   mutable charged_epochs : int list;  (** active epochs it was paid in *)
-  own_cells : int;
-      (** alloc-v1 cells its cold sub-run charged itself, excluding the memoized terms it reached *)
 }
 
 (* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
    another evaluator inside a sub-run still attributes that evaluator's memoized terms to it *)
 type memo_frame = {
   frame_start : int;  (** the meter's fine count when the sub-run's recorded cost began *)
-  mutable completed : (int * int * memo_charge) list;
-      (** memoized terms reached, as (fine count at start, at end, term), most recent first *)
-  mutable nested_cells : int;  (** cells charged for the memoized terms it reached *)
+  mutable completed : (int * int * int * memo_charge) list;
+      (** memoized terms reached, as (fine count at start, at end, the sub-run's own cells charged
+          just before it, term), most recent first *)
+  mutable pending_cells : int;
+      (** cells the sub-run allocated since its last charge: charged when it reaches a memoized term
+          or ends, so a warm replay charges cells at exactly the same points *)
+  mutable flushed_cells : int;  (** own cells charged since the last memoized term it reached *)
 }
 
 (* Hand the terms a sub-run or replay completed before it failed to the enclosing frame, so the
@@ -848,12 +851,25 @@ let alloc_error ctx =
     allocates them. A charge that would pass the ceiling exhausts the invocation: inside a run it
     raises E0921; outside any run (a driver resuming a continuation) the next run raises it as it
     starts. *)
-let[@inline] charge_alloc ctx cells =
+let charge_cells_now ctx cells =
   let used = !Alloc_meter.used + cells in
   if used > !Alloc_meter.ceiling then (
     Alloc_meter.trip ();
     if not ctx.deferring then rt (alloc_error ctx))
   else Alloc_meter.used := used
+
+let[@inline] charge_alloc ctx cells =
+  match !memo_frames with
+  | frame :: _ -> frame.pending_cells <- frame.pending_cells + cells
+  | [] -> charge_cells_now ctx cells
+
+(* [charge_alloc_outside ctx cells] charges cells a driver allocates outside any run (reinstalling a
+   captured continuation's frames); a refusal trips the meter and surfaces when the next run starts *)
+let charge_alloc_outside ctx cells =
+  let saved = ctx.deferring in
+  ctx.deferring <- true;
+  charge_cells_now ctx cells;
+  ctx.deferring <- saved
 
 (* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
    continuation), deferring a refusal to the next run *)
@@ -912,6 +928,10 @@ let rec match_pat (v : Value.t) (p : Kernel.pat) (env : env) : env option =
 and match_pats vs ps env =
   List.fold_left2 (fun acc v p -> Option.bind acc (match_pat v p)) (Some env) vs ps
 
+(* alloc-v1: one cell per node of a code value a spliced quote builds *)
+let rec form_nodes (f : Form.t) =
+  List.fold_left (fun n a -> match a with Form.F g -> n + form_nodes g | _ -> n) 1 f.Form.args
+
 (* alloc-v1: one cell per environment binding a pattern makes *)
 let rec pat_binders (p : Kernel.pat) =
   match p.Kernel.it with
@@ -961,7 +981,9 @@ let con_value ctx ~trusted h =
   | { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; role = Store.Constructor i; _ } ->
       let { Kernel.con_name; fields; _ } = nth_or_bug "constructor" cons i in
       let arity = List.length fields in
-      if arity = 0 then VCon { con = h; name = con_name; args = [] }
+      if arity = 0 then (
+        charge_alloc ctx 1;
+        VCon { con = h; name = con_name; args = [] })
       else VConstructor { con = h; name = con_name; arity }
   | _ -> rt_type "hash %s is not a constructor" (Hash.to_hex h)
 
@@ -1686,19 +1708,30 @@ let apply ctx fn args k =
    invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
    dependency, charged or not, so a recorded cost never depends on what this invocation had already
    paid for. *)
-let note_memo_charge ?(cells = 0) cost units =
+let note_memo_charge cost units =
   match !memo_frames with
   | frame :: _ ->
       let now = !Fuel_meter.used in
-      frame.completed <- (now - units, now, cost) :: frame.completed;
-      frame.nested_cells <- frame.nested_cells + cells
+      frame.completed <- (now - units, now, frame.flushed_cells, cost) :: frame.completed;
+      frame.flushed_cells <- 0
   | [] -> ()
+
+(* charge the cells the innermost memo sub-run has allocated so far, before it reaches another
+   memoized term *)
+let flush_frame_cells ctx =
+  match !memo_frames with
+  | frame :: _ when frame.pending_cells > 0 ->
+      let cells = frame.pending_cells in
+      frame.pending_cells <- 0;
+      frame.flushed_cells <- frame.flushed_cells + cells;
+      charge_cells_now ctx cells
+  | _ -> ()
 
 (* A frame's record: its own fine units before each term it reached, then after the last one *)
 let segments_of_frame frame ~finished =
   let rec go previous acc = function
     | [] -> (List.rev acc, finished - previous)
-    | (start, stop, cost) :: rest -> go stop ((start - previous, cost) :: acc) rest
+    | (start, stop, cells, cost) :: rest -> go stop ((start - previous, cells, cost) :: acc) rest
   in
   go frame.frame_start [] (List.rev frame.completed)
 
@@ -1712,35 +1745,36 @@ let charge_memo_hit ctx h =
   let rec replay cost =
     if not (memo_paid cost) then (
       let start = !Fuel_meter.used in
-      charge_alloc ctx cost.own_cells;
       List.iter
-        (fun (own, dep) ->
+        (fun (own, cells, dep) ->
           charge_fine ctx own;
+          charge_cells_now ctx cells;
           replay dep)
         cost.segments;
       charge_fine ctx cost.tail;
+      charge_cells_now ctx cost.tail_cells;
       mark_memo_paid cost;
-      finished := (start, !Fuel_meter.used, cost) :: !finished)
+      finished := (start, !Fuel_meter.used, 0, cost) :: !finished)
   in
+  flush_frame_cells ctx;
   match Hashtbl.find_opt ctx.memo_cost h with
   | None -> ()
   | Some cost -> (
-      let before = !Fuel_meter.used and cells_before = !Alloc_meter.used in
+      let before = !Fuel_meter.used in
       match replay cost with
-      | () ->
-          note_memo_charge ~cells:(!Alloc_meter.used - cells_before) cost (!Fuel_meter.used - before)
+      | () -> note_memo_charge cost (!Fuel_meter.used - before)
       | exception exn ->
           (* keep the outermost completed replays: a later one that started earlier contains the
              ones it replayed *)
           let outermost =
             List.fold_left
-              (fun kept ((start, stop, _) as entry) ->
-                if List.exists (fun (s, e, _) -> s <= start && stop <= e) kept then kept
+              (fun kept ((start, stop, _, _) as entry) ->
+                if List.exists (fun (s, e, _, _) -> s <= start && stop <= e) kept then kept
                 else entry :: kept)
               [] !finished
           in
           hoist_completed !memo_frames
-            (List.sort (fun (a, _, _) (b, _, _) -> compare b a) outermost);
+            (List.sort (fun (a, _, _, _) (b, _, _, _) -> compare b a) outermost);
           raise exn)
 
 (* the hot path: a warm hit already charged in this invocation, outside any memo sub-run *)
@@ -1794,8 +1828,8 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
           | None -> (
               (* everything from here to publishing the value is the term's recorded cost, so a
                  warm hit charges exactly what this cold path did *)
-              let started = !Fuel_meter.used
-              and cells_started = !Alloc_meter.used in
+              flush_frame_cells ctx;
+              let started = !Fuel_meter.used in
               match locate ctx ~trusted h with
               | {
                Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ } as decl;
@@ -1814,7 +1848,9 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
-                  let frame = { frame_start = started; completed = []; nested_cells = 0 } in
+                  let frame =
+                    { frame_start = started; completed = []; pending_cells = 0; flushed_cells = 0 }
+                  in
                   let saved_frames = !memo_frames in
                   memo_frames := frame :: saved_frames;
                   let v =
@@ -1826,17 +1862,16 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                     | exception exn ->
                         ctx.capture_ops <- saved_capture;
                         memo_frames := saved_frames;
+                        (* the cells of the unfinished segment are dropped, as a warm replay
+                           stopping inside that segment never charges them *)
                         hoist_completed saved_frames frame.completed;
                         raise exn
                   in
-                  let cells = !Alloc_meter.used - cells_started in
+                  (* the sub-run's trailing cells, charged at its end as a warm replay does *)
+                  let tail_cells = frame.flushed_cells + frame.pending_cells in
+                  charge_cells_now ctx frame.pending_cells;
                   let memo_charge =
-                    {
-                      segments = [];
-                      tail = 0;
-                      charged_epochs = [ !Fuel_meter.epoch ];
-                      own_cells = cells - frame.nested_cells;
-                    }
+                    { segments = []; tail = 0; tail_cells; charged_epochs = [ !Fuel_meter.epoch ] }
                   in
                   let next = checked_result_state ctx v k in
                   let snapshot = make_mutable_snapshot ~memo_charge ctx v in
@@ -1845,7 +1880,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   memo_charge.segments <- segments;
                   memo_charge.tail <- tail;
                   Hashtbl.replace ctx.memo_cost h memo_charge;
-                  note_memo_charge ~cells memo_charge units;
+                  note_memo_charge memo_charge units;
                   (* The isolated run has completed all closure construction and [let rec] knot
                      tying, and [checked_result_state] has traversed the finished graph. Evaluator
                      transitions never mutate a memoized graph after this point. Record ownership
@@ -1886,10 +1921,10 @@ and step_unchecked ctx (state : state) : state option =
              mutable cell (plan W2.2) *)
           match (binder.Kernel.it, value.Kernel.it) with
           | Kernel.PVar x, Kernel.Lam (params, lam_body) ->
+              charge_alloc ctx 2;
               let cell = ref Value.unit_v in
               let env = Env.add x cell scope.env in
               let scope' = { scope with env } in
-              charge_alloc ctx 2;
               cell := VClosure { scope = scope'; params; body = lam_body };
               Some (SEval (scope', body, k))
           | _ -> rt_type "malformed let rec survived validation")
@@ -1899,7 +1934,9 @@ and step_unchecked ctx (state : state) : state option =
                ( scope,
                  scrutinee,
                  FMatch { scrutinee_meta = scrutinee.Kernel.meta; clauses; scope } :: k ))
-      | Kernel.Tuple [] -> Some (SApply (VTuple [], k))
+      | Kernel.Tuple [] ->
+          charge_alloc ctx 1;
+          Some (SApply (VTuple [], k))
       | Kernel.Tuple (e0 :: rest) ->
           Some (SEval (scope, e0, FTuple { done_rev = []; pending = rest; scope } :: k))
       | Kernel.Handle { body; ret = { rbinder; rbody; _ }; ops } ->
@@ -1915,7 +1952,9 @@ and step_unchecked ctx (state : state) : state option =
           Some (SEval (scope, body, FHandle handler :: k))
       | Kernel.Quote payload -> (
           match live_splices payload with
-          | [] -> Some (SApply (VCode (stamp_scope_mark payload), k))
+          | [] ->
+              charge_alloc ctx 1;
+              Some (SApply (VCode (stamp_scope_mark payload), k))
           | e0 :: rest ->
               Some
                 (SEval (scope, e0, FQuote { payload; done_rev = []; pending = rest; scope } :: k)))
@@ -1958,6 +1997,8 @@ and step_unchecked ctx (state : state) : state option =
           Some (SEval (scope, e, FTuple { done_rev = v :: done_rev; pending = rest; scope } :: k))
       | FQuote { payload; done_rev; pending = []; scope = _ } ->
           let spliced = substitute_splices payload (List.rev (v :: done_rev)) in
+          (* a spliced quote builds a new code value: one cell per form node *)
+          charge_alloc ctx (form_nodes spliced);
           Some (SApply (VCode (stamp_scope_mark spliced), k))
       | FQuote { payload; done_rev; pending = e :: rest; scope } ->
           Some
@@ -2002,6 +2043,9 @@ and run_state_unchecked ctx state =
    can never deliver a value *)
 and run_machine ctx state =
   charge ctx 1;
+  (* exhaustion is sticky at every state, so a nested run whose E0921 a native swallowed cannot
+     let this one deliver a value *)
+  if Alloc_meter.exhausted () then rt (alloc_error ctx);
   match step_unchecked ctx state with
   | Some next -> run_machine ctx next
   | None -> (
@@ -2137,6 +2181,7 @@ let resume_validated_state ctx kont value =
         if owner != ctx then Error (foreign_evaluator_context "validated continuation")
         else (
           charge_outside ctx (List.length frames);
+          charge_alloc_outside ctx (List.length frames);
           match checked_result_state ctx value frames with
           | state -> Ok (Validated_state (owner, state, None))
           | exception Rt error -> Error error
@@ -2246,6 +2291,7 @@ let resume_captured_state ctx kont value =
         if owner != ctx then Error (foreign_evaluator_context "captured continuation")
         else (
           charge_outside ctx (List.length frames);
+          charge_alloc_outside ctx (List.length frames);
           match checked_result_state ctx value frames with
           | state -> Ok state
           | exception Rt error -> Error error

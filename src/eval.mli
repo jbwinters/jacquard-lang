@@ -188,8 +188,12 @@ val fuel_budget : invocation -> int option
 val alloc_model : string
 (** ["alloc-v1"] (RT.2, docs/designs/allocation-limits.md): logical allocation in cells. Slice 1
     charges, before the transition that allocates: a closure 1; a tuple or constructor value 1 plus
-    one per field; each environment binding a pattern makes 1; capturing a continuation 1 per
-    captured frame; resuming one 1 per reinstalled frame. [with_invocation ~alloc] bounds an
+    one per field (a nullary one 1); a quote 1, or one per node of the code value a spliced quote
+    builds; each environment binding a pattern makes 1; capturing a continuation 1 per captured
+    frame; resuming one 1 per reinstalled frame, including resumptions a driver makes. Inside a
+    memoized term's first evaluation, cells are charged when it reaches another memoized term and
+    when it ends, the points a later warm hit replays them at, so warm and cold runs stop at the
+    same point. Exhaustion is checked at every machine state. [with_invocation ~alloc] bounds an
     invocation like [~fuel] does: a nested invocation stays within the outer allowance, exhaustion
     is sticky, and running out is the incomplete outcome E0921, never a value. *)
 
