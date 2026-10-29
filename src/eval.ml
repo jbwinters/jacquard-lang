@@ -132,10 +132,8 @@ type memo_frame = {
   mutable completed : (int * int * int * memo_charge) list;
       (** memoized terms reached, as (fine count at start, at end, the sub-run's own cells charged
           just before it, term), most recent first *)
-  mutable pending_cells : int;
-      (** cells the sub-run allocated since its last charge: charged when it reaches a memoized term
-          or ends, so a warm replay charges cells at exactly the same points *)
-  mutable flushed_cells : int;  (** own cells charged since the last memoized term it reached *)
+  mutable segment_cells : int;
+      (** cells the sub-run charged itself since the last memoized term it reached *)
 }
 
 (* Hand the terms a sub-run or replay completed before it failed to the enclosing frame, so the
@@ -859,9 +857,11 @@ let charge_cells_now ctx cells =
   else Alloc_meter.used := used
 
 let[@inline] charge_alloc ctx cells =
+  charge_cells_now ctx cells;
+  (* a memo sub-run records its own cells per segment, so a warm hit replays them *)
   match !memo_frames with
-  | frame :: _ -> frame.pending_cells <- frame.pending_cells + cells
-  | [] -> charge_cells_now ctx cells
+  | frame :: _ -> frame.segment_cells <- frame.segment_cells + cells
+  | [] -> ()
 
 (* [charge_alloc_outside ctx cells] charges cells a driver allocates outside any run (reinstalling a
    captured continuation's frames); a refusal trips the meter and surfaces when the next run starts *)
@@ -1458,10 +1458,13 @@ let check_native_argument ctx root =
 let note_returned_exhaustion ctx = function
   | Error error when Runtime_err.is_fuel_exhausted error && !Fuel_meter.depth > 0 ->
       mark_exhausted ctx
+  | Error (Runtime_err.Alloc_exhausted _) when !Fuel_meter.depth > 0 -> Alloc_meter.trip ()
   | Ok _ | Error _ -> ()
 
 let charge_native_result ctx result =
   if Fuel_meter.exhausted () then Error (fuel_error ctx)
+  else if Alloc_meter.exhausted () then (* nor its allocation exhaustion *)
+    Error (alloc_error ctx)
   else
     match result with
     | Ok value ->
@@ -1712,20 +1715,9 @@ let note_memo_charge cost units =
   match !memo_frames with
   | frame :: _ ->
       let now = !Fuel_meter.used in
-      frame.completed <- (now - units, now, frame.flushed_cells, cost) :: frame.completed;
-      frame.flushed_cells <- 0
+      frame.completed <- (now - units, now, frame.segment_cells, cost) :: frame.completed;
+      frame.segment_cells <- 0
   | [] -> ()
-
-(* charge the cells the innermost memo sub-run has allocated so far, before it reaches another
-   memoized term *)
-let flush_frame_cells ctx =
-  match !memo_frames with
-  | frame :: _ when frame.pending_cells > 0 ->
-      let cells = frame.pending_cells in
-      frame.pending_cells <- 0;
-      frame.flushed_cells <- frame.flushed_cells + cells;
-      charge_cells_now ctx cells
-  | _ -> ()
 
 (* A frame's record: its own fine units before each term it reached, then after the last one *)
 let segments_of_frame frame ~finished =
@@ -1756,7 +1748,6 @@ let charge_memo_hit ctx h =
       mark_memo_paid cost;
       finished := (start, !Fuel_meter.used, 0, cost) :: !finished)
   in
-  flush_frame_cells ctx;
   match Hashtbl.find_opt ctx.memo_cost h with
   | None -> ()
   | Some cost -> (
@@ -1828,7 +1819,6 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
           | None -> (
               (* everything from here to publishing the value is the term's recorded cost, so a
                  warm hit charges exactly what this cold path did *)
-              flush_frame_cells ctx;
               let started = !Fuel_meter.used in
               match locate ctx ~trusted h with
               | {
@@ -1848,9 +1838,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
-                  let frame =
-                    { frame_start = started; completed = []; pending_cells = 0; flushed_cells = 0 }
-                  in
+                  let frame = { frame_start = started; completed = []; segment_cells = 0 } in
                   let saved_frames = !memo_frames in
                   memo_frames := frame :: saved_frames;
                   let v =
@@ -1862,14 +1850,11 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                     | exception exn ->
                         ctx.capture_ops <- saved_capture;
                         memo_frames := saved_frames;
-                        (* the cells of the unfinished segment are dropped, as a warm replay
-                           stopping inside that segment never charges them *)
                         hoist_completed saved_frames frame.completed;
                         raise exn
                   in
                   (* the sub-run's trailing cells, charged at its end as a warm replay does *)
-                  let tail_cells = frame.flushed_cells + frame.pending_cells in
-                  charge_cells_now ctx frame.pending_cells;
+                  let tail_cells = frame.segment_cells in
                   let memo_charge =
                     { segments = []; tail = 0; tail_cells; charged_epochs = [ !Fuel_meter.epoch ] }
                   in

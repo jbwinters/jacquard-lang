@@ -46,3 +46,18 @@ first is reported.
   Usage: jacquard run [--help] [OPTION]… FILE
   jacquard: option '--alloc': expected a non-negative number of cells
   [124]
+
+A memoized term's first evaluation is bounded as it runs: an initializer that
+allocates forever stops at the budget.
+
+  $ cat > forever.jac <<'JAC'
+  > type Chain = End | Link Int Chain
+  > big = { let rec g(xs) = g(Link(1, xs)); g(End) }
+  > big
+  > JAC
+  $ timeout 20 jacquard run forever.jac --alloc 10
+  error[E0921]: The allocation budget was exhausted
+    Cause: allocation budget exhausted: the alloc-v1 budget of 10 cell(s) ran out before evaluation finished; the result is incomplete
+    Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
+  alloc: 10 of 10 cell(s) used (alloc-v1)
+  [2]

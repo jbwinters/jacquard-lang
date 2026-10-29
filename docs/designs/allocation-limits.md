@@ -11,6 +11,12 @@
   budget. Slice 3 adds the registry ceilings (§4), the refusal for native
   builds (§7) and the overhead measurement (§8). Until slice 2, natives
   allocate uncharged.
+- Owner decision (2026-10-29), from slice 1's review: every charge is enforced
+  when made, including inside a memoized term's first evaluation. A warm hit
+  replays that term's recorded cells per segment, after the segment's fuel, so a
+  warm and a cold run end with the same outcome and the same count on the
+  budget that ran out; the count of the other budget may differ by one
+  segment's charges.
 - Task: RT.2. With RT.1 (fuel-v1, done) it gates the host's process lifecycle
   limits.
 - Builds on: `docs/computation-fuel.md` (one budget per invocation, a

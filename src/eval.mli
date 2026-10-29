@@ -190,12 +190,14 @@ val alloc_model : string
     charges, before the transition that allocates: a closure 1; a tuple or constructor value 1 plus
     one per field (a nullary one 1); a quote 1, or one per node of the code value a spliced quote
     builds; each environment binding a pattern makes 1; capturing a continuation 1 per captured
-    frame; resuming one 1 per reinstalled frame, including resumptions a driver makes. Inside a
-    memoized term's first evaluation, cells are charged when it reaches another memoized term and
-    when it ends, the points a later warm hit replays them at, so warm and cold runs stop at the
-    same point. Exhaustion is checked at every machine state. [with_invocation ~alloc] bounds an
-    invocation like [~fuel] does: a nested invocation stays within the outer allowance, exhaustion
-    is sticky, and running out is the incomplete outcome E0921, never a value. *)
+    frame; resuming one 1 per reinstalled frame, including resumptions a driver makes. Every charge
+    is enforced when made, and exhaustion is checked at every machine state and on every native's
+    return. A memoized term's cells are charged once per invocation: a warm hit replays its recorded
+    cells per segment after that segment's fuel, so a warm and a cold run end with the same outcome
+    and the same count on the budget that ran out; the other budget's count may differ by one
+    segment's charges. [with_invocation ~alloc] bounds an invocation like [~fuel] does: a nested
+    invocation stays within the outer allowance, exhaustion is sticky, and running out is the
+    incomplete outcome E0921, never a value. *)
 
 val alloc_used : invocation -> int
 (** [alloc_used invocation] is the number of {!alloc_model} cells charged so far in [invocation]. *)

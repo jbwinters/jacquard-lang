@@ -16,89 +16,196 @@
   ../../docs/research/readability-benchmark/EXECUTION.md
   (source_tree ../../prelude))
  (action
-  (setenv TMPDIR .
+  (setenv
+   TMPDIR
+   .
    (progn
-    (run %{bin:python3} readability_benchmark.py verify
-     --manifest fixture-manifest.json
-     --schema result.schema.json
-     --protocol ../../docs/research/readability-benchmark/PROTOCOL.md
-     --cohort cohorts/m0-fable5.json
-     --authority authority-manifest.template.json
-     --jacquard %{bin:jacquard}
-     --prelude ../../prelude)
-    (with-stdout-to dry-run.jsonl
-     (run %{bin:python3} readability_benchmark.py dry-run
-      --seed ux1-analysis-v1
-      --manifest fixture-manifest.json
-      --schema result.schema.json))
-    (with-stdout-to validated-results.txt
-     (run %{bin:python3} readability_benchmark.py validate-results
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
-    (with-stdout-to analysis-input-1.json
-     (run %{bin:python3} readability_benchmark.py prepare-analysis
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
-    (with-stdout-to analysis-input-2.json
-     (run %{bin:python3} readability_benchmark.py prepare-analysis
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
+    (run
+     %{bin:python3}
+     readability_benchmark.py
+     verify
+     --manifest
+     fixture-manifest.json
+     --schema
+     result.schema.json
+     --protocol
+     ../../docs/research/readability-benchmark/PROTOCOL.md
+     --cohort
+     cohorts/m0-fable5.json
+     --authority
+     authority-manifest.template.json
+     --jacquard
+     %{bin:jacquard}
+     --prelude
+     ../../prelude)
+    (with-stdout-to
+     dry-run.jsonl
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      dry-run
+      --seed
+      ux1-analysis-v1
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json))
+    (with-stdout-to
+     validated-results.txt
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      validate-results
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
+    (with-stdout-to
+     analysis-input-1.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      prepare-analysis
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
+    (with-stdout-to
+     analysis-input-2.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      prepare-analysis
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
     (diff analysis-input-1.json analysis-input-2.json)
-    (with-stdout-to descriptive-1.json
-     (run %{bin:python3} readability_benchmark.py analyze-descriptive
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
-    (with-stdout-to descriptive-2.json
-     (run %{bin:python3} readability_benchmark.py analyze-descriptive
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
+    (with-stdout-to
+     descriptive-1.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      analyze-descriptive
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
+    (with-stdout-to
+     descriptive-2.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      analyze-descriptive
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
     (diff descriptive-1.json descriptive-2.json)
-    (with-stdout-to comparative-1.json
-     (run %{bin:python3} readability_benchmark.py analyze-comparative
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
-    (with-stdout-to comparative-2.json
-     (run %{bin:python3} readability_benchmark.py analyze-comparative
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl))
+    (with-stdout-to
+     comparative-1.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      analyze-comparative
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
+    (with-stdout-to
+     comparative-2.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      analyze-comparative
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl))
     (diff comparative-1.json comparative-2.json)
-    (with-stdout-to rescore-packet-1.json
-     (run %{bin:python3} readability_benchmark.py prepare-rescore
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl
-      --sample-seed ux1-rescore-v1
-      --sample-size 5))
-    (with-stdout-to rescore-packet-2.json
-     (run %{bin:python3} readability_benchmark.py prepare-rescore
-      --manifest fixture-manifest.json
-      --schema result.schema.json
-      --authority authority-manifest.template.json
-      --input dry-run.jsonl
-      --sample-seed ux1-rescore-v1
-      --sample-size 5))
+    (with-stdout-to
+     rescore-packet-1.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      prepare-rescore
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl
+      --sample-seed
+      ux1-rescore-v1
+      --sample-size
+      5))
+    (with-stdout-to
+     rescore-packet-2.json
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      prepare-rescore
+      --manifest
+      fixture-manifest.json
+      --schema
+      result.schema.json
+      --authority
+      authority-manifest.template.json
+      --input
+      dry-run.jsonl
+      --sample-seed
+      ux1-rescore-v1
+      --sample-size
+      5))
     (diff rescore-packet-1.json rescore-packet-2.json)
-    (with-stdout-to human-schedule.jsonl
+    (with-stdout-to
+     human-schedule.jsonl
      (run %{bin:python3} readability_benchmark.py human-schedule))
-    (with-stdout-to model-schedule.jsonl
-     (run %{bin:python3} readability_benchmark.py model-schedule
-      --manifest fixture-manifest.json
-      --cohort cohorts/m0-fable5.json))
-    (run %{bin:python3} readability_benchmark.py verify-schedules
-     --human human-schedule.jsonl
-     --model model-schedule.jsonl)))))
+    (with-stdout-to
+     model-schedule.jsonl
+     (run
+      %{bin:python3}
+      readability_benchmark.py
+      model-schedule
+      --manifest
+      fixture-manifest.json
+      --cohort
+      cohorts/m0-fable5.json))
+    (run
+     %{bin:python3}
+     readability_benchmark.py
+     verify-schedules
+     --human
+     human-schedule.jsonl
+     --model
+     model-schedule.jsonl)))))

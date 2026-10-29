@@ -921,5 +921,6 @@ once per invocation, so warm and cold runs cost the same. Natives, the other
 drivers and the registry ceilings follow in later slices. `alloc.t` pins the
 reported count, the exact boundary, exhaustion and the interaction with
 `--fuel`; `test_invocation.ml` adds six cases, including driver-made
-resumptions under exact enumeration and warm/cold agreement when both budgets
-are set. The source inventory is now `1221 / 82 / 56`.
+resumptions under exact enumeration and warm/cold agreement on the budget that
+ran out; `alloc.t` also shows a memoized initializer that allocates forever
+stopping at the budget. The source inventory is now `1221 / 82 / 56`.
