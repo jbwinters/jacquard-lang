@@ -21,16 +21,10 @@
   ../../docs/warp-testing.md
   ../../demos/README.md)
  (action
-  (setenv
-   TMPDIR
-   .
+  (setenv TMPDIR .
    (progn
     (run ./docs_doctest.exe --self-test %{bin:jacquard} ../../prelude)
-    (run
-     ./docs_doctest.exe
-     %{bin:jacquard}
-     ../../prelude
-     fixtures
+    (run ./docs_doctest.exe %{bin:jacquard} ../../prelude fixtures
      ../../README.md
      ../../docs/effect-membranes.md
      ../../docs/effect-taxonomy.md

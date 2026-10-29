@@ -3,7 +3,6 @@
 ; the notebook's 1024 fresh-evaluator comparisons) and re-checks native parity.
 ; It is mandatory in its own CI lane but excluded from runtest so the ordinary
 ; development loop stays responsive; test/cli/applications.t is the routine lane.
-
 (rule
  (alias applications-exhaustive)
  (deps
@@ -17,7 +16,4 @@
   (setenv
    JACQUARD
    %{bin:jac}
-   (run
-    ../../scripts/applications/exhaustive.sh
-    ../../demos/applications
-    ../../prelude))))
+   (run ../../scripts/applications/exhaustive.sh ../../demos/applications ../../prelude))))

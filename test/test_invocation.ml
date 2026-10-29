@@ -453,10 +453,11 @@ let test_alloc_nullary_and_driver_resumptions () =
   Alcotest.(check (pair string int)) "exact" ("posterior", cost) (enumerate (Some cost));
   Alcotest.(check string) "one cell short" "incomplete" (fst (enumerate (Some (cost - 1))))
 
-(* a warm memo hit stops where a cold run does: the same outcome, and the same count on the budget
-   that ran out. A cold run charges a memoized term's fuel and cells as they happen, a warm hit
-   replays each segment's fuel before its cells, so the other budget's count may differ by one
-   segment's charges (owner decision, 2026-10-29) *)
+(* a warm memo hit stops where a cold run does when one budget runs out: the same outcome, and the
+   same count on that budget. A cold run charges a memoized term's fuel and cells as they happen, a
+   warm hit replays each segment's fuel before its cells, so the other budget's count may differ by
+   one segment's charges; when both run out inside the term, the codes may differ too, and both
+   runs are incomplete (owner decision, 2026-10-29) *)
 let test_alloc_and_fuel_memo_order () =
   let outcome ctx store ~fuel ~alloc source =
     let call = expression store source in
@@ -496,7 +497,21 @@ let test_alloc_and_fuel_memo_order () =
       (1_000_000, 5);
       (1_000_000, 50);
       (1_000_000, 1_000_000);
-    ]
+    ];
+  (* both budgets binding inside the memoized term: both runs are incomplete *)
+  List.iter
+    (fun (fuel, alloc) ->
+      let incomplete (code, _, _) = List.mem code [ "E0919"; "E0921" ] in
+      let store, ctx = prepared "alloc-both-cold" memo_program in
+      let cold = outcome ctx store ~fuel ~alloc "spliced" in
+      let store, ctx = prepared "alloc-both-warm" memo_program in
+      ignore (outcome ctx store ~fuel:1_000_000 ~alloc:1_000_000 "spliced");
+      let warm = outcome ctx store ~fuel ~alloc "spliced" in
+      Alcotest.(check (pair bool bool))
+        (Printf.sprintf "both incomplete, fuel %d alloc %d" fuel alloc)
+        (true, true)
+        (incomplete cold, incomplete warm))
+    [ (50, 3); (200, 10) ]
 
 let test_alloc_exhaustion_is_sticky () =
   let store, ctx = prepared "alloc-sticky" list_program in

@@ -88,8 +88,6 @@
 
 ; Keep exact historical evidence commands runnable while the proof implementation
 ; remains isolated in test/gm12b/dune.
-
 (alias
  (name gm12b-evidence)
- (deps
-  (alias ../gm12b/gm12b-evidence)))
+ (deps (alias ../gm12b/gm12b-evidence)))

@@ -868,7 +868,8 @@ let[@inline] charge_alloc ctx cells =
 let charge_alloc_outside ctx cells =
   let saved = ctx.deferring in
   ctx.deferring <- true;
-  charge_cells_now ctx cells;
+  (* through [charge_alloc], so a memo sub-run records these cells for its warm replay *)
+  charge_alloc ctx cells;
   ctx.deferring <- saved
 
 (* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
@@ -1495,6 +1496,8 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
      it mutated *)
   note_returned_exhaustion ctx result;
   if Fuel_meter.exhausted () then exhaust ctx;
+  (* nor replace allocation exhaustion with a failure found while revalidating *)
+  if Alloc_meter.exhausted () then rt (alloc_error ctx);
   List.iter (check_native_argument ctx) invocation_roots;
   (* the Result event reports only what the program receives, so it follows every post-call check *)
   let observe result =
@@ -2251,6 +2254,7 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
           let result = dispatching_as ctx call (fun () -> native args) in
           note_returned_exhaustion ctx result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
+          if Alloc_meter.exhausted () then raise (Rt (alloc_error ctx));
           List.iter (check_native_argument ctx) roots;
           match charge_native_result ctx result with
           | Ok value ->
