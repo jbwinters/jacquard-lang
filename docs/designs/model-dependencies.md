@@ -8,8 +8,8 @@
   `model-result-v1` and the cache (`src/model_eval.ml`, E1806, W1800, W1801;
   §3.3a). Slice 3a implements history, snapshots of assumptions, inputs and the
   policy, and `jacquard model explain` (`src/model_history.ml`, W1802; §3.5a).
-  Retaining each entry's reachable declarations, so `explain` can name the
-  callee that changed, is slice 3b. §7 lists what each slice proves.
+  Slice 3b retains each entry's and term argument's reachable declarations and
+  names the callees that changed (§3.5a). §7 lists what each slice proves.
 - Task: MODEL.1. Consumers: EXP.5 (`scenario-v1` is a MODEL.1 artifact plus
   forks), UNC.3 (assumption sets), the host's decision documents (APP.3), and
   MODEL.2 (measured incremental computation).
@@ -367,8 +367,37 @@ guessed. Host 13 consumes `--json` of both commands.
   freshness, `evaluated_at`, the latest record's `outcome` and `previous` key,
   `missing` snapshots, changes (each with `component`, `subject`, `before` and
   `after`) and `last_transition`.
-- Until slice 3b, an entry or term argument change is named but not explained
-  callee by callee.
+- Slice 3b: each record also names the entry's **closure manifest**, and a
+  term argument's snapshot is its closure manifest. A manifest
+  (`jacquard-model-closure format=1`) names, on its second line, `root
+  DECL-HASH`: the declaration the term belongs to. It then lists, sorted, every
+  declaration the term reaches as `NAME KIND DECL-HASH BODY-SNAPSHOT`: one line per (name,
+  kind) bound to a member of it, or one `- -` line when nothing names it. Each
+  declaration's stored bytes are retained as a snapshot (decision 5); a body
+  that cannot be read is written `none`. When the entry or a term argument
+  changed, `explain` compares the two manifests by (name, kind), so a term and a
+  type sharing a name are both followed, and lists `callee NAME changed`,
+  `callee NAME added` or `callee NAME removed` for every named declaration
+  except the root's own declaration and its group siblings, found by that
+  identity (so a same-named type the entry reaches is still followed). Without both
+  manifests (a pruned snapshot, or a record from before 3b, which has no
+  `entry-closure` line and still parses) only the change itself is named.
+- A missing manifest, or a manifest whose retained bodies are not all readable,
+  counts as a missing snapshot (`entry NAME`, `entry NAME declarations`, `term
+  NAME declarations`), so such a result with an unchanged key is `unknown`.
+  Every recorded evaluation rewrites the bodies, restoring them, and appends a
+  refresh record when the latest record's manifests name bodies that are still
+  gone (an identity-preserving edit, such as renaming a parameter, changes the
+  stored bytes and so the manifest). A refresh is appended only when it would
+  name other snapshots than the latest record does: a body that cannot be
+  retained at all (over 16 MiB stored) stays `none`, so the result stays
+  `unknown` without growing its history.
+- Owner decision (2026-10-28): naming the changed callees meets §3.5's
+  rendering; a `jac diff` of the retained bodies in `explain` is a follow-up.
+- `current (evaluated T)`, the JSON `outcome` and `previous` come from the
+  first record under the latest key, so refresh records do not move them. The
+  `after` side of a change renders the latest record's snapshot, which for a
+  respelled assumption is its current spelling.
 
 ### 3.6 Consumers
 
@@ -452,5 +481,5 @@ The owner adopted the recommended option of each decision.
   opaque, truncated, excluded and granted results, each with its reason.
   Snapshots are slice 3.
 - `explain` names every differing key component. Slice 3a does, from the
-  history and snapshots (`test/cli/model-eval.t`); naming the callee inside a
-  changed entry is slice 3b.
+  history and snapshots, and slice 3b names the callees that changed inside a
+  changed entry or term argument (`test/cli/model-eval.t`).

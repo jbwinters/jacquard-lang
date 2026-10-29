@@ -17,6 +17,9 @@ type binding = { kind : string; name : string; snapshot : Hash.t option }
 type record = {
   time : string;  (** UTC, [YYYY-MM-DDTHH:MM:SSZ] *)
   entry_name : string;
+  entry_closure : Hash.t option;
+      (** the snapshot of the entry's closure manifest: every declaration it reaches, with the names
+          bound to it and a snapshot of its body *)
   key : Hash.t;
   previous : Hash.t option;  (** the key of the record before this one *)
   outcome : string;  (** the status and outcome tag, as [model eval] reported them *)
@@ -42,11 +45,15 @@ val append :
   outcome:string ->
   (string option, string) result
 (** [append ~cache ~document prepared resolved ~outcome] writes the result's snapshots (owner-only,
-    atomically, when absent) and appends a record when the result has no history or its latest
-    record has another key, holding an exclusive lock on a sibling [.lock] file across the read, the
-    decision and the write. A history with a damaged frame keeps every record before it, is
-    rewritten atomically, and the result carries a note saying so; a history that cannot be read at
-    all is left untouched and refused. *)
+    atomically): each assumption's text, inline literal and input, the policy, and the closure
+    manifest and declaration bodies of the entry and of each term argument. A snapshot is written
+    when absent or no longer holding its content, on every call. A record is appended when the
+    result has no history, when its latest record has another key, or, as a refresh under the same
+    key, when the latest record names a snapshot that is gone. The read, the decision and the write
+    hold an exclusive lock on a sibling [.lock] file. A history with a damaged frame keeps every
+    record before it, is rewritten atomically, and the result carries a note saying so; a history
+    that cannot be read at all, or holds a record of another format, is left untouched and refused.
+*)
 
 (** {1 Explanations} *)
 
@@ -70,9 +77,11 @@ type freshness =
 
 type explanation = {
   result : string;
-  evaluated_at : string option;  (** the latest record's time *)
-  outcome : string option;  (** the latest record's status and outcome tag *)
-  previous : Hash.t option;  (** the latest record's predecessor key *)
+  evaluated_at : string option;
+      (** when the latest key was first recorded; refresh records under the same key do not move it
+      *)
+  outcome : string option;  (** that first record's status and outcome tag *)
+  previous : Hash.t option;  (** that first record's predecessor key *)
   missing : string list;
       (** dependencies of the latest record whose snapshots are gone; always reported, and a result
           with an unchanged key and missing snapshots is [Unknown] *)
