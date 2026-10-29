@@ -277,6 +277,14 @@ let write_schedule path trace =
    and install the program's tops in [store] in order, passing each expression to [on_expr]. *)
 (* RT.1: with a budget, report what the invocation spent once it ends, whether it finished or ran
    out; the line names the cost model so the numbers are never compared across models *)
+let report_alloc invocation =
+  match Eval.alloc_budget invocation with
+  | None -> ()
+  | Some budget ->
+      Eval.on_teardown invocation (fun () ->
+          Printf.eprintf "alloc: %d of %d cell(s) used (%s)\n%!" (Eval.alloc_used invocation) budget
+            Eval.alloc_model)
+
 let report_fuel invocation =
   match Eval.fuel_budget invocation with
   | None -> ()
@@ -296,12 +304,13 @@ let fuel_guard ctx body =
       print_runtime_error (Eval.fuel_error ctx);
       exit_runtime
 
-let run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
+let run_program ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
     ~requested_mode ~walk =
   (* one invocation owns this run's grants and Once resumptions; run never reads
                  coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
-  Eval.with_invocation ~coverage:false ?fuel ctx @@ fun invocation ->
+  Eval.with_invocation ~coverage:false ?fuel ?alloc ctx @@ fun invocation ->
   report_fuel invocation;
+  report_alloc invocation;
   fuel_guard ctx @@ fun () ->
   let seed =
     (* OS-entropy seeded unless pinned; --seed makes sampling runs reproducible (SL.7) *)
@@ -466,7 +475,7 @@ let relate_policy_check ~prelude ~syntax ~file ~source policy =
                     ~identity:(Interface.identity (Frontend.Checked.interface artifact)))))
 
 let rec run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
-    schedule_replay schedule_fork fuel syntax record =
+    schedule_replay schedule_fork fuel alloc syntax record =
   (* schedule flags are validated before any store is opened, as for a plain run *)
   match schedule_mode schedule_replay schedule_fork with
   | Error diagnostics -> print_diags diagnostics
@@ -477,17 +486,17 @@ let rec run_cmd file allows prelude store_dir seed infer_cache origin dry_run sc
           let source = read_file file in
           match record with
           | None ->
-              run_in ~session ~source file allows seed infer_cache origin dry_run schedule_record
-                schedule_replay schedule_fork fuel syntax
+              run_in ?alloc ~session ~source file allows seed infer_cache origin dry_run
+                schedule_record schedule_replay schedule_fork fuel syntax
           | Some record ->
-              record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache origin
-                dry_run schedule_record schedule_replay schedule_fork fuel syntax record))
+              record_run ?alloc ~prelude ~store_dir ~session ~source file allows seed infer_cache
+                origin dry_run schedule_record schedule_replay schedule_fork fuel syntax record))
 
 (* EXP.1: [run --record LOG] records every root-reaching operation and Dist choice, with its
    source span, into an owner-only exploration-log-v1; values, output and exit codes are those of
    the plain run *)
-and record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache origin dry_run
-    schedule_record schedule_replay schedule_fork fuel syntax
+and record_run ?alloc ~prelude ~store_dir ~session ~source file allows seed infer_cache origin
+    dry_run schedule_record schedule_replay schedule_fork fuel syntax
     (path, policy_path, record_output, max_steps, max_bytes) =
   let store, ctx = session in
   let refuse code cause =
@@ -559,8 +568,8 @@ and record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache
             in
             Eval.with_named_choices ctx named (fun () ->
                 Eval.with_observer ctx (Exploration_log.on_event recorder) (fun () ->
-                    run_in ~session ~source file allows (Some seed) infer_cache origin dry_run
-                      schedule_record schedule_replay schedule_fork fuel syntax))
+                    run_in ?alloc ~session ~source file allows (Some seed) infer_cache origin
+                      dry_run schedule_record schedule_replay schedule_fork fuel syntax))
           with
           | status -> status
           | exception Exploration_log.Bound_reached bound ->
@@ -593,7 +602,7 @@ and record_run ~prelude ~store_dir ~session ~source file allows seed infer_cache
         | Ok () -> status
         | Error cause -> refuse "E1016" ("cannot write the exploration log: " ^ cause))
 
-and run_in ~session ~source file allows seed infer_cache origin dry_run schedule_record
+and run_in ?alloc ~session ~source file allows seed infer_cache origin dry_run schedule_record
     schedule_replay schedule_fork fuel syntax =
   match schedule_mode schedule_replay schedule_fork with
   | Error diagnostics -> print_diags diagnostics
@@ -628,7 +637,7 @@ and run_in ~session ~source file allows seed infer_cache origin dry_run schedule
       match expression_count with
       | Error diagnostics -> print_diags diagnostics
       | Ok () ->
-          run_program ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
+          run_program ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
             ~requested_mode ~walk:(fun ~on_expr ->
               process_forms ?origin ~syntax store ~file source ~on_expr))
 
@@ -2357,6 +2366,24 @@ let fuel_arg =
            docs/computation-fuel.md). Running out stops with E0919: the run is incomplete, neither \
            a pass nor a failure. Without it the run is unbounded.")
 
+let alloc_arg =
+  let cells =
+    let parse text =
+      match int_of_string_opt text with
+      | Some cells when cells >= 0 -> Ok cells
+      | Some _ | None -> Error (`Msg "expected a non-negative number of cells")
+    in
+    Arg.conv (parse, Format.pp_print_int)
+  in
+  Arg.(
+    value
+    & opt (some cells) None
+    & info [ "alloc" ] ~docv:"CELLS"
+        ~doc:
+          "Bound the whole run to CELLS of alloc-v1 logical allocation (see \
+           docs/designs/allocation-limits.md). Running out stops with E0921: the run is \
+           incomplete, neither a pass nor a failure. Without it allocation is unbounded.")
+
 let required_seed_arg =
   Arg.(
     required
@@ -2525,7 +2552,7 @@ let run_t =
       const (configure_diagnostics run_cmd)
       $ diagnostic_format_arg $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
-      $ schedule_fork_arg $ fuel_arg $ syntax_arg $ record_arg)
+      $ schedule_fork_arg $ fuel_arg $ alloc_arg $ syntax_arg $ record_arg)
 
 let relate_term format file variation seed allows prelude syntax policy =
   selected_diagnostic_format := format;
@@ -3819,7 +3846,7 @@ let project_run_source project prelude entry_name allows seed =
               | Error ds -> print_diags ds
               | Ok tops ->
                   let store = Project_frontend.store session in
-                  run_program ~fuel:None ~store ~ctx:(Project_frontend.eval_ctx session)
+                  run_program ~alloc:None ~fuel:None ~store ~ctx:(Project_frontend.eval_ctx session)
                     ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
                     ~requested_mode:None ~walk:(fun ~on_expr ->
                       Project_frontend.walk_entry session tops ~on_resolved:(fun top _warnings ->
@@ -3927,9 +3954,9 @@ let project_run_bundle path prelude entry_name allows seed =
       | None -> bundle_entry_error path entry_name "run"
       | Some steps ->
           (* each step is a checked thunk; running it prints its value, as jacquard run does *)
-          run_program ~fuel:None ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows
-            ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
-            ~walk:(fun ~on_expr ->
+          run_program ~alloc:None ~fuel:None ~store:bundle.Project_bundle_reader.store
+            ~ctx:bundle.ctx ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
+            ~requested_mode:None ~walk:(fun ~on_expr ->
               List.fold_left
                 (fun acc step ->
                   Result.bind acc (fun () ->

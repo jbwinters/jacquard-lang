@@ -357,6 +357,94 @@ let memo_program =
      other = add(base, derived)\n\
      spliced = quote { pair(unquote(code.of-int(base)), 2) }\n"
 
+(* --- logical allocation (RT.2) --- *)
+
+let allocated ?budget ctx store source =
+  let call = expression store source in
+  Eval.with_invocation ~coverage:false ?alloc:budget ctx (fun invocation ->
+      let outcome =
+        match Eval.run_expr ctx call with
+        | Ok value -> Fuel_meter.unmetered (fun () -> Value.show value)
+        | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+      in
+      (outcome, Eval.alloc_used invocation))
+
+let list_program =
+  "type Chain = End | Link Int Chain\n\
+   build(n) = if eq(n, 0) then End else Link(n, build(sub(n, 1)))\n\
+   size(xs) = match xs { | End -> 0 | Link(_, rest) -> add(1, size(rest)) }\n"
+
+let test_alloc_exact_boundary () =
+  let store, ctx = prepared "alloc-exact" list_program in
+  let result, cost = allocated ctx store "size(build(50))" in
+  Alcotest.(check string) "unbounded result" "50" result;
+  Alcotest.(check bool) "the run allocates" true (cost > 50);
+  Alcotest.(check (pair string int))
+    "same count on a fresh evaluator" (result, cost)
+    (let store, ctx = prepared "alloc-exact-fresh" list_program in
+     allocated ctx store "size(build(50))");
+  Alcotest.(check (pair string int))
+    "completes at exactly its cost" (result, cost)
+    (allocated ~budget:cost ctx store "size(build(50))");
+  Alcotest.(check (pair string int))
+    "one cell short is exhausted"
+    ("E0921", cost - 1)
+    (allocated ~budget:(cost - 1) ctx store "size(build(50))");
+  Alcotest.(check (pair string int))
+    "zero budget" ("E0921", 0)
+    (allocated ~budget:0 ctx store "size(build(1))")
+
+let test_alloc_is_shared_by_multi_shot_branches () =
+  let store, ctx =
+    prepared "alloc-multi"
+      (list_program
+     ^ "effect Pick where { multi pick : () -> Int }\n\
+        both(body) = handle body() {\n\
+       \  | return value -> value\n\
+       \  | pick() resume k -> add(k(0), k(1))\n\
+        }\n")
+  in
+  let one = snd (allocated ctx store "size(build(20))") in
+  let _, both_cost = allocated ctx store "both(fn () -> size(build(add(pick(), 20))))" in
+  (* both resumed branches build their own chain, and capture and resumption pay per frame *)
+  Alcotest.(check bool) "aggregate exceeds two branches" true (both_cost > 2 * one);
+  Alcotest.(check (pair string int))
+    "a budget for one branch is not enough for both"
+    ("E0921", 2 * one)
+    (allocated ~budget:(2 * one) ctx store "both(fn () -> size(build(add(pick(), 20))))")
+
+let test_alloc_ignores_memo_warmth () =
+  (* a memoized term's allocation is charged once per invocation, warm or cold *)
+  let cold source =
+    let store, ctx = prepared "alloc-memo-cold" memo_program in
+    snd (allocated ctx store source)
+  in
+  let store, ctx = prepared "alloc-memo-warm" memo_program in
+  List.iter
+    (fun source ->
+      let expected = cold source in
+      Alcotest.(check int) ("warm " ^ source) expected (snd (allocated ctx store source)))
+    [ "other"; "derived"; "base"; "spliced"; "other" ]
+
+let test_alloc_exhaustion_is_sticky () =
+  let store, ctx = prepared "alloc-sticky" list_program in
+  let first = expression store "size(build(30))" and second = expression store "1" in
+  let outcomes =
+    Eval.with_invocation ~alloc:10 ctx (fun _ ->
+        let code = function
+          | Ok _ -> "value"
+          | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+        in
+        let a = code (Eval.run_expr ctx first) in
+        (* a later run that allocates nothing still cannot deliver a value *)
+        (a, code (Eval.run_expr ctx second)))
+  in
+  Alcotest.(check (pair string string)) "sticky" ("E0921", "E0921") outcomes;
+  (* the next invocation starts fresh *)
+  Alcotest.(check (pair string int))
+    "fresh invocation" ("1", 0)
+    (allocated ~budget:10 ctx store "1")
+
 let test_fuel_ignores_memo_warmth () =
   (* the fuel an expression costs is the same on a fresh evaluator and after any earlier
      invocation warmed the memo in any order *)
@@ -1163,6 +1251,13 @@ let suite =
     Alcotest.test_case "multi-shot branches and enumeration share one budget" `Quick
       test_fuel_is_shared_by_multi_shot_branches;
     Alcotest.test_case "fuel does not depend on memo warmth" `Quick test_fuel_ignores_memo_warmth;
+    Alcotest.test_case "allocation completes at exactly the program's cost" `Quick
+      test_alloc_exact_boundary;
+    Alcotest.test_case "allocation is shared by multi-shot branches" `Quick
+      test_alloc_is_shared_by_multi_shot_branches;
+    Alcotest.test_case "allocation exhaustion is sticky" `Quick test_alloc_exhaustion_is_sticky;
+    Alcotest.test_case "allocation does not depend on memo warmth" `Quick
+      test_alloc_ignores_memo_warmth;
     Alcotest.test_case "natives pay for text payloads" `Quick test_fuel_charges_native_payloads;
     Alcotest.test_case "exhaustion is sticky within an invocation" `Quick
       test_fuel_exhaustion_is_sticky;

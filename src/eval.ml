@@ -122,6 +122,8 @@ type memo_charge = {
           it reached, and that term *)
   mutable tail : int;  (** its own fine units after the last memoized term *)
   mutable charged_epochs : int list;  (** active epochs it was paid in *)
+  own_cells : int;
+      (** alloc-v1 cells its cold sub-run charged itself, excluding the memoized terms it reached *)
 }
 
 (* memo sub-runs in progress, innermost first, across every evaluator: a native that re-enters
@@ -130,6 +132,7 @@ type memo_frame = {
   frame_start : int;  (** the meter's fine count when the sub-run's recorded cost began *)
   mutable completed : (int * int * memo_charge) list;
       (** memoized terms reached, as (fine count at start, at end, term), most recent first *)
+  mutable nested_cells : int;  (** cells charged for the memoized terms it reached *)
 }
 
 (* Hand the terms a sub-run or replay completed before it failed to the enclosing frame, so the
@@ -244,6 +247,9 @@ type ctx = {
   mutable fuel_pending : int;
       (** resumption units incurred while a driver built a state outside the machine; charged when
           the next run starts, inside its error channel *)
+  mutable alloc_limit : int option;
+      (** the active invocation's allocation budget in cells, for diagnostics (RT.2); the counter
+          and ceiling are the process-wide {!Alloc_meter} *)
 }
 
 and invocation = {
@@ -256,6 +262,11 @@ and invocation = {
   saved_epoch : int;  (** the memo-charging epoch to restore when the invocation ends *)
   saved_frames : memo_frame list;  (** memo sub-runs of an enclosing invocation *)
   budget : int option;
+  alloc_start : int;  (** the allocation meter's count when the invocation began *)
+  mutable alloc_final : int option;  (** cells used, frozen when the invocation ends *)
+  alloc_budget : int option;
+  saved_alloc_ceiling : int;
+  saved_alloc_budget : int;
 }
 
 let next_audit_context_id = Atomic.make 0
@@ -309,6 +320,7 @@ let make_ctx store =
     memo_cost = Hashtbl.create 64;
     deferring = false;
     fuel_pending = 0;
+    alloc_limit = None;
   }
 
 (** [store ctx] returns the immutable store handle used for name and declaration lookup. *)
@@ -552,18 +564,30 @@ let fuel_used invocation =
   | None -> units_of_fine (!Fuel_meter.used - invocation.fuel_start)
 
 let fuel_budget invocation = invocation.budget
+let alloc_model = "alloc-v1"
+
+let alloc_used invocation =
+  match invocation.alloc_final with
+  | Some used -> used
+  | None -> !Alloc_meter.used - invocation.alloc_start
+
+let alloc_budget invocation = invocation.alloc_budget
 let fuel_exhausted _ctx = Fuel_meter.exhausted ()
 
 let reset_fuel ctx =
   ctx.fuel_limit <- None;
   ctx.fuel_pending <- 0;
+  ctx.alloc_limit <- None;
   ignore ctx
 
-let with_invocation ?coverage ?fuel ctx body =
+let with_invocation ?coverage ?fuel ?alloc ctx body =
   if Option.is_some ctx.invocation then
     invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
   (match fuel with
   | Some limit when limit < 0 -> invalid_arg "Eval.with_invocation: fuel must be non-negative"
+  | Some _ | None -> ());
+  (match alloc with
+  | Some limit when limit < 0 -> invalid_arg "Eval.with_invocation: alloc must be non-negative"
   | Some _ | None -> ());
   let saved_coverage = ctx.track_coverage
   and saved_observer = ctx.root_observer
@@ -579,6 +603,11 @@ let with_invocation ?coverage ?fuel ctx body =
       saved_budget = !Fuel_meter.budget;
       saved_epoch = !Fuel_meter.epoch;
       saved_frames = !memo_frames;
+      alloc_start = !Alloc_meter.used;
+      alloc_final = None;
+      alloc_budget = alloc;
+      saved_alloc_ceiling = !Alloc_meter.ceiling;
+      saved_alloc_budget = !Alloc_meter.budget;
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
@@ -602,6 +631,15 @@ let with_invocation ?coverage ?fuel ctx body =
       Fuel_meter.budget := limit;
       ctx.fuel_limit <- Some limit)
     fuel;
+  (* allocation follows the same rule: a nested invocation stays within the outer allowance *)
+  Option.iter
+    (fun limit ->
+      let start = !Alloc_meter.used in
+      let own = if limit > max_int - start then max_int else start + limit in
+      Alloc_meter.ceiling := min own invocation.saved_alloc_ceiling;
+      Alloc_meter.budget := limit;
+      ctx.alloc_limit <- Some limit)
+    alloc;
   ctx.invocation <- Some invocation;
   (* runs every callback exactly once, most recent first, then restores the configuration the
      invocation borrowed; returns the first callback exception *)
@@ -619,6 +657,17 @@ let with_invocation ?coverage ?fuel ctx body =
       Fuel_meter.trip ())
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
+    invocation.alloc_final <- Some (!Alloc_meter.used - invocation.alloc_start);
+    if
+      Alloc_meter.exhausted ()
+      && invocation.saved_alloc_ceiling >= 0
+      && !Alloc_meter.used >= invocation.saved_alloc_ceiling
+      && invocation.saved_alloc_ceiling < max_int
+    then (
+      Alloc_meter.ceiling := invocation.saved_alloc_ceiling;
+      Alloc_meter.trip ())
+    else Alloc_meter.ceiling := invocation.saved_alloc_ceiling;
+    Alloc_meter.budget := invocation.saved_alloc_budget;
     decr Fuel_meter.depth;
     if !Fuel_meter.depth = 0 then
       Fuel_meter.active_epochs :=
@@ -789,6 +838,23 @@ let[@inline] charge_fine ctx fine =
 (** [charge ctx units] debits whole fuel units. *)
 let[@inline] charge ctx units = charge_fine ctx (units * fine_per_unit)
 
+(* --- logical allocation (RT.2, cost model alloc-v1; docs/designs/allocation-limits.md) --- *)
+
+let alloc_error ctx =
+  Runtime_err.Alloc_exhausted
+    { model = alloc_model; limit = Option.value ctx.alloc_limit ~default:!Alloc_meter.budget }
+
+(** [charge_alloc ctx cells] charges [cells] of logical allocation before the transition that
+    allocates them. A charge that would pass the ceiling exhausts the invocation: inside a run it
+    raises E0921; outside any run (a driver resuming a continuation) the next run raises it as it
+    starts. *)
+let[@inline] charge_alloc ctx cells =
+  let used = !Alloc_meter.used + cells in
+  if used > !Alloc_meter.ceiling then (
+    Alloc_meter.trip ();
+    if not ctx.deferring then rt (alloc_error ctx))
+  else Alloc_meter.used := used
+
 (* [charge_outside ctx units] debits work a driver does outside any run (resuming a captured
    continuation), deferring a refusal to the next run *)
 let charge_outside ctx units =
@@ -845,6 +911,29 @@ let rec match_pat (v : Value.t) (p : Kernel.pat) (env : env) : env option =
 
 and match_pats vs ps env =
   List.fold_left2 (fun acc v p -> Option.bind acc (match_pat v p)) (Some env) vs ps
+
+(* alloc-v1: one cell per environment binding a pattern makes *)
+let rec pat_binders (p : Kernel.pat) =
+  match p.Kernel.it with
+  | Kernel.PVar _ -> 1
+  | Kernel.PAs (_, inner) -> 1 + pat_binders inner
+  | Kernel.PCon (_, ps) | Kernel.PTuple ps -> List.fold_left (fun n p -> n + pat_binders p) 0 ps
+  | Kernel.PWild | Kernel.PLit _ -> 0
+
+(* a successful match charges one cell per binding it makes; a failed clause allocates nothing *)
+let charged_pat ctx v p env =
+  match match_pat v p env with
+  | Some _ as matched ->
+      charge_alloc ctx (pat_binders p);
+      matched
+  | None -> None
+
+let charged_pats ctx vs ps env =
+  match match_pats vs ps env with
+  | Some _ as matched ->
+      charge_alloc ctx (List.fold_left (fun n p -> n + pat_binders p) 0 ps);
+      matched
+  | None -> None
 
 (* ------------------------------------------------------------------ *)
 (* Store-backed references                                             *)
@@ -1435,6 +1524,7 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
     | FHandle h :: outer when handler_covers h op ->
         if walked > 0 then charge ctx walked;
         let captured = List.rev (FHandle h :: inner_rev) in
+        charge_alloc ctx (List.length captured);
         let { Kernel.params; resume; obody; _ } =
           match List.find_opt (fun (o, _) -> Hash.equal o op) h.hops with
           | Some (_, c) -> c
@@ -1444,7 +1534,7 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
           rt_arity "op `%s` handled with %d parameter(s) but performed with %d argument(s)" name
             (List.length params) (List.length args);
         let env =
-          match match_pats args params h.hscope.env with
+          match charged_pats ctx args params h.hscope.env with
           | Some env -> env
           | None -> rt (Runtime_err.Match_failure (Value.display (VTuple args)))
         in
@@ -1453,6 +1543,7 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
           | Kernel.Multi -> VResume captured
           | Kernel.Once -> VOnceResume (Once_state.create ~owner:ctx.task_run captured)
         in
+        charge_alloc ctx 1;
         let env = Env.add resume (ref resume_value) env in
         SEval ({ h.hscope with env }, obody, outer)
     | f :: outer -> split (walked + 1) (f :: inner_rev) outer
@@ -1481,6 +1572,7 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
               (VOp { op; name; effect_ })
               native args k
         | None, Some mode ->
+            charge_alloc ctx (List.length inner_rev);
             raise (Op_captured { call; op; name; effect_; mode; args; kont = List.rev inner_rev })
         | None, None -> rt (Runtime_err.Unhandled { effect_; op = name }))
   in
@@ -1489,7 +1581,10 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
 (** Apply a function-position value to fully evaluated arguments (uncurried, decision D5): closures,
     builtins, constructors, ops (perform), and resumptions. *)
 let apply_unchecked ?site ctx (fn : Value.t) (args : Value.t list) (k : kont) : state =
-  let charge_frames frames = charge ctx (List.length frames) in
+  let charge_frames frames =
+    charge ctx (List.length frames);
+    charge_alloc ctx (List.length frames)
+  in
   match fn with
   | VClosure { scope; params; body } ->
       (match (ctx.named_choice, args) with
@@ -1504,7 +1599,7 @@ let apply_unchecked ?site ctx (fn : Value.t) (args : Value.t list) (k : kont) : 
           (List.length args)
       else
         let env =
-          match match_pats args params scope.env with
+          match charged_pats ctx args params scope.env with
           | Some env -> env
           | None -> rt (Runtime_err.Match_failure (Value.display (VTuple args)))
         in
@@ -1530,7 +1625,9 @@ let apply_unchecked ?site ctx (fn : Value.t) (args : Value.t list) (k : kont) : 
   | VConstructor { con; name; arity } ->
       if List.length args <> arity then
         rt_arity "constructor %s expects %d argument(s), got %d" name arity (List.length args)
-      else SApply (VCon { con; name; args }, k)
+      else (
+        charge_alloc ctx (1 + List.length args);
+        SApply (VCon { con; name; args }, k))
   | VOp { op; name; effect_ } -> perform_unchecked ?site ctx op ~name ~effect_ args k
   | VResume frames -> (
       match args with
@@ -1589,11 +1686,12 @@ let apply ctx fn args k =
    invocation) and attribute it to the enclosing memo sub-run, if any. Every reached term is a
    dependency, charged or not, so a recorded cost never depends on what this invocation had already
    paid for. *)
-let note_memo_charge cost units =
+let note_memo_charge ?(cells = 0) cost units =
   match !memo_frames with
   | frame :: _ ->
       let now = !Fuel_meter.used in
-      frame.completed <- (now - units, now, cost) :: frame.completed
+      frame.completed <- (now - units, now, cost) :: frame.completed;
+      frame.nested_cells <- frame.nested_cells + cells
   | [] -> ()
 
 (* A frame's record: its own fine units before each term it reached, then after the last one *)
@@ -1614,6 +1712,7 @@ let charge_memo_hit ctx h =
   let rec replay cost =
     if not (memo_paid cost) then (
       let start = !Fuel_meter.used in
+      charge_alloc ctx cost.own_cells;
       List.iter
         (fun (own, dep) ->
           charge_fine ctx own;
@@ -1626,9 +1725,10 @@ let charge_memo_hit ctx h =
   match Hashtbl.find_opt ctx.memo_cost h with
   | None -> ()
   | Some cost -> (
-      let before = !Fuel_meter.used in
+      let before = !Fuel_meter.used and cells_before = !Alloc_meter.used in
       match replay cost with
-      | () -> note_memo_charge cost (!Fuel_meter.used - before)
+      | () ->
+          note_memo_charge ~cells:(!Alloc_meter.used - cells_before) cost (!Fuel_meter.used - before)
       | exception exn ->
           (* keep the outermost completed replays: a later one that started earlier contains the
              ones it replayed *)
@@ -1694,7 +1794,8 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
           | None -> (
               (* everything from here to publishing the value is the term's recorded cost, so a
                  warm hit charges exactly what this cold path did *)
-              let started = !Fuel_meter.used in
+              let started = !Fuel_meter.used
+              and cells_started = !Alloc_meter.used in
               match locate ctx ~trusted h with
               | {
                Store.decl = { Kernel.it = Kernel.DefTerm bindings; _ } as decl;
@@ -1713,7 +1814,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   reject_recovery_state ctx initial;
                   let saved_capture = ctx.capture_ops in
                   ctx.capture_ops <- false;
-                  let frame = { frame_start = started; completed = [] } in
+                  let frame = { frame_start = started; completed = []; nested_cells = 0 } in
                   let saved_frames = !memo_frames in
                   memo_frames := frame :: saved_frames;
                   let v =
@@ -1728,8 +1829,14 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                         hoist_completed saved_frames frame.completed;
                         raise exn
                   in
+                  let cells = !Alloc_meter.used - cells_started in
                   let memo_charge =
-                    { segments = []; tail = 0; charged_epochs = [ !Fuel_meter.epoch ] }
+                    {
+                      segments = [];
+                      tail = 0;
+                      charged_epochs = [ !Fuel_meter.epoch ];
+                      own_cells = cells - frame.nested_cells;
+                    }
                   in
                   let next = checked_result_state ctx v k in
                   let snapshot = make_mutable_snapshot ~memo_charge ctx v in
@@ -1738,7 +1845,7 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                   memo_charge.segments <- segments;
                   memo_charge.tail <- tail;
                   Hashtbl.replace ctx.memo_cost h memo_charge;
-                  note_memo_charge memo_charge units;
+                  note_memo_charge ~cells memo_charge units;
                   (* The isolated run has completed all closure construction and [let rec] knot
                      tying, and [checked_result_state] has traversed the finished graph. Evaluator
                      transitions never mutate a memoized graph after this point. Record ownership
@@ -1767,7 +1874,9 @@ and step_unchecked ctx (state : state) : state option =
           if i >= 0 && i < Array.length scope.group then
             Some (eval_ref ctx ~trusted:scope.trusted_store_refs scope.group.(i) Kernel.Term k)
           else rt_type "groupref %d outside its group at runtime" i
-      | Kernel.Lam (params, body) -> Some (SApply (VClosure { scope; params; body }, k))
+      | Kernel.Lam (params, body) ->
+          charge_alloc ctx 1;
+          Some (SApply (VClosure { scope; params; body }, k))
       | Kernel.App (fn, args) ->
           Some (SEval (scope, fn, FAppFn { args; scope; site = Meta.span e.meta } :: k))
       | Kernel.Let { isrec = false; binder; value; body } ->
@@ -1780,6 +1889,7 @@ and step_unchecked ctx (state : state) : state option =
               let cell = ref Value.unit_v in
               let env = Env.add x cell scope.env in
               let scope' = { scope with env } in
+              charge_alloc ctx 2;
               cell := VClosure { scope = scope'; params; body = lam_body };
               Some (SEval (scope', body, k))
           | _ -> rt_type "malformed let rec survived validation")
@@ -1829,19 +1939,20 @@ and step_unchecked ctx (state : state) : state option =
                  e,
                  FAppArgs { fn; done_rev = v :: done_rev; pending = rest; scope; site } :: k ))
       | FLet { binder; body; scope } -> (
-          match match_pat v binder scope.env with
+          match charged_pat ctx v binder scope.env with
           | Some env -> Some (SEval ({ scope with env }, body, k))
           | None -> rt (Runtime_err.Match_failure (Value.display v)))
       | FMatch { clauses; scope; _ } ->
           let rec try_clauses = function
             | [] -> rt (Runtime_err.Match_failure (Value.display v))
             | { Kernel.cpat; cbody; _ } :: rest -> (
-                match match_pat v cpat scope.env with
+                match charged_pat ctx v cpat scope.env with
                 | Some env -> SEval ({ scope with env }, cbody, k)
                 | None -> try_clauses rest)
           in
           Some (try_clauses clauses)
       | FTuple { done_rev; pending = []; scope = _ } ->
+          charge_alloc ctx (2 + List.length done_rev);
           Some (SApply (VTuple (List.rev (v :: done_rev)), k))
       | FTuple { done_rev; pending = e :: rest; scope } ->
           Some (SEval (scope, e, FTuple { done_rev = v :: done_rev; pending = rest; scope } :: k))
@@ -1854,7 +1965,7 @@ and step_unchecked ctx (state : state) : state option =
                (scope, e, FQuote { payload; done_rev = v :: done_rev; pending = rest; scope } :: k))
       | FHandle { hret = rbinder, rbody; hscope; _ } -> (
           (* body finished normally: run the return clause in the handler's scope *)
-          match match_pat v rbinder hscope.env with
+          match charged_pat ctx v rbinder hscope.env with
           | Some env -> Some (SEval ({ hscope with env }, rbody, k))
           | None -> rt (Runtime_err.Match_failure (Value.display v))))
 
@@ -1872,6 +1983,8 @@ and run_state_unchecked ctx state =
       let pending = ctx.fuel_pending in
       ctx.fuel_pending <- 0;
       charge ctx pending);
+    (* an exhausted allocation budget is sticky: no later run of the invocation delivers a value *)
+    if Alloc_meter.exhausted () then rt (alloc_error ctx);
     run_machine ctx state
   with
   | value ->
