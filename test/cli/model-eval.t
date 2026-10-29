@@ -453,3 +453,29 @@ result unknown, and the next evaluation restores it.
     last change (TIME):
       entry go changed
       callee wrap changed
+
+The entry's own declaration is found by identity, so a same-named type it
+reaches is still followed; and after a retained body is pruned, an edit that
+keeps the identity (renaming a parameter) still refreshes the history, so the
+result is current again.
+
+  $ for h in .jacquard/model-cache/history/*/g; do m=$(grep '^entry-closure ' "$h" | tail -1 | cut -d' ' -f2); body=$(grep '^wrap term ' ".jacquard/model-cache/snapshots/$m" | cut -d' ' -f4); rm ".jacquard/model-cache/snapshots/$body"; done
+  $ sed -i 's/^wrap(n) = add(n, 5)$/wrap(m) = add(m, 5)/' m.jac
+  $ jacquard model eval doc.model > /dev/null
+  $ jacquard model explain doc.model > alpha.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' alpha.out
+  g: current (evaluated TIME)
+    last change (TIME):
+      entry go changed
+      callee wrap changed
+  $ cd .. && mkdir root && cd root
+  $ printf 'type Wrap = W Int\nwrap(n) = W(n)\n' > m.jac
+  $ printf 'jacquard-model format=1\nsource m.jac\nresult w entry wrap args 1 driver run fuel=10000\n' > doc.model
+  $ jacquard model eval doc.model > /dev/null
+  $ printf 'type Wrap = W Int | V Int\nwrap(n) = W(n)\n' > m.jac
+  $ jacquard model explain doc.model > w.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' w.out
+  w: stale (last evaluated TIME)
+    entry wrap changed
+    callee v added
+    callee w changed
+    callee wrap changed
+    signature wrap changed

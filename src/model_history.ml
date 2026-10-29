@@ -286,13 +286,22 @@ let closure ~(store : Store.t) root =
       bodies
     |> List.sort_uniq compare
   in
-  ( "jacquard-model-closure format=1\n" ^ String.concat "" (List.map (fun l -> l ^ "\n") lines),
+  let root_decl = match Hashtbl.find_opt owner (hex root) with Some d -> d | None -> root in
+  ( "jacquard-model-closure format=1\nroot " ^ hex root_decl ^ "\n"
+    ^ String.concat "" (List.map (fun l -> l ^ "\n") lines),
     List.filter_map snd bodies )
+
+(* the declaration the manifest's root belongs to *)
+let closure_root text =
+  match String.split_on_char '\n' text with
+  | "jacquard-model-closure format=1" :: r :: _ when String.starts_with ~prefix:"root " r ->
+      Some (String.sub r 5 (String.length r - 5))
+  | _ -> None
 
 (* ((name, kind), decl, body) per line; unnamed lines have name "-" *)
 let parse_closure text =
   match String.split_on_char '\n' text with
-  | "jacquard-model-closure format=1" :: rest ->
+  | "jacquard-model-closure format=1" :: _ :: rest ->
       Some
         (List.filter_map
            (fun l ->
@@ -394,12 +403,33 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
   (* the latest record still names a snapshot that is gone (an equal respelling of an
      assumption keeps the key but changes its text): refresh it with a record naming the
      current snapshots *)
+  let bodies_missing h =
+    match read_snapshot ~cache h with
+    | None -> true
+    | Some text -> (
+        match parse_closure text with
+        | None -> true
+        | Some lines ->
+            List.exists
+              (fun (_, _, b) ->
+                b = "none"
+                ||
+                match Hash.of_canonical_hex b with
+                | Some h -> read_snapshot ~cache h = None
+                | None -> true)
+              lines)
+  in
   let stale_refs (l : record) =
     List.exists
       (fun b -> match b.snapshot with Some h -> read_snapshot ~cache h = None | None -> false)
       l.bindings
     || read_snapshot ~cache l.policy_snapshot = None
-    || match l.entry_closure with Some h -> read_snapshot ~cache h = None | None -> true
+    || (match l.entry_closure with Some h -> bodies_missing h | None -> true)
+    (* a term argument's manifest whose retained bodies are gone also needs a refresh *)
+    || List.exists
+         (fun b ->
+           match (b.kind, b.snapshot) with "term", Some h -> bodies_missing h | _ -> false)
+         l.bindings
   in
   match latest with
   | Some l when Hash.equal l.key key && not (stale_refs l) -> (
@@ -484,7 +514,7 @@ let byte_count content = function
 let differences old_ now_ =
   let change ?subject ?before ?after component = { component; subject; before; after } in
   (* the named declarations that differ between two closure manifests, the root's own name aside *)
-  let callees ~root old_c new_c =
+  let callees old_c new_c =
     let manifest side = function
       | None -> None
       | Some h -> Option.bind (side.content h) parse_closure
@@ -493,9 +523,12 @@ let differences old_ now_ =
     | Some o, Some n ->
         let named m = List.filter (fun ((name, _), _, _) -> name <> "-") m in
         let o = named o and n = named n in
-        (* the root's own declaration, with its group siblings, is the change itself *)
+        (* the root's own declaration, with its group siblings, is the change itself; it is
+           found by identity, so a same-named declaration of another kind is still followed *)
         let root_decls =
-          List.filter_map (fun ((name, _), d, _) -> if name = root then Some d else None) (o @ n)
+          List.filter_map
+            (fun c -> Option.bind c closure_root)
+            [ Option.bind old_c old_.content; Option.bind new_c now_.content ]
         in
         let decls m key =
           List.sort_uniq compare
@@ -524,7 +557,7 @@ let differences old_ now_ =
        else change ~subject:now_.entry "entry")
     @
     if Hash.equal o.Model_doc.entry n.Model_doc.entry then []
-    else callees ~root:now_.entry old_.entry_closure now_.entry_closure
+    else callees old_.entry_closure now_.entry_closure
   in
   let fixed =
     some
@@ -579,7 +612,7 @@ let differences old_ now_ =
                     ~after:(byte_count now_.content b1.snapshot)
                     "input";
                 ]
-            | kind -> change ~subject:b1.name kind :: callees ~root:b1.name b0.snapshot b1.snapshot
+            | kind -> change ~subject:b1.name kind :: callees b0.snapshot b1.snapshot
         in
         here @ pairs (i + 1) ob nb oi ni
     | _ -> []
