@@ -1854,6 +1854,12 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                         ctx.capture_ops <- saved_capture;
                         memo_frames := saved_frames;
                         hoist_completed saved_frames frame.completed;
+                        (* the cells it charged stay spent, so the enclosing sub-run's record
+                           keeps them for its warm replay, as fuel's meter differences do *)
+                        (match saved_frames with
+                        | parent :: _ ->
+                            parent.segment_cells <- parent.segment_cells + frame.segment_cells
+                        | [] -> ());
                         raise exn
                   in
                   (* the sub-run's trailing cells, charged at its end as a warm replay does *)

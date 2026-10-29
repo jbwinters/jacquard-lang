@@ -513,6 +513,28 @@ let test_alloc_and_fuel_memo_order () =
         (incomplete cold, incomplete warm))
     [ (50, 3); (200, 10) ]
 
+(* a memoized term that failed inside another one, caught by a native, still counts in the
+   survivor's record *)
+let test_alloc_failed_memo_dependency () =
+  let doomed_store, doomed_ctx = prepared "alloc-doomed" "doomed = { let x = (); div(1, 0) }\n" in
+  let doomed = expression doomed_store "doomed" in
+  let store, ctx = prepared "alloc-bridge" "bridge(u) = 0\nouter = bridge(1)\n" in
+  (match Store.lookup_kind store "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin ctx hash
+        (Value.VBuiltin
+           ("bridge", fun _ -> match Eval.run_expr doomed_ctx doomed with _ -> Ok (Value.VInt 0)))
+  | None -> Alcotest.fail "bridge not declared");
+  let outer = expression store "outer" in
+  let cells () =
+    Eval.with_invocation ctx (fun invocation ->
+        ignore (Eval.run_expr ctx outer);
+        Eval.alloc_used invocation)
+  in
+  let cold = cells () in
+  Alcotest.(check bool) "the failed term allocated" true (cold > 0);
+  Alcotest.(check int) "warm counts the failed dependency's cells" cold (cells ())
+
 let test_alloc_exhaustion_is_sticky () =
   let store, ctx = prepared "alloc-sticky" list_program in
   let first = expression store "size(build(30))" and second = expression store "1" in
@@ -1343,6 +1365,8 @@ let suite =
     Alcotest.test_case "allocation is shared by multi-shot branches" `Quick
       test_alloc_is_shared_by_multi_shot_branches;
     Alcotest.test_case "allocation exhaustion is sticky" `Quick test_alloc_exhaustion_is_sticky;
+    Alcotest.test_case "allocation of a failed memo dependency is replayed" `Quick
+      test_alloc_failed_memo_dependency;
     Alcotest.test_case "allocation charges nullary values and driver resumptions" `Quick
       test_alloc_nullary_and_driver_resumptions;
     Alcotest.test_case "allocation and fuel stop at the same point warm or cold" `Quick

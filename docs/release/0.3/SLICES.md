@@ -920,7 +920,7 @@ continuation capture and resumption; a memoized term's allocation is charged
 once per invocation, so warm and cold runs cost the same. Natives, the other
 drivers and the registry ceilings follow in later slices. `alloc.t` pins the
 reported count, the exact boundary, exhaustion and the interaction with
-`--fuel`; `test_invocation.ml` adds six cases, including driver-made
+`--fuel`; `test_invocation.ml` adds seven cases, including driver-made
 resumptions under exact enumeration and warm/cold agreement on the budget that
 ran out; `alloc.t` also shows a memoized initializer that allocates forever
-stopping at the budget. The source inventory is now `1221 / 82 / 56`.
+stopping at the budget. The source inventory is now `1222 / 82 / 56`.
