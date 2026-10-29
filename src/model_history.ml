@@ -432,7 +432,14 @@ let append ~cache ~document (prepared : Model_doc.prepared) (r : Model_doc.resol
          l.bindings
   in
   match latest with
-  | Some l when Hash.equal l.key key && not (stale_refs l) -> (
+  | Some l
+    when Hash.equal l.key key
+         && ((not (stale_refs l))
+            (* a refresh can only help when it would name other snapshots: a body that cannot be
+               retained at all stays [none] in the current manifest too *)
+            || l.bindings = bindings
+               && Hash.equal l.policy_snapshot policy_snapshot
+               && l.entry_closure = Some entry_closure) -> (
       match damage with
       | None -> Ok None
       | Some (kept, _) -> Result.map (fun () -> note) (Model_eval.write_atomic path kept))

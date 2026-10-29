@@ -388,7 +388,10 @@ guessed. Host 13 consumes `--json` of both commands.
   Every recorded evaluation rewrites the bodies, restoring them, and appends a
   refresh record when the latest record's manifests name bodies that are still
   gone (an identity-preserving edit, such as renaming a parameter, changes the
-  stored bytes and so the manifest).
+  stored bytes and so the manifest). A refresh is appended only when it would
+  name other snapshots than the latest record does: a body that cannot be
+  retained at all (over 16 MiB stored) stays `none`, so the result stays
+  `unknown` without growing its history.
 - Owner decision (2026-10-28): naming the changed callees meets §3.5's
   rendering; a `jac diff` of the retained bodies in `explain` is a follow-up.
 - `current (evaluated T)`, the JSON `outcome` and `previous` come from the

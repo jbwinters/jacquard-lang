@@ -479,3 +479,19 @@ result is current again.
     callee w changed
     callee wrap changed
     signature wrap changed
+
+A declaration whose stored body exceeds the retention limit cannot be
+retained: the result is reported unknown, and repeated evaluations do not grow
+its history.
+
+  $ cd .. && mkdir big && cd big
+  $ { printf 'big() = { let x = "'; head -c 9000000 /dev/zero | tr '\0' '\t'; printf '"; 1 }\n'; } > m.jac
+  $ printf 'jacquard-model format=1\nsource m.jac\nresult b entry big args none driver run fuel=100000000\n' > doc.model
+  $ jacquard model eval doc.model
+  b: fresh
+    value 1
+  $ jacquard model eval doc.model > /dev/null; jacquard model eval doc.model > /dev/null
+  $ grep -c '^entry bytes=' .jacquard/model-cache/history/*/b
+  1
+  $ jacquard model explain doc.model > b.out; sed -E 's/[0-9]{4}-[0-9-]+T[0-9:]+Z/TIME/' b.out
+  b: unknown (snapshots gone: entry big declarations)
