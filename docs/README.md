@@ -167,6 +167,8 @@ Read these together when reviewing the historical 0.1 candidate boundary:
   slices. TYPE.1 implements it; [`release/abstract-types/`](release/abstract-types/DECISION.md)
   has the upgrade notes, and `demos/abstract-types` shows three libraries and
   a client.
+- `designs/allocation-limits.md`: DES.6 accepted design for RT.2: the
+  alloc-v1 logical-allocation budget (`--alloc`, E0921) and registry ceilings.
 - `designs/behavioral-change-review.md`: DES.1 design proposal (not a
   contract) for reviewing two compatible checked versions over declared inputs
   and worlds: observation policy, status taxonomy, condition grouping,

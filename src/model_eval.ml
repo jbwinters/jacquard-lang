@@ -214,6 +214,7 @@ let runtime_kind (e : Runtime_err.t) d =
       | Unresolved _ -> "unresolved"
       | Eval_error _ -> "eval"
       | Fuel_exhausted _ -> "fuel"
+      | Alloc_exhausted _ -> "alloc"
       | Stale_capability _ -> "stale-capability"
       | Diagnostic _ -> "uncoded")
 

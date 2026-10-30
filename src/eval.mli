@@ -129,7 +129,7 @@ val note_root_output : ctx -> operation:Hash.t -> string -> unit
 type invocation
 (** One evaluation extent over a [ctx]. Abstract: it grants nothing and exposes no continuation. *)
 
-val with_invocation : ?coverage:bool -> ?fuel:int -> ctx -> (invocation -> 'a) -> 'a
+val with_invocation : ?coverage:bool -> ?fuel:int -> ?alloc:int -> ctx -> (invocation -> 'a) -> 'a
 (** [with_invocation ctx body] runs [body] as one invocation: grants installed during [body] scoped
     to it, the coverage flag set to [coverage] when given, and the coverage flag and root handlers
     restored on every exit (the root observer is restored too, defensively: the public API only sets
@@ -184,6 +184,27 @@ val fuel_error : ctx -> Runtime_err.t
 
 val fuel_budget : invocation -> int option
 (** [fuel_budget invocation] is the budget [invocation] was started with, if bounded. *)
+
+val alloc_model : string
+(** ["alloc-v1"] (RT.2, docs/designs/allocation-limits.md): logical allocation in cells. Slice 1
+    charges, before the transition that allocates: a closure 1; a tuple or constructor value 1 plus
+    one per field (a nullary one 1); a quote 1, or one per node of the code value a spliced quote
+    builds; each environment binding a pattern makes 1; capturing a continuation 1 per captured
+    frame; resuming one 1 per reinstalled frame, including resumptions a driver makes. Every charge
+    is enforced when made, and exhaustion is checked at every machine state and on every native's
+    return. A memoized term's cells are charged once per invocation: a warm hit replays its recorded
+    cells per segment after that segment's fuel. When one budget runs out, a warm and a cold run end
+    with the same outcome and the same count on that budget; the other budget's count may differ by
+    one segment's charges. When both run out inside one memoized term's first evaluation, they may
+    report different codes and counts; both are incomplete. [with_invocation ~alloc] bounds an
+    invocation like [~fuel] does: a nested invocation stays within the outer allowance, exhaustion
+    is sticky, and running out is the incomplete outcome E0921, never a value. *)
+
+val alloc_used : invocation -> int
+(** [alloc_used invocation] is the number of {!alloc_model} cells charged so far in [invocation]. *)
+
+val alloc_budget : invocation -> int option
+(** [alloc_budget invocation] is the allocation budget [invocation] was started with, if bounded. *)
 
 val on_teardown : invocation -> (unit -> unit) -> unit
 (** [on_teardown invocation callback] registers exactly-once cleanup. [Invalid_argument] after the

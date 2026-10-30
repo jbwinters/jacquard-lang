@@ -33,8 +33,8 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.3.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1215`
-- Cram transcript files: `81`
+- Alcotest/QCheck cases: `1222`
+- Cram transcript files: `82`
 - Documentation examples: `56` named examples across `9` documents
 
 The host protocol v0 conformance kit's `kit.json` records `core_version`

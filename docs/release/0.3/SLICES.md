@@ -909,3 +909,18 @@ unchanged result unknown until the next evaluation restores it;
 existed. The history-v1 record gained an optional `entry-closure` line; no
 release carried the earlier layout, and records without the line still parse.
 The source inventory is now `1215 / 81 / 56`.
+
+RT.2 slice 1 accepts the allocation-limits design
+(`docs/designs/allocation-limits.md`) and adds `jacquard run --alloc CELLS`: a
+process-wide `Alloc_meter` beside the fuel meter, `Eval.with_invocation
+~alloc` with the same nesting, sticky exhaustion and deferred-refusal rules as
+fuel, and E0921 (exit 2, incomplete). The evaluator charges alloc-v1 cells
+before closures, tuples and constructor values, environment bindings, and
+continuation capture and resumption; a memoized term's allocation is charged
+once per invocation, so warm and cold runs cost the same. Natives, the other
+drivers and the registry ceilings follow in later slices. `alloc.t` pins the
+reported count, the exact boundary, exhaustion and the interaction with
+`--fuel`; `test_invocation.ml` adds seven cases, including driver-made
+resumptions under exact enumeration and warm/cold agreement on the budget that
+ran out; `alloc.t` also shows a memoized initializer that allocates forever
+stopping at the budget. The source inventory is now `1222 / 82 / 56`.

@@ -27,6 +27,9 @@ type t =
       (** the invocation's computation fuel ran out (RT.1). Incomplete, not a program failure: the
           same budget and program always stop at the same transition, and no later evaluation in the
           invocation can produce a value *)
+  | Alloc_exhausted of { model : string; limit : int }
+      (** the invocation's logical-allocation budget ran out (RT.2). Incomplete, not a program
+          failure: the same budget and program always stop at the same transition *)
   | Stale_capability of { op : string }
       (** a scoped instance operation found no frame of its scope on the current continuation (TS.2,
           design §10 A2.4): defence in depth, reachable only through unchecked eval *)
@@ -39,6 +42,13 @@ type t =
 let is_fuel_exhausted = function
   | Fuel_exhausted _ -> true
   | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0919"
+  | _ -> false
+
+(** [is_incomplete error] recognises a budget running out: computation fuel (E0919) or the
+    allocation budget (E0921), directly or wrapped in a subsystem [Diagnostic]. *)
+let is_incomplete = function
+  | Fuel_exhausted _ | Alloc_exhausted _ -> true
+  | Diagnostic diagnostic -> List.mem (Diag.code diagnostic) [ Some "E0919"; Some "E0921" ]
   | _ -> false
 
 (** [to_string error] renders compact technical cause text for embedding in another failure. *)
@@ -62,6 +72,11 @@ let to_string = function
   | Type_error msg -> "type error: " ^ msg
   | Unresolved msg -> "unresolved reference: " ^ msg
   | Eval_error msg -> "eval rejected its argument: " ^ msg
+  | Alloc_exhausted { model; limit } ->
+      Printf.sprintf
+        "allocation budget exhausted: the %s budget of %d cell(s) ran out before evaluation \
+         finished; the result is incomplete"
+        model limit
   | Fuel_exhausted { model; limit } ->
       Printf.sprintf
         "computation fuel exhausted: the %s budget of %d unit(s) ran out before evaluation \
@@ -120,6 +135,12 @@ let to_diag error =
   | Eval_error _ ->
       make ~domain:Runtime ~summary:"Eval rejected its code value"
         ~next_step:"Pass validated closed code to eval." ()
+  | Alloc_exhausted _ ->
+      make ~domain:Runtime ~code:"E0921" ~summary:"The allocation budget was exhausted"
+        ~next_step:
+          "Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; \
+           it neither passes nor fails."
+        ()
   | Fuel_exhausted _ ->
       make ~domain:Runtime ~code:"E0919" ~summary:"Computation fuel was exhausted"
         ~next_step:
