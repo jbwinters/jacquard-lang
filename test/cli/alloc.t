@@ -149,7 +149,9 @@ exhaustive property cannot turn running out into a failing verdict:
 
 With both budgets, the one that runs out first is reported:
 
-  $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 1000 --no-cache | head -1
+  $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 1000 --no-cache > both.out || echo "exit=$?"; head -1 < both.out
+  exit=2
   INCOMPLETE grow-case: computation fuel exhausted (fuel-v1, 1000 unit(s))
-  $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 100000 --no-cache | head -1
+  $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 100000 --no-cache > both.out || echo "exit=$?"; head -1 < both.out
+  exit=2
   INCOMPLETE grow-case: allocation budget exhausted (alloc-v1, 5000 cell(s))
