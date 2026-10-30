@@ -924,3 +924,8 @@ reported count, the exact boundary, exhaustion and the interaction with
 resumptions under exact enumeration and warm/cold agreement on the budget that
 ran out; `alloc.t` also shows a memoized initializer that allocates forever
 stopping at the budget. The source inventory is now `1222 / 82 / 56`.
+
+DOC.1 completes the SKILL.md fix: a new `skill-greet` example runs `greet`
+with `grants=console` and checks what it prints, so a SKILL.md example now
+exercises Console authority end to end. The source inventory is now
+`1222 / 82 / 57`.

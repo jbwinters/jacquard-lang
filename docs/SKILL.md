@@ -327,6 +327,18 @@ greet(name) = {
 }
 ```
 
+`greet` prints through Console, so running it needs that authority; `jacquard
+run --allow console` grants it:
+
+```jacquard doctest=skill-greet mode=run grants=console fixture=skill-greet.jac stdout=skill-greet.stdout stderr=empty exit=0
+greet(name) = {
+  println(text.concat("hello ", name))
+  text.length(name)
+}
+
+greet("Ada")
+```
+
 Local recursive bindings must bind functions. Jacquard is strict and
 evaluates arguments left to right. A local `let rec` whose body performs an
 effect can fail row inference (E0801, a known checker bug) when nothing fixes
