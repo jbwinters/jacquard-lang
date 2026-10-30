@@ -94,9 +94,10 @@ result data bytes=1
 ```
 
 - A run is `complete` (with its `value` line when results are compared),
-  `failed code=<diagnostic code>` (never E0919), or `incomplete code=E0919`
-  when the run's fuel budget stopped it, during evaluation or while its result
-  was being rendered. Unlike `run-transcript-v1`, a failed or incomplete run is
+  `failed code=<diagnostic code>` (never E0919 or E0921), or
+  `incomplete code=E0919` when the run's fuel budget stopped it, during
+  evaluation or while its result was being rendered, or `incomplete code=E0921`
+  when its allocation budget stopped it during evaluation. Unlike `run-transcript-v1`, a failed or incomplete run is
   recorded, with the events observed before it stopped.
 - An event is recorded for each root operation the policy observes, in order.
   It has the compared argument positions, then `result` and `output` lines
@@ -122,9 +123,9 @@ nested bounded invocation, or recording outside an invocation can let it
 continue. So unfinished fields, and handler results that failed with E0919,
 may appear on any event of any run. The parser fixes only what the recorder
 guarantees: unfinished arguments mean the handler never ran (every selected
-position unfinished, no result or output), a failed run is never coded E0919,
-an incomplete run always is, and an opaque kind is one the projection
-produces.
+position unfinished, no result or output), a failed run is never coded E0919
+or E0921, an incomplete run always is one of them, and an opaque kind is one
+the projection produces.
 
 Parsing needs the policy: the header's policy identity must match it, and each
 event must carry exactly the lines its rule demands. Everything else is as

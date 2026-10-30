@@ -69,13 +69,13 @@ let probe_send store ctx =
   | _ -> Alcotest.fail "probe.send was not observed"
 
 (* record [sources] under [policy], each in its own invocation with probe.send granted *)
-let record ?fuel ?(handler = fun _ -> Ok (Value.VInt 7)) store ctx policy sources =
+let record ?fuel ?alloc ?(handler = fun _ -> Ok (Value.VInt 7)) store ctx policy sources =
   let recorder = Observation_transcript.create policy in
   let send = probe_send store ctx in
   List.iter
     (fun source ->
       ignore
-        (Eval.with_invocation ?fuel ctx (fun _ ->
+        (Eval.with_invocation ?fuel ?alloc ctx (fun _ ->
              Eval.register_root_handler ctx send handler;
              Observation_transcript.record recorder ctx (fun () ->
                  Eval.run_expr ctx (expression store source)))))
@@ -295,12 +295,21 @@ let test_failures_and_truncation () =
   Alcotest.(check string) "a fuel-stopped run is incomplete" "incomplete E0919/1" (status spinning);
   Alcotest.(check string)
     "failure and exhaustion differ" "divergent run[0].status" (compare failing spinning);
+  (* RT.2: running out of allocation is incomplete too, under its own code *)
+  let growing =
+    record ~alloc:200 store ctx observed
+      [ "{ probe.send(\"a\", \"b\"); let rec g(n) = { let _ = (n, n); g(add(n, 1)) }; g(0) }" ]
+  in
+  Alcotest.(check string)
+    "an allocation-stopped run is incomplete" "incomplete E0921/1" (status growing);
+  Alcotest.(check string)
+    "fuel and allocation exhaustion differ" "divergent run[0].status" (compare spinning growing);
   List.iter
     (fun transcript ->
       let bytes = Observation_transcript.serialize transcript in
       let reparsed = expect_ok "round trip" (Observation_transcript.parse ~policy:observed bytes) in
       Alcotest.(check string) "canonical" bytes (Observation_transcript.serialize reparsed))
-    [ failing; spinning ];
+    [ failing; spinning; growing ];
   (* truncation: equal prefixes are inconclusive, different lengths diverge *)
   let small = policy ~field_bytes:4 [ (send, rule ~result:Observation_policy.Ignore ()) ] in
   let long suffix =
@@ -494,6 +503,12 @@ let test_impossible_transcripts () =
     (replace_once spinning "status=incomplete code=E0919" "status=incomplete code=E0601");
   refuse "failed by fuel" observed
     (replace_once spinning "status=incomplete code=E0919" "status=failed code=E0919");
+  refuse "failed by allocation" observed
+    (replace_once spinning "status=incomplete code=E0919" "status=failed code=E0921");
+  ignore
+    (expect_ok "incomplete by allocation"
+       (Observation_transcript.parse ~policy:observed
+          (replace_once spinning "status=incomplete code=E0919" "status=incomplete code=E0921")));
   let all =
     Observation_transcript.serialize
       (record store ctx Observation_policy.default [ "probe.send(\"a\", \"b\")" ])

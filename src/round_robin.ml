@@ -253,9 +253,10 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
     let max_live = ref 1 in
     let fatal_diagnostics = ref [] in
     let budget_refusal = ref None in
-    (* RT.1: computation fuel belongs to the whole invocation, so exhaustion stops the run instead
-       of becoming one task's failure that a sibling or collecting policy could absorb *)
-    let fuel_exhaustion = ref None in
+    (* RT.1, RT.2: computation fuel and allocation belong to the whole invocation, so exhaustion
+       stops the run instead of becoming one task's failure that a sibling or collecting policy
+       could absorb *)
+    let exhaustion = ref None in
     let validate_creation creation =
       match Schedule_control.creation schedule_control creation with
       | Ok () -> Ok ()
@@ -564,7 +565,7 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
       | Structured_scope.Effect_cancelled awakened -> finish_cancelled run handle awakened
       | Structured_scope.Effect_routed { resume; result = Ok value } -> continue resume value
       | Structured_scope.Effect_routed { result = Error diagnostics; _ }
-        when !fatal_diagnostics <> [] || Option.is_some !fuel_exhaustion ->
+        when !fatal_diagnostics <> [] || Option.is_some !exhaustion ->
           Error diagnostics
       | Structured_scope.Effect_routed { result = Error diagnostics; _ } ->
           fail_task run handle (error_of_diagnostics diagnostics)
@@ -581,8 +582,8 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
     let step run handle state =
       Structured_scope.with_eval_task_context Task_capability.runtime ctx run.scope (fun () ->
           match Eval.run_state_capturing_once_routed ctx state with
-          | Error error when Eval.fuel_exhausted ctx || Runtime_err.is_fuel_exhausted error ->
-              fuel_exhaustion := Some error;
+          | Error error when Eval.exhausted ctx || Runtime_err.is_incomplete error ->
+              exhaustion := Some error;
               Error [ Runtime_err.to_diag error ]
           | Error error ->
               let* () =
@@ -922,8 +923,8 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
                   with
                   | Ok value -> Ok value
                   | Error error ->
-                      if Eval.fuel_exhausted ctx || Runtime_err.is_fuel_exhausted error then
-                        fuel_exhaustion := Some error;
+                      if Eval.exhausted ctx || Runtime_err.is_incomplete error then
+                        exhaustion := Some error;
                       routed_error := Some error;
                       Error [ scheduler_diagnostic (Runtime_err.to_string error) ])
                 ~continue:(fun owned value ->
@@ -1035,14 +1036,14 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
       Error (Run_error (Runtime_err.Scheduler_error "scope cleanup left nonzero ownership metrics"))
     else
       match protected with
-      | (Error _ | Ok _) when Eval.fuel_exhausted ctx ->
+      | (Error _ | Ok _) when Eval.exhausted ctx ->
           (* exhaustion is sticky: however the run ended (a decision limit reached after a
              deferred debit, or a failure it caused), the outcome is the exhaustion *)
-          Error (Run_error (Option.value !fuel_exhaustion ~default:(Eval.fuel_error ctx)))
-      | Error _ when Option.is_some !fuel_exhaustion ->
+          Error (Run_error (Option.value !exhaustion ~default:(Option.get (Eval.exhaustion ctx))))
+      | Error _ when Option.is_some !exhaustion ->
           (* a nested invocation ran out and its native returned that exhaustion: the run is
              incomplete even though the outer meter still has fuel *)
-          Error (Run_error (Option.get !fuel_exhaustion))
+          Error (Run_error (Option.get !exhaustion))
       | Error diagnostics -> (
           let error = runtime_of_diagnostics diagnostics in
           match !budget_refusal with
