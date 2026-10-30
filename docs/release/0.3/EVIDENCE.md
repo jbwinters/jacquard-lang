@@ -35,7 +35,7 @@ tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1222`
 - Cram transcript files: `82`
-- Documentation examples: `56` named examples across `9` documents
+- Documentation examples: `57` named examples across `9` documents
 
 The host protocol v0 conformance kit's `kit.json` records `core_version`
 `0.3.0`; its SHA-256 is
