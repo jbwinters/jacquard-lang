@@ -18,7 +18,8 @@
   test --alloc`: each test runs under `Eval.with_scope ~fuel ~alloc` (one memo
   epoch for both caps), Warp keys bounded results on `alloc=alloc-v1:CELLS`,
   and a native that returns a nested invocation's E0921, even wrapped in a
-  diagnostic, exhausts the enclosing invocation. Charging the natives is
+  diagnostic, exhausts the enclosing invocation when an invocation really ran
+  out while the native ran. Charging the natives is
   slice 2c. A model document has no allocation budget, so `model eval` cannot
   run out of one yet.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced

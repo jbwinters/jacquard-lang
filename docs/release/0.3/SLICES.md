@@ -951,9 +951,13 @@ cached, and makes the run exit 2 unless a test failed; Warp keys bounded
 results on `alloc=alloc-v1:CELLS` after any fuel component, and its group,
 property and runner guards treat either budget's exhaustion alike. A native
 that returns a nested invocation's E0921, even wrapped in a diagnostic, now
-exhausts the enclosing invocation (`Runtime_err.is_alloc_exhausted`).
+exhausts the enclosing invocation, but only when an invocation actually ended
+out of allocation while the native ran (`Alloc_meter.nested_exhaustions`): an
+error that merely carries the code exhausts nothing. A scope whose enclosing
+allowance is smaller than its cap reports that allowance as the limit.
 `test_invocation.ml` adds two cases: allocation scopes (own cap, aggregate
-reached, first budget out, no exhaustion left behind after a smaller nested or
-scoped cap, memo cost per scope) and the wrapped native error, which fails
-without the fix; `alloc.t` shows `test --alloc`. The source inventory is now
+reached and the limit that bound it, first budget out, no exhaustion left
+behind after a smaller nested or scoped cap, memo cost per scope) and the
+native error (wrapped nested exhaustion, and a forged E0921 that exhausts
+nothing), both failing without their fixes; `alloc.t` shows `test --alloc`. The source inventory is now
 `1225 / 82 / 57`.

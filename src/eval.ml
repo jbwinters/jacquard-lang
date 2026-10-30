@@ -659,6 +659,7 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
     invocation.alloc_final <- Some (!Alloc_meter.used - invocation.alloc_start);
+    if Alloc_meter.exhausted () then incr Alloc_meter.nested_exhaustions;
     if
       Alloc_meter.exhausted ()
       && invocation.saved_alloc_ceiling >= 0
@@ -820,16 +821,19 @@ let with_scope ctx ?fuel ?alloc body =
       let own =
         if fuel > (max_int - start) / fine_per_unit then max_int else start + (fuel * fine_per_unit)
       in
-      Fuel_meter.ceiling := min own saved_ceiling;
-      Fuel_meter.budget := fuel;
-      ctx.fuel_limit <- Some fuel)
+      (* exhaustion reports the limit that binds: the cap, or the enclosing allowance if smaller *)
+      if own <= saved_ceiling then (
+        Fuel_meter.ceiling := own;
+        Fuel_meter.budget := fuel;
+        ctx.fuel_limit <- Some fuel))
     fuel;
   Option.iter
     (fun alloc ->
       let own = if alloc > max_int - alloc_start then max_int else alloc_start + alloc in
-      Alloc_meter.ceiling := min own saved_alloc_ceiling;
-      Alloc_meter.budget := alloc;
-      ctx.alloc_limit <- Some alloc)
+      if own <= saved_alloc_ceiling then (
+        Alloc_meter.ceiling := own;
+        Alloc_meter.budget := alloc;
+        ctx.alloc_limit <- Some alloc))
     alloc;
   (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
      what earlier scopes of the same invocation paid for *)
@@ -1501,15 +1505,20 @@ let check_native_argument ctx root =
 (* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
    result or error *)
 (* Only inside an invocation: outside one there is no teardown to restore the meter, and no
-   enclosing budget to exhaust. *)
-let note_returned_exhaustion ctx = function
+   enclosing budget to exhaust. Allocation exhaustion is taken from a native's error, bare or wrapped,
+   only when an invocation ended exhausted while the native ran ([nested], the count before it
+   started). *)
+let note_returned_exhaustion ctx ~nested = function
   | Error error when Runtime_err.is_fuel_exhausted error && !Fuel_meter.depth > 0 ->
       mark_exhausted ctx
-  | Error error when Runtime_err.is_alloc_exhausted error && !Fuel_meter.depth > 0 ->
+  | Error error
+    when Runtime_err.is_alloc_exhausted error
+         && !Fuel_meter.depth > 0
+         && !Alloc_meter.nested_exhaustions > nested ->
       Alloc_meter.trip ()
   | Ok _ | Error _ -> ()
 
-let charge_native_result ctx result =
+let charge_native_result ctx ~nested result =
   if Fuel_meter.exhausted () then Error (fuel_error ctx)
   else if Alloc_meter.exhausted () then (* nor its allocation exhaustion *)
     Error (alloc_error ctx)
@@ -1522,7 +1531,7 @@ let charge_native_result ctx result =
         (* a native reporting exhaustion (say, of a nested invocation with its own budget) left
            its work incomplete, so everything depending on it is incomplete: the enclosing
            invocation is exhausted too, and every driver's sticky check sees it *)
-        note_returned_exhaustion ctx result;
+        note_returned_exhaustion ctx ~nested result;
         result
     | Error _ -> result
 
@@ -1533,6 +1542,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
   List.iter (prepare_native_argument ctx) invocation_roots;
   charge_native ctx args;
+  let nested = !Alloc_meter.nested_exhaustions in
   let result =
     match observed with
     | Some (_, call) -> dispatching_as ctx call (fun () -> native args)
@@ -1541,7 +1551,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   (* a native that ran out of fuel inside a nested run, or returned a nested invocation's
      exhaustion, cannot turn that into another failure, not even one found by revalidating what
      it mutated *)
-  note_returned_exhaustion ctx result;
+  note_returned_exhaustion ctx ~nested result;
   if Fuel_meter.exhausted () then exhaust ctx;
   (* nor replace allocation exhaustion with a failure found while revalidating *)
   if Alloc_meter.exhausted () then rt (alloc_error ctx);
@@ -1550,7 +1560,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   let observe result =
     Option.iter (fun (operation, call) -> notify_root_result ctx ~call operation result) observed
   in
-  match charge_native_result ctx result with
+  match charge_native_result ctx ~nested result with
   | Ok value ->
       let next = checked_result_state ctx value kont in
       observe (Ok value);
@@ -1565,8 +1575,9 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
 let invoke_trusted_native ctx builtin args kont =
   if Fuel_meter.exhausted () then exhaust ctx;
   charge_native ctx args;
+  let nested = !Alloc_meter.nested_exhaustions in
   let result = Trusted_builtin.invoke builtin args in
-  match charge_native_result ctx result with
+  match charge_native_result ctx ~nested result with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
@@ -2304,12 +2315,13 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
           List.iter (prepare_native_argument ctx) roots;
           charge_native ctx args;
           (* a routed dispatch continues the call its capture observed *)
+          let nested = !Alloc_meter.nested_exhaustions in
           let result = dispatching_as ctx call (fun () -> native args) in
-          note_returned_exhaustion ctx result;
+          note_returned_exhaustion ctx ~nested result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
           if Alloc_meter.exhausted () then raise (Rt (alloc_error ctx));
           List.iter (check_native_argument ctx) roots;
-          match charge_native_result ctx result with
+          match charge_native_result ctx ~nested result with
           | Ok value ->
               if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
               notify_root_result ctx ~call op (Ok value);

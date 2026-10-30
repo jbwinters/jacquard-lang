@@ -1181,6 +1181,14 @@ let test_alloc_scopes () =
         (code report.Eval.exhaustion, Eval.exhausted ctx, failure (Eval.run_expr ctx one)))
   in
   Alcotest.(check (triple string bool string)) "aggregate reached" ("E0921", true, "E0921") reached;
+  (* and reports the limit that bound it, not the larger cap *)
+  let bound =
+    Eval.with_invocation ~alloc:50 ctx (fun _ ->
+        match Eval.with_scope ctx ~alloc:1_000 (fun () -> Eval.run_expr ctx grow) with
+        | _, { Eval.exhaustion = Some (Runtime_err.Alloc_exhausted { limit; _ }); _ } -> limit
+        | _ -> -1)
+  in
+  Alcotest.(check int) "the enclosing limit binds" 50 bound;
   (* with both caps, the first to run out is reported *)
   let both =
     Eval.with_invocation ctx (fun _ ->
@@ -1245,7 +1253,27 @@ let test_alloc_wrapped_native_exhaustion () =
         (first, Eval.exhausted ctx, failure (Eval.run_expr ctx one)))
   in
   Alcotest.(check (triple string bool string))
-    "the enclosing invocation is exhausted" ("E0921", true, "E0921") outcome
+    "the enclosing invocation is exhausted" ("E0921", true, "E0921") outcome;
+  (* an error that only carries the code, with no nested run behind it, exhausts nothing *)
+  let forged_store, forged_ctx = prepared "alloc-forged" "forge(u) = 0\n" in
+  (match Store.lookup_kind forged_store "forge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin forged_ctx hash
+        (Value.VBuiltin
+           ( "forge",
+             fun _ ->
+               Error
+                 (Runtime_err.Diagnostic
+                    (Runtime_err.to_diag
+                       (Runtime_err.Alloc_exhausted { model = Eval.alloc_model; limit = 1 }))) ))
+  | None -> Alcotest.fail "forge not declared");
+  let forged = expression forged_store "forge(1)" and sum = expression forged_store "add(1, 2)" in
+  let after =
+    Eval.with_invocation ~alloc:100_000 forged_ctx (fun _ ->
+        ignore (Eval.run_expr forged_ctx forged);
+        (Eval.exhausted forged_ctx, Result.is_ok (Eval.run_expr forged_ctx sum)))
+  in
+  Alcotest.(check (pair bool bool)) "a forged E0921 exhausts nothing" (false, true) after
 
 (* --- typed observation (RF.3) --- *)
 
