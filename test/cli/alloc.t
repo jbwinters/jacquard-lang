@@ -94,3 +94,62 @@ branch or run; running out is E0921, not a model failure (E0902):
   $ jacquard infer lw --seed 1 --samples 50 --alloc 50 ../../demos/inference/m3-two-coins.jac > lw.out 2>&1 || echo "exit=$?"; head -1 < lw.out
   exit=2
   error[E0921]: The allocation budget was exhausted
+
+`jacquard test --alloc CELLS` gives each discovered test its own allocation
+budget, drawn from one run, as `--fuel` does: a test that runs out is
+INCOMPLETE, is never cached, and makes the run exit 2; bounded results are
+cached under the budget and never answer for an unbounded run or another
+budget:
+
+  $ cat > suite.jac <<'JAC'
+  > grow(n) = { let _ = (n, n); grow(add(n, 1)) }
+  > twice(n) = mul(n, 2)
+  > quick-case =
+  >   Case("quick", fn () -> check.eq(twice(3), 6, int.eq, int.show, "twice"))
+  > grow-case =
+  >   Case("grows", fn () -> check.eq(grow(0), 0, int.eq, int.show, "never"))
+  > JAC
+  $ timeout 60 jacquard test suite.jac --alloc 5000 --cache-dir bounded
+  INCOMPLETE grow-case: allocation budget exhausted (alloc-v1, 5000 cell(s))
+  PASS quick-case/quick (1 check)
+  1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
+  cache: 0 hit, 1 ran
+  [2]
+  $ ls bounded | wc -l
+  1
+  $ timeout 60 jacquard test suite.jac --alloc 5000 --cache-dir bounded > pipe.out || echo "exit=$?"; tail -2 < pipe.out
+  exit=2
+  1 passed, 0 failed, 0 skipped, 0 refused, 1 incomplete
+  cache: 1 hit, 0 ran
+  $ timeout 60 jacquard test suite.jac --alloc 6000 --cache-dir bounded > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  exit=2
+  cache: 0 hit, 1 ran
+  $ grep -v grow suite.jac > quick.jac
+  $ jacquard test quick.jac --cache-dir bounded > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  cache: 0 hit, 1 ran
+
+A group keeps the verdicts its children finished before one ran out, and an
+exhaustive property cannot turn running out into a failing verdict:
+
+  $ cat > group.jac <<'JAC'
+  > grow(n) = { let _ = (n, n); grow(add(n, 1)) }
+  > suite-case = Group("suite", [
+  >   Case("fails", fn () -> check.true(False, "no")),
+  >   prop("grows", fn () -> check.eq(grow(sample(uniform-int(0, 1))), 0, int.eq, int.show, "never"))
+  > ])
+  > zz-after-case = Case("after", fn () -> check.true(True, "yes"))
+  > JAC
+  $ timeout 60 jacquard test group.jac --exhaustive --alloc 3000 --no-cache
+  FAIL suite-case/suite/fails
+    - no
+  INCOMPLETE suite-case: allocation budget exhausted (alloc-v1, 3000 cell(s))
+  PASS zz-after-case/after (1 check)
+  1 passed, 1 failed, 0 skipped, 0 refused, 1 incomplete
+  [1]
+
+With both budgets, the one that runs out first is reported:
+
+  $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 1000 --no-cache | head -1
+  INCOMPLETE grow-case: computation fuel exhausted (fuel-v1, 1000 unit(s))
+  $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 100000 --no-cache | head -1
+  INCOMPLETE grow-case: allocation budget exhausted (alloc-v1, 5000 cell(s))

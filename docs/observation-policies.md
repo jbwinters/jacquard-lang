@@ -97,8 +97,9 @@ result data bytes=1
   `failed code=<diagnostic code>` (never E0919 or E0921), or
   `incomplete code=E0919` when the run's fuel budget stopped it, during
   evaluation or while its result was being rendered, or `incomplete code=E0921`
-  when its allocation budget stopped it during evaluation. Unlike `run-transcript-v1`, a failed or incomplete run is
-  recorded, with the events observed before it stopped.
+  when its allocation budget stopped it during evaluation. Unlike
+  `run-transcript-v1`, a failed or incomplete run is recorded, with the events
+  observed before it stopped.
 - An event is recorded for each root operation the policy observes, in order.
   It has the compared argument positions, then `result` and `output` lines
   exactly when the rule compares them.

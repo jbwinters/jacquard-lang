@@ -1620,8 +1620,8 @@ let replay_cmd log_file program forks to_n compare prelude =
 
 (* Run the discovered Warp tests with the granted authority and print the suite summary; the exit
    status reflects failures. *)
-let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir ~no_cache
-    ~default_cache_dir ~coverage ~prelude ~discover () =
+let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir
+    ~no_cache ~default_cache_dir ~coverage ~prelude ~discover () =
   match Prelude_identity.lookup_kind store "test.run" Resolve.KTerm with
   | None -> print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
   | Some { Resolve.hash = tr; _ } -> (
@@ -1659,19 +1659,20 @@ let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~c
                   Warp.run_discovered ctx cctx ~test_run ~prop_mode ~schedule_plan ~suite_seed:seed
                     ~cache_dir ~granted d
                 in
-                (* RT.1: with --fuel each test has its own cap on the suite's aggregate; a test that
-                   runs out is incomplete, reported as such and never cached *)
+                (* RT.1, RT.2: with --fuel or --alloc each test has its own caps on the suite's
+                   aggregate; a test that runs out is incomplete, reported as such and never
+                   cached *)
                 Warp.partial_outcomes := [];
-                let result, exhausted =
-                  match fuel with
-                  | None -> (run (), false)
-                  | Some budget -> (
-                      match Eval.with_fuel_scope ctx ~fuel:budget run with
-                      | result, exhausted, _ -> (result, exhausted)
-                      | exception Fuel_meter.Exceeded -> (Ok [], true))
+                let result, exhaustion =
+                  match (fuel, alloc) with
+                  | None, None -> (run (), None)
+                  | _ -> (
+                      match Eval.with_scope ctx ?fuel ?alloc run with
+                      | result, report -> (result, report.Eval.exhaustion)
+                      | exception Fuel_meter.Exceeded -> (Ok [], Some (Eval.fuel_error ctx)))
                 in
-                match result with
-                | _ when exhausted ->
+                match (result, exhaustion) with
+                | _, Some exhaustion ->
                     let name =
                       match d with
                       | Warp.Hermetic (name, _) | Warp.World (name, _) | Warp.Relational (name, _)
@@ -1685,11 +1686,19 @@ let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~c
                         List.iter print_endline (Warp.render_outcome totals o))
                       !Warp.partial_outcomes;
                     totals.Warp.incomplete <- totals.Warp.incomplete + 1;
-                    Printf.printf "INCOMPLETE %s: computation fuel exhausted (%s, %d unit(s))\n"
-                      name Eval.fuel_model (Option.get fuel);
+                    (match exhaustion with
+                    | Runtime_err.Alloc_exhausted { model; limit } ->
+                        Printf.printf
+                          "INCOMPLETE %s: allocation budget exhausted (%s, %d cell(s))\n" name model
+                          limit
+                    | Runtime_err.Fuel_exhausted { model; limit } ->
+                        Printf.printf "INCOMPLETE %s: computation fuel exhausted (%s, %d unit(s))\n"
+                          name model limit
+                    | other ->
+                        Printf.printf "INCOMPLETE %s: %s\n" name (Runtime_err.to_string other));
                     go rest
-                | Error e -> Error e
-                | Ok outcomes ->
+                | Error e, None -> Error e
+                | Ok outcomes, None ->
                     List.iter
                       (fun (o : Warp.outcome) ->
                         List.iter (fun h -> Hashtbl.replace union h ()) o.Warp.coverage;
@@ -1704,7 +1713,8 @@ let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~c
           | Ok () ->
               Printf.printf "%d passed, %d failed, %d skipped, %d refused" totals.Warp.passed
                 totals.Warp.failed totals.Warp.skipped totals.Warp.refused;
-              if Option.is_some fuel then Printf.printf ", %d incomplete" totals.Warp.incomplete;
+              if Option.is_some fuel || Option.is_some alloc then
+                Printf.printf ", %d incomplete" totals.Warp.incomplete;
               print_newline ();
               if cache_dir <> None then
                 Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits totals.Warp.ran;
@@ -1719,7 +1729,7 @@ let run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~c
               else ok))
 
 let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget
-    schedules fuel =
+    schedules fuel alloc =
   let configuration =
     match (schedules, seed) with
     | Some count, _ when count <= 0 ->
@@ -1825,8 +1835,10 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                       | Error ds -> print_diags ds
                       | Ok () ->
                           Warp.fuel_budget := fuel;
-                          run_suite ?fuel ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed
-                            ~cache_dir ~no_cache ~default_cache_dir:"test-cache" ~coverage ~prelude
+                          Warp.alloc_budget := alloc;
+                          run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan
+                            ~seed ~cache_dir ~no_cache ~default_cache_dir:"test-cache" ~coverage
+                            ~prelude
                             ~discover:(fun () -> Warp.discover store cctx)
                             ())))))
 
@@ -2933,6 +2945,26 @@ let test_fuel_arg =
            cached, and makes the run exit 2 unless a test failed. Results are cached under the \
            budget, never shared with unbounded runs.")
 
+let test_alloc_arg =
+  let cells =
+    let parse text =
+      match int_of_string_opt text with
+      | Some cells when cells >= 0 -> Ok cells
+      | Some _ | None -> Error (`Msg "expected a non-negative number of cells")
+    in
+    Arg.conv (parse, Format.pp_print_int)
+  in
+  Arg.(
+    value
+    & opt (some cells) None
+    & info [ "alloc" ] ~docv:"CELLS"
+        ~doc:
+          "Give each discovered test its own alloc-v1 allocation budget of CELLS (see \
+           docs/designs/allocation-limits.md). A test that runs out is reported INCOMPLETE, is \
+           never cached, and makes the run exit 2 unless a test failed. Results are cached under \
+           the budget, never shared with unbounded runs. Values built inside natives are not yet \
+           charged.")
+
 let test_t =
   Cmd.v
     (Cmd.info "test"
@@ -2943,7 +2975,7 @@ let test_t =
       const (configure_diagnostics test_cmd)
       $ diagnostic_format_arg $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg
       $ no_cache_arg $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg
-      $ schedules_arg $ test_fuel_arg)
+      $ schedules_arg $ test_fuel_arg $ test_alloc_arg)
 
 (* --- tiers (PF.2 phase 1) --- *)
 

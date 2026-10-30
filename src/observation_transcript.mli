@@ -74,10 +74,10 @@ val record :
   (Value.t, Runtime_err.t) result
 (** [record recorder ctx run] executes [run] under a scoped observer and returns its result
     unchanged. Every outcome adds one run: [Ok] is complete, fuel exhaustion (including while the
-    result is projected) is incomplete, any other [Error] is failed. A raised exception adds nothing
-    and propagates. Results and output pair with their call by correlation id. Arguments are
-    projected inside the observer, so their walk draws on the observed invocation's fuel; if it runs
-    out, the operation is kept with [Unfinished] fields. *)
+    result is projected) or allocation exhaustion is incomplete, any other [Error] is failed. A
+    raised exception adds nothing and propagates. Results and output pair with their call by
+    correlation id. Arguments are projected inside the observer, so their walk draws on the observed
+    invocation's fuel; if it runs out, the operation is kept with [Unfinished] fields. *)
 
 val transcript : recorder -> transcript
 

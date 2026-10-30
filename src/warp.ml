@@ -121,15 +121,16 @@ let verdict_of_report (v : Value.t) : (verdict, string) result =
           | v -> Error (Printf.sprintf "malformed report hard field: %s" (Value.display v))))
   | v -> Error (Printf.sprintf "not a report: %s" (Value.display v))
 
-(* RT.1: exhaustion is incomplete, never a verdict. Exhaustion is sticky, so a runner that ran out
-   anywhere (and any verdict it built from the error) reports it as a runner error instead. *)
-let fuel_exhausted_message ctx = Runtime_err.to_string (Eval.fuel_error ctx)
-
+(* RT.1, RT.2: exhaustion of fuel or allocation is incomplete, never a verdict. Exhaustion is
+   sticky, so a runner that ran out anywhere (and any verdict it built from the error) reports it as
+   a runner error instead. *)
 let guard_fuel_string ctx run =
   match run () with
-  | _ when Eval.fuel_exhausted ctx -> Error (fuel_exhausted_message ctx)
-  | result -> result
-  | exception Fuel_meter.Exceeded -> Error (fuel_exhausted_message ctx)
+  | result -> (
+      match Eval.exhaustion ctx with
+      | Some error -> Error (Runtime_err.to_string error)
+      | None -> result)
+  | exception Fuel_meter.Exceeded -> Error (Runtime_err.to_string (Eval.fuel_error ctx))
 
 (* Run one thunk under test.run, collecting its per-test coverage set. A runtime crash
    is a FAILING verdict, not a runner abort: one broken test must not blind the suite.
@@ -143,7 +144,7 @@ let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) 
   in
   match result with
   | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
-  | Error e when Runtime_err.is_fuel_exhausted e -> Error (Runtime_err.to_string e)
+  | Error e when Runtime_err.is_incomplete e -> Error (Runtime_err.to_string e)
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
 
@@ -222,8 +223,8 @@ let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~progr
       in
       let coverage = add_coverage coverage mine in
       match result with
-      | Error error when Runtime_err.is_fuel_exhausted error -> Error (Runtime_err.to_string error)
-      | Ok { Round_robin.result = Error error; _ } when Runtime_err.is_fuel_exhausted error ->
+      | Error error when Runtime_err.is_incomplete error -> Error (Runtime_err.to_string error)
+      | Ok { Round_robin.result = Error error; _ } when Runtime_err.is_incomplete error ->
           Error (Runtime_err.to_string error)
       | Error error ->
           Ok
@@ -619,8 +620,10 @@ let run_prop_exhaustive ctx ~budget (thunk : Value.t) : (verdict * string, Diag.
 
 let run_prop_exhaustive ctx ~budget thunk =
   match run_prop_exhaustive ctx ~budget thunk with
-  | _ when Eval.fuel_exhausted ctx -> Error (Runtime_err.to_diag (Eval.fuel_error ctx))
-  | result -> result
+  | result -> (
+      match Eval.exhaustion ctx with
+      | Some error -> Error (Runtime_err.to_diag error)
+      | None -> result)
   | exception Fuel_meter.Exceeded -> Error (Runtime_err.to_diag (Eval.fuel_error ctx))
 
 let relational_failure detail = Fail { soft = []; hard = Some detail }
@@ -954,14 +957,22 @@ let read_file path =
 *)
 let fuel_budget : int option ref = ref None
 
+(** RT.2: the per-test allocation budget, keyed the same way. *)
+let alloc_budget : int option ref = ref None
+
 (** Outcomes a test's groups completed before its fuel ran out, in order; the runner reports them
     alongside the incomplete test and resets this before each test. They are never cached. *)
 let partial_outcomes : outcome list ref = ref []
 
 let bounded_key key =
-  match !fuel_budget with
+  let key =
+    match !fuel_budget with
+    | None -> key
+    | Some budget -> Printf.sprintf "%s|fuel=%s:%d" key Eval.fuel_model budget
+  in
+  match !alloc_budget with
   | None -> key
-  | Some budget -> Printf.sprintf "%s|fuel=%s:%d" key Eval.fuel_model budget
+  | Some budget -> Printf.sprintf "%s|alloc=%s:%d" key Eval.alloc_model budget
 
 let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t list) list option =
   let key = bounded_key key in
@@ -983,7 +994,7 @@ let cache_store ~cache_dir key outcomes : unit =
   let key = bounded_key key in
   match cache_dir with
   | None -> ()
-  | Some _ when Fuel_meter.exhausted () ->
+  | Some _ when Fuel_meter.exhausted () || Alloc_meter.exhausted () ->
       (* an exhausted test is incomplete: nothing it produced is a verdict worth caching *)
       ()
   | Some dir -> (
@@ -1115,12 +1126,12 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
                 ~display:(display ^ "/" ^ label)
                 t
             with
-            | _ when Fuel_meter.exhausted () ->
-                (* RT.1: a child that ran out of fuel leaves the group incomplete, whatever it
-                   returned (an exhaustive property turns the error into a verdict); only the
-                   children that finished before it keep their verdicts *)
+            | _ when Eval.exhausted ctx ->
+                (* RT.1, RT.2: a child that ran out of fuel or allocation leaves the group
+                   incomplete, whatever it returned (an exhaustive property turns the error into a
+                   verdict); only the children that finished before it keep their verdicts *)
                 partial_outcomes := List.concat (List.rev acc) @ !partial_outcomes;
-                Error "computation fuel exhausted"
+                Error (Runtime_err.to_string (Option.get (Eval.exhaustion ctx)))
             | Ok os -> walk (child_index + 1) (os :: acc) rest
             | Error e -> Error e)
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.display v))
