@@ -659,6 +659,7 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
     invocation.alloc_final <- Some (!Alloc_meter.used - invocation.alloc_start);
+    if Alloc_meter.exhausted () then incr Alloc_meter.nested_exhaustions;
     if
       Alloc_meter.exhausted ()
       && invocation.saved_alloc_ceiling >= 0
@@ -701,59 +702,6 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
       let backtrace = Printexc.get_raw_backtrace () in
       ignore (finish ());
       Printexc.raise_with_backtrace exn backtrace
-
-let with_fuel_scope ctx ~fuel body =
-  if fuel < 0 then invalid_arg "Eval.with_fuel_scope: fuel must be non-negative";
-  if not (invocation_active ctx) then
-    invalid_arg "Eval.with_fuel_scope: no invocation is active on this evaluator";
-  let saved_ceiling = !Fuel_meter.ceiling
-  and saved_budget = !Fuel_meter.budget
-  and saved_limit = ctx.fuel_limit in
-  let start = !Fuel_meter.used in
-  let own =
-    if fuel > (max_int - start) / fine_per_unit then max_int else start + (fuel * fine_per_unit)
-  in
-  Fuel_meter.ceiling := min own saved_ceiling;
-  Fuel_meter.budget := fuel;
-  ctx.fuel_limit <- Some fuel;
-  (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
-     what earlier scopes of the same invocation paid for *)
-  let saved_epoch = !Fuel_meter.epoch and saved_pending = ctx.fuel_pending in
-  incr Fuel_meter.next_epoch;
-  Fuel_meter.epoch := !Fuel_meter.next_epoch;
-  Fuel_meter.active_epochs := !Fuel_meter.epoch :: !Fuel_meter.active_epochs;
-  ctx.fuel_pending <- 0;
-  let exhausted = ref false in
-  let restore () =
-    (* the scope's own exhaustion is its outcome; the enclosing allowance stays exhausted only if
-       the scope used it up *)
-    if
-      Fuel_meter.exhausted () && saved_ceiling >= 0 && saved_ceiling < max_int
-      && !Fuel_meter.used >= saved_ceiling
-    then (
-      Fuel_meter.ceiling := saved_ceiling;
-      Fuel_meter.trip ())
-    else Fuel_meter.ceiling := saved_ceiling;
-    Fuel_meter.budget := saved_budget;
-    ctx.fuel_limit <- saved_limit;
-    Fuel_meter.active_epochs :=
-      List.filter (fun epoch -> epoch <> !Fuel_meter.epoch) !Fuel_meter.active_epochs;
-    Fuel_meter.epoch := saved_epoch;
-    ctx.fuel_pending <- saved_pending
-  in
-  let result =
-    Fun.protect ~finally:restore (fun () ->
-        let result =
-          match body () with
-          | result -> result
-          | exception Fuel_meter.Exceeded ->
-              exhausted := true;
-              raise Fuel_meter.Exceeded
-        in
-        exhausted := Fuel_meter.exhausted ();
-        result)
-  in
-  (result, !exhausted, units_of_fine (!Fuel_meter.used - start))
 
 (** [set_coverage_tracking ctx enabled] controls semantic term-reference collection. Disabling it
     avoids bookkeeping when callers will not inspect coverage. *)
@@ -851,6 +799,101 @@ let exhaustion ctx =
   else None
 
 let exhausted ctx = Option.is_some (exhaustion ctx)
+
+type scope_report = { exhaustion : Runtime_err.t option; fuel_used : int; alloc_used : int }
+
+let with_scope ctx ?fuel ?alloc body =
+  if Option.fold ~none:false ~some:(fun n -> n < 0) fuel then
+    invalid_arg "Eval.with_scope: fuel must be non-negative";
+  if Option.fold ~none:false ~some:(fun n -> n < 0) alloc then
+    invalid_arg "Eval.with_scope: alloc must be non-negative";
+  if not (invocation_active ctx) then
+    invalid_arg "Eval.with_scope: no invocation is active on this evaluator";
+  let saved_ceiling = !Fuel_meter.ceiling
+  and saved_budget = !Fuel_meter.budget
+  and saved_limit = ctx.fuel_limit in
+  let saved_alloc_ceiling = !Alloc_meter.ceiling
+  and saved_alloc_budget = !Alloc_meter.budget
+  and saved_alloc_limit = ctx.alloc_limit in
+  let start = !Fuel_meter.used and alloc_start = !Alloc_meter.used in
+  Option.iter
+    (fun fuel ->
+      let own =
+        if fuel > (max_int - start) / fine_per_unit then max_int else start + (fuel * fine_per_unit)
+      in
+      (* exhaustion reports the limit that binds: the cap, or the enclosing allowance if smaller *)
+      if own <= saved_ceiling then (
+        Fuel_meter.ceiling := own;
+        Fuel_meter.budget := fuel;
+        ctx.fuel_limit <- Some fuel))
+    fuel;
+  Option.iter
+    (fun alloc ->
+      let own = if alloc > max_int - alloc_start then max_int else alloc_start + alloc in
+      if own <= saved_alloc_ceiling then (
+        Alloc_meter.ceiling := own;
+        Alloc_meter.budget := alloc;
+        ctx.alloc_limit <- Some alloc))
+    alloc;
+  (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
+     what earlier scopes of the same invocation paid for *)
+  let saved_epoch = !Fuel_meter.epoch and saved_pending = ctx.fuel_pending in
+  incr Fuel_meter.next_epoch;
+  Fuel_meter.epoch := !Fuel_meter.next_epoch;
+  Fuel_meter.active_epochs := !Fuel_meter.epoch :: !Fuel_meter.active_epochs;
+  ctx.fuel_pending <- 0;
+  let outcome = ref None in
+  let restore () =
+    (* the scope's own exhaustion is its outcome; the enclosing allowance stays exhausted only if
+       the scope used it up *)
+    if
+      Fuel_meter.exhausted () && saved_ceiling >= 0 && saved_ceiling < max_int
+      && !Fuel_meter.used >= saved_ceiling
+    then (
+      Fuel_meter.ceiling := saved_ceiling;
+      Fuel_meter.trip ())
+    else Fuel_meter.ceiling := saved_ceiling;
+    Fuel_meter.budget := saved_budget;
+    ctx.fuel_limit <- saved_limit;
+    if
+      Alloc_meter.exhausted () && saved_alloc_ceiling >= 0 && saved_alloc_ceiling < max_int
+      && !Alloc_meter.used >= saved_alloc_ceiling
+    then (
+      Alloc_meter.ceiling := saved_alloc_ceiling;
+      Alloc_meter.trip ())
+    else Alloc_meter.ceiling := saved_alloc_ceiling;
+    Alloc_meter.budget := saved_alloc_budget;
+    ctx.alloc_limit <- saved_alloc_limit;
+    Fuel_meter.active_epochs :=
+      List.filter (fun epoch -> epoch <> !Fuel_meter.epoch) !Fuel_meter.active_epochs;
+    Fuel_meter.epoch := saved_epoch;
+    ctx.fuel_pending <- saved_pending
+  in
+  let result =
+    Fun.protect ~finally:restore (fun () ->
+        let result =
+          match body () with
+          | result -> result
+          | exception Fuel_meter.Exceeded ->
+              outcome := Some (fuel_error ctx);
+              raise Fuel_meter.Exceeded
+        in
+        outcome := exhaustion ctx;
+        result)
+  in
+  ( result,
+    {
+      exhaustion = !outcome;
+      fuel_used = units_of_fine (!Fuel_meter.used - start);
+      alloc_used = !Alloc_meter.used - alloc_start;
+    } )
+
+let with_fuel_scope ctx ~fuel body =
+  let result, report = with_scope ctx ~fuel body in
+  let exhausted =
+    match report.exhaustion with Some (Runtime_err.Fuel_exhausted _) -> true | _ -> false
+  in
+  (result, exhausted, report.fuel_used)
 
 (** [charge_alloc ctx cells] charges [cells] of logical allocation before the transition that
     allocates them. A charge that would pass the ceiling exhausts the invocation: inside a run it
@@ -1462,14 +1505,20 @@ let check_native_argument ctx root =
 (* A native that re-entered the evaluator and ran out cannot replace the exhaustion with its own
    result or error *)
 (* Only inside an invocation: outside one there is no teardown to restore the meter, and no
-   enclosing budget to exhaust. *)
-let note_returned_exhaustion ctx = function
+   enclosing budget to exhaust. Allocation exhaustion is taken from a native's error, bare or wrapped,
+   only when an invocation ended exhausted while the native ran ([nested], the count before it
+   started). *)
+let note_returned_exhaustion ctx ~nested = function
   | Error error when Runtime_err.is_fuel_exhausted error && !Fuel_meter.depth > 0 ->
       mark_exhausted ctx
-  | Error (Runtime_err.Alloc_exhausted _) when !Fuel_meter.depth > 0 -> Alloc_meter.trip ()
+  | Error error
+    when Runtime_err.is_alloc_exhausted error
+         && !Fuel_meter.depth > 0
+         && !Alloc_meter.nested_exhaustions > nested ->
+      Alloc_meter.trip ()
   | Ok _ | Error _ -> ()
 
-let charge_native_result ctx result =
+let charge_native_result ctx ~nested result =
   if Fuel_meter.exhausted () then Error (fuel_error ctx)
   else if Alloc_meter.exhausted () then (* nor its allocation exhaustion *)
     Error (alloc_error ctx)
@@ -1478,11 +1527,11 @@ let charge_native_result ctx result =
     | Ok value ->
         charge_payload ctx (payload_units value);
         result
-    | Error error when Runtime_err.is_fuel_exhausted error ->
+    | Error error when Runtime_err.is_incomplete error ->
         (* a native reporting exhaustion (say, of a nested invocation with its own budget) left
            its work incomplete, so everything depending on it is incomplete: the enclosing
            invocation is exhausted too, and every driver's sticky check sees it *)
-        note_returned_exhaustion ctx result;
+        note_returned_exhaustion ctx ~nested result;
         result
     | Error _ -> result
 
@@ -1493,6 +1542,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   let invocation_roots = [ fn; VTuple args; VResume kont ] in
   List.iter (prepare_native_argument ctx) invocation_roots;
   charge_native ctx args;
+  let nested = !Alloc_meter.nested_exhaustions in
   let result =
     match observed with
     | Some (_, call) -> dispatching_as ctx call (fun () -> native args)
@@ -1501,7 +1551,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   (* a native that ran out of fuel inside a nested run, or returned a nested invocation's
      exhaustion, cannot turn that into another failure, not even one found by revalidating what
      it mutated *)
-  note_returned_exhaustion ctx result;
+  note_returned_exhaustion ctx ~nested result;
   if Fuel_meter.exhausted () then exhaust ctx;
   (* nor replace allocation exhaustion with a failure found while revalidating *)
   if Alloc_meter.exhausted () then rt (alloc_error ctx);
@@ -1510,7 +1560,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   let observe result =
     Option.iter (fun (operation, call) -> notify_root_result ctx ~call operation result) observed
   in
-  match charge_native_result ctx result with
+  match charge_native_result ctx ~nested result with
   | Ok value ->
       let next = checked_result_state ctx value kont in
       observe (Ok value);
@@ -1525,8 +1575,9 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
 let invoke_trusted_native ctx builtin args kont =
   if Fuel_meter.exhausted () then exhaust ctx;
   charge_native ctx args;
+  let nested = !Alloc_meter.nested_exhaustions in
   let result = Trusted_builtin.invoke builtin args in
-  match charge_native_result ctx result with
+  match charge_native_result ctx ~nested result with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error
 
@@ -2264,12 +2315,13 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
           List.iter (prepare_native_argument ctx) roots;
           charge_native ctx args;
           (* a routed dispatch continues the call its capture observed *)
+          let nested = !Alloc_meter.nested_exhaustions in
           let result = dispatching_as ctx call (fun () -> native args) in
-          note_returned_exhaustion ctx result;
+          note_returned_exhaustion ctx ~nested result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
           if Alloc_meter.exhausted () then raise (Rt (alloc_error ctx));
           List.iter (check_native_argument ctx) roots;
-          match charge_native_result ctx result with
+          match charge_native_result ctx ~nested result with
           | Ok value ->
               if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
               notify_root_result ctx ~call op (Ok value);

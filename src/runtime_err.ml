@@ -44,6 +44,12 @@ let is_fuel_exhausted = function
   | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0919"
   | _ -> false
 
+(** [is_alloc_exhausted error] recognises allocation exhaustion (E0921) the same way. *)
+let is_alloc_exhausted = function
+  | Alloc_exhausted _ -> true
+  | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0921"
+  | _ -> false
+
 (** [is_incomplete error] recognises a budget running out: computation fuel (E0919) or the
     allocation budget (E0921), directly or wrapped in a subsystem [Diagnostic]. *)
 let is_incomplete = function

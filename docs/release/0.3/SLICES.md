@@ -942,3 +942,22 @@ weighting, a scheduled task and a driver entered after exhaustion;
 `test_observation_policy.ml` extends its status and impossible-transcript
 cases; `alloc.t` and `host-worker.t` show the new options. The source
 inventory is now `1223 / 82 / 57`.
+
+RT.2 slice 2b adds `jacquard test --alloc CELLS`: each discovered test runs
+under its own allocation cap, through the new `Eval.with_scope ?fuel ?alloc`
+(one memo epoch for both caps; `with_fuel_scope` is now its fuel-only form). A
+test that runs out is `INCOMPLETE ... allocation budget exhausted`, is never
+cached, and makes the run exit 2 unless a test failed; Warp keys bounded
+results on `alloc=alloc-v1:CELLS` after any fuel component, and its group,
+property and runner guards treat either budget's exhaustion alike. A native
+that returns a nested invocation's E0921, even wrapped in a diagnostic, now
+exhausts the enclosing invocation, but only when an invocation actually ended
+out of allocation while the native ran (`Alloc_meter.nested_exhaustions`): an
+error that merely carries the code exhausts nothing. A scope whose enclosing
+allowance is smaller than its cap reports that allowance as the limit.
+`test_invocation.ml` adds two cases: allocation scopes (own cap, aggregate
+reached and the limit that bound it, first budget out, no exhaustion left
+behind after a smaller nested or scoped cap, memo cost per scope) and the
+native error (wrapped nested exhaustion, and a forged E0921 that exhausts
+nothing), both failing without their fixes; `alloc.t` shows `test --alloc`. The source inventory is now
+`1225 / 82 / 57`.

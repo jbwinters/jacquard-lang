@@ -20,5 +20,10 @@ let trip () =
     if !ceiling < max_int then used := !ceiling;
     ceiling := -1)
 
+(** The number of invocations that have ended with allocation exhausted. A native's E0921 exhausts
+    the enclosing invocation only when this rose while the native ran: evidence that a nested run
+    really did run out, not just an error that carries the code. *)
+let nested_exhaustions = ref 0
+
 (** [exhausted ()] holds once a bounded invocation has run out of allocation. *)
 let exhausted () = !ceiling < 0

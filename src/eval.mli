@@ -169,7 +169,26 @@ val with_fuel_scope : ctx -> fuel:int -> (unit -> 'a) -> 'a * bool * int
     reached it. [body] runs in its own memo epoch, so memoized terms are charged as if it ran alone
     and its cost does not depend on earlier scopes. A [Fuel_meter.Exceeded] escaping [body]
     propagates after the cap is restored. [Invalid_argument] without an active invocation or for a
-    negative [fuel]. *)
+    negative [fuel]. It is {!with_scope} with only a fuel cap; the flag reports fuel exhaustion
+    only. *)
+
+type scope_report = {
+  exhaustion : Runtime_err.t option;
+      (** the budget that ran out while the body ran, fuel (E0919) before allocation (E0921) *)
+  fuel_used : int;  (** {!fuel_model} units the body charged *)
+  alloc_used : int;  (** {!alloc_model} cells the body charged *)
+}
+
+val with_scope : ctx -> ?fuel:int -> ?alloc:int -> (unit -> 'a) -> 'a * scope_report
+(** [with_scope ctx ?fuel ?alloc body] runs [body] inside the active invocation under per-branch
+    caps of [fuel] units and [alloc] cells (docs/computation-fuel.md §4,
+    docs/designs/allocation-limits.md §6). Each cap draws on the invocation's aggregate, so it only
+    lowers what [body] may spend; running out of a cap is [body]'s outcome, reported in the
+    [scope_report], and the enclosing invocation keeps its remaining allowance unless the cap
+    reached it. A budget without a cap is still checked against the invocation's own. [body] runs in
+    its own memo epoch, as for {!with_fuel_scope}. A [Fuel_meter.Exceeded] escaping [body]
+    propagates after the caps are restored. [Invalid_argument] without an active invocation or for a
+    negative cap. *)
 
 val fuel_used : invocation -> int
 (** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)

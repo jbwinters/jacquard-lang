@@ -1157,6 +1157,124 @@ let test_fuel_scopes () =
   | _ -> Alcotest.fail "scope outside an invocation"
   | exception Invalid_argument _ -> ()
 
+let test_alloc_scopes () =
+  let store, ctx = prepared "alloc-scope" (list_program ^ "table = build(30)\n") in
+  let grow = expression store "{ let rec g(n) = { let _ = (n, n); g(add(n, 1)) }; g(0) }"
+  and one = expression store "size(build(3))" in
+  let code = function
+    | Some error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+    | None -> "-"
+  in
+  (* a scope's cap is its own outcome: the invocation keeps its remaining allowance *)
+  let scoped, used, after, still =
+    Eval.with_invocation ~alloc:100_000 ctx (fun _ ->
+        let _, report = Eval.with_scope ctx ~alloc:100 (fun () -> Eval.run_expr ctx grow) in
+        let after = Eval.run_expr ctx one in
+        (code report.Eval.exhaustion, report.Eval.alloc_used, Result.is_ok after, Eval.exhausted ctx))
+  in
+  Alcotest.(check (pair string int)) "scope exhausted at its cap" ("E0921", 100) (scoped, used);
+  Alcotest.(check (pair bool bool)) "the invocation continues" (true, false) (after, still);
+  (* a scope that reaches the invocation's own budget leaves the invocation exhausted *)
+  let reached =
+    Eval.with_invocation ~alloc:50 ctx (fun _ ->
+        let _, report = Eval.with_scope ctx ~alloc:1_000 (fun () -> Eval.run_expr ctx grow) in
+        (code report.Eval.exhaustion, Eval.exhausted ctx, failure (Eval.run_expr ctx one)))
+  in
+  Alcotest.(check (triple string bool string)) "aggregate reached" ("E0921", true, "E0921") reached;
+  (* and reports the limit that bound it, not the larger cap *)
+  let bound =
+    Eval.with_invocation ~alloc:50 ctx (fun _ ->
+        match Eval.with_scope ctx ~alloc:1_000 (fun () -> Eval.run_expr ctx grow) with
+        | _, { Eval.exhaustion = Some (Runtime_err.Alloc_exhausted { limit; _ }); _ } -> limit
+        | _ -> -1)
+  in
+  Alcotest.(check int) "the enclosing limit binds" 50 bound;
+  (* with both caps, the first to run out is reported *)
+  let both =
+    Eval.with_invocation ctx (fun _ ->
+        let _, report =
+          Eval.with_scope ctx ~fuel:1_000_000 ~alloc:100 (fun () -> Eval.run_expr ctx grow)
+        in
+        code report.Eval.exhaustion)
+  in
+  Alcotest.(check string) "allocation before ample fuel" "E0921" both;
+  (* a smaller cap that ended, nested or scoped, never leaves exhaustion behind *)
+  let other_store, other_ctx = prepared "alloc-scope-other" list_program in
+  let other_grow =
+    expression other_store "{ let rec g(n) = { let _ = (n, n); g(add(n, 1)) }; g(0) }"
+  in
+  let after_nested =
+    Eval.with_invocation ~alloc:100_000 ctx (fun _ ->
+        ignore
+          (Eval.with_invocation ~alloc:10 other_ctx (fun _ -> Eval.run_expr other_ctx other_grow));
+        code (Eval.exhaustion ctx))
+  in
+  Alcotest.(check string) "after a nested invocation's smaller cap" "-" after_nested;
+  Alcotest.(check string)
+    "in a later unbounded invocation" "-"
+    (Eval.with_invocation ctx (fun _ -> code (Eval.exhaustion ctx)));
+  (* each scope pays for the memoized terms it uses, whatever an earlier scope paid *)
+  let table = expression store "table" in
+  let costs =
+    Eval.with_invocation ctx (fun _ ->
+        List.init 2 (fun _ ->
+            (snd (Eval.with_scope ctx ~alloc:1_000_000 (fun () -> Eval.run_expr ctx table)))
+              .Eval.alloc_used))
+  in
+  Alcotest.(check bool)
+    "a warm memo costs the same in a later scope" true
+    (match costs with [ first; second ] -> first > 0 && first = second | _ -> false);
+  match Eval.with_scope ctx ~alloc:1 (fun () -> ()) with
+  | _ -> Alcotest.fail "scope outside an invocation"
+  | exception Invalid_argument _ -> ()
+
+let test_alloc_wrapped_native_exhaustion () =
+  (* a native returning a nested invocation's E0921, even wrapped in a diagnostic, exhausts the
+     enclosing invocation: the work depending on it is incomplete *)
+  let nested_store, nested_ctx = prepared "alloc-wrapped-nested" list_program in
+  let grow = expression nested_store "{ let rec g(n) = { let _ = (n, n); g(add(n, 1)) }; g(0) }" in
+  let store, ctx = prepared "alloc-wrapped" "bridge(u) = 0\n" in
+  (match Store.lookup_kind store "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin ctx hash
+        (Value.VBuiltin
+           ( "bridge",
+             fun _ ->
+               match
+                 Eval.with_invocation ~alloc:10 nested_ctx (fun _ -> Eval.run_expr nested_ctx grow)
+               with
+               | Error error -> Error (Runtime_err.Diagnostic (Runtime_err.to_diag error))
+               | Ok _ -> Ok (Value.VInt 0) ))
+  | None -> Alcotest.fail "bridge not declared");
+  let call = expression store "bridge(1)" and one = expression store "add(1, 2)" in
+  let outcome =
+    Eval.with_invocation ~alloc:100_000 ctx (fun _ ->
+        let first = failure (Eval.run_expr ctx call) in
+        (first, Eval.exhausted ctx, failure (Eval.run_expr ctx one)))
+  in
+  Alcotest.(check (triple string bool string))
+    "the enclosing invocation is exhausted" ("E0921", true, "E0921") outcome;
+  (* an error that only carries the code, with no nested run behind it, exhausts nothing *)
+  let forged_store, forged_ctx = prepared "alloc-forged" "forge(u) = 0\n" in
+  (match Store.lookup_kind forged_store "forge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin forged_ctx hash
+        (Value.VBuiltin
+           ( "forge",
+             fun _ ->
+               Error
+                 (Runtime_err.Diagnostic
+                    (Runtime_err.to_diag
+                       (Runtime_err.Alloc_exhausted { model = Eval.alloc_model; limit = 1 }))) ))
+  | None -> Alcotest.fail "forge not declared");
+  let forged = expression forged_store "forge(1)" and sum = expression forged_store "add(1, 2)" in
+  let after =
+    Eval.with_invocation ~alloc:100_000 forged_ctx (fun _ ->
+        ignore (Eval.run_expr forged_ctx forged);
+        (Eval.exhausted forged_ctx, Result.is_ok (Eval.run_expr forged_ctx sum)))
+  in
+  Alcotest.(check (pair bool bool)) "a forged E0921 exhausts nothing" (false, true) after
+
 (* --- typed observation (RF.3) --- *)
 
 let describe = function
@@ -1417,6 +1535,9 @@ let suite =
     Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
     Alcotest.test_case "drivers report allocation exhaustion as E0921" `Quick
       test_alloc_survives_drivers;
+    Alcotest.test_case "allocation scopes cap one branch of an invocation" `Quick test_alloc_scopes;
+    Alcotest.test_case "a native's wrapped E0921 exhausts its invocation" `Quick
+      test_alloc_wrapped_native_exhaustion;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
     Alcotest.test_case "fuel scopes cap one branch of the aggregate" `Quick test_fuel_scopes;
     Alcotest.test_case "typed root events are ordered and single" `Quick test_typed_events;
