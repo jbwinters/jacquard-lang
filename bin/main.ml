@@ -1093,10 +1093,13 @@ let infer_check store model =
           | [] -> Ok ()
           | ds -> Error ds))
 
-(* RT.1: an exhausted run is incomplete, and every bounded command exits 2 for it, as run does *)
+(* RT.1, RT.2: an exhausted run is incomplete, and every bounded command exits 2 for it, as run
+   does *)
 let print_incomplete_or_diags ds =
   let code = print_diags ds in
-  if List.exists (fun d -> Diag.code d = Some "E0919") ds then exit_runtime else code
+  if List.exists (fun d -> List.mem (Diag.code d) [ Some "E0919"; Some "E0921" ]) ds then
+    exit_runtime
+  else code
 
 (* INF.1: print the typed outcome; failures are diagnostics, the metadata line is opt-in *)
 let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
@@ -1107,12 +1110,13 @@ let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
       if metadata then print_endline ("# " ^ Infer_dist.show_metadata c.metadata);
       ok
 
-let infer_enumerate_cmd file prelude max_branches metadata fuel syntax =
+let infer_enumerate_cmd file prelude max_branches metadata fuel alloc syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      Eval.with_invocation ?fuel ctx @@ fun invocation ->
+      Eval.with_invocation ?fuel ?alloc ctx @@ fun invocation ->
       report_fuel invocation;
+      report_alloc invocation;
       fuel_guard ctx @@ fun () ->
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
@@ -1124,12 +1128,13 @@ let infer_enumerate_cmd file prelude max_branches metadata fuel syntax =
               | Error ds -> print_incomplete_or_diags ds
               | Ok classified -> print_classified ~sampled:false ~metadata classified)))
 
-let infer_lw_cmd file prelude seed samples metadata fuel syntax =
+let infer_lw_cmd file prelude seed samples metadata fuel alloc syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      Eval.with_invocation ?fuel ctx @@ fun invocation ->
+      Eval.with_invocation ?fuel ?alloc ctx @@ fun invocation ->
       report_fuel invocation;
+      report_alloc invocation;
       fuel_guard ctx @@ fun () ->
       match load_model store ~syntax ~file with
       | Error ds -> print_diags ds
@@ -2651,7 +2656,7 @@ let infer_t =
                 ~doc:
                   "Stop with E0918 instead of exploring more than $(docv) terminal paths (default: \
                    unbounded).")
-        $ infer_metadata_arg $ fuel_arg $ syntax_arg)
+        $ infer_metadata_arg $ fuel_arg $ alloc_arg $ syntax_arg)
   in
   let lw =
     Cmd.v
@@ -2664,7 +2669,7 @@ let infer_t =
             & opt (some int) None
             & info [ "seed" ] ~docv:"N" ~doc:"PRNG seed (required, D4).")
         $ Arg.(value & opt positive_int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs.")
-        $ infer_metadata_arg $ fuel_arg $ syntax_arg)
+        $ infer_metadata_arg $ fuel_arg $ alloc_arg $ syntax_arg)
   in
   Cmd.group
     (Cmd.info "infer" ~doc:"Probabilistic inference: handlers over an unchanged model.")
@@ -3331,7 +3336,7 @@ let best_effort_note text =
       try ignore (Unix.write_substring Unix.stderr line 0 (String.length line))
       with Unix.Unix_error _ -> ())
 
-let host_worker_cmd store_dir fuel =
+let host_worker_cmd store_dir fuel alloc =
   match reopen_closed_standard_descriptors () with
   | exception Unix.Unix_error _ ->
       (* a closed descriptor could not be neutralized, so opening the store could hand it out:
@@ -3358,7 +3363,8 @@ let host_worker_cmd store_dir fuel =
                 set_binary_mode_in stdin true;
                 set_binary_mode_out stdout true;
                 let status =
-                  Host_worker.serve ?fuel prepared ~input:stdin ~output:stdout ~operator:stderr
+                  Host_worker.serve ?fuel ?alloc prepared ~input:stdin ~output:stdout
+                    ~operator:stderr
                 in
                 (match status with
                 | Host_worker.Carrier_lost ->
@@ -3423,7 +3429,7 @@ let host_t =
                 ~doc:
                   "Existing local store holding the target and its complete closure. The prelude \
                    is not reloaded.")
-        $ fuel_arg)
+        $ fuel_arg $ alloc_arg)
   in
   Cmd.group
     (Cmd.info "host" ~doc:"Opt-in host carriers for invoking checked Jacquard from another process.")

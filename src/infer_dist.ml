@@ -102,10 +102,11 @@ let diagnostic ~code cause =
 
 let err ~code fmt = Printf.ksprintf (fun cause -> Error [ diagnostic ~code cause ]) fmt
 
-(* A runtime failure under [code], except computation-fuel exhaustion (RT.1), which keeps E0919:
-   running out of fuel is incomplete inference, not a model failure. *)
+(* A runtime failure under [code], except exhaustion of computation fuel (RT.1, E0919) or
+   allocation (RT.2, E0921), which keeps its code: running out is incomplete inference, not a model
+   failure. *)
 let runtime_diagnostic ~code error =
-  if Runtime_err.is_fuel_exhausted error then Runtime_err.to_diag error
+  if Runtime_err.is_incomplete error then Runtime_err.to_diag error
   else diagnostic ~code (Runtime_err.to_string error)
 
 (* --- distribution values --- *)
@@ -865,15 +866,15 @@ let likelihood_weighting_v1 (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eva
 (* RT.1: drivers key, merge and compare values outside any evaluator run; a walk that runs out of
    fuel there ends the driver with E0919 *)
 let guard_walks ctx run =
-  let exhausted () = Error [ Runtime_err.to_diag (Eval.fuel_error ctx) ] in
-  (* exhaustion is sticky: a driver entered, or finishing, after the invocation ran out reports
-     it even on a path that does no further metered work *)
-  if Fuel_meter.exhausted () then exhausted ()
-  else
-    match run () with
-    | _ when Fuel_meter.exhausted () -> exhausted ()
-    | result -> result
-    | exception Fuel_meter.Exceeded -> exhausted ()
+  let exhausted error = Error [ Runtime_err.to_diag error ] in
+  (* exhaustion is sticky: a driver entered, or finishing, after the invocation ran out (of fuel or,
+     RT.2, of allocation) reports it even on a path that does no further metered work *)
+  match Eval.exhaustion ctx with
+  | Some error -> exhausted error
+  | None -> (
+      match run () with
+      | result -> ( match Eval.exhaustion ctx with Some error -> exhausted error | None -> result)
+      | exception Fuel_meter.Exceeded -> exhausted (Eval.fuel_error ctx))
 
 let enumerate_v1 ?max_branches ctx model =
   guard_walks ctx (fun () -> enumerate_v1 ?max_branches ctx model)

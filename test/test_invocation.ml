@@ -734,6 +734,41 @@ let test_fuel_survives_nested_drivers () =
   in
   Alcotest.(check string) "E0919, not E0902" "E0919" code
 
+let test_alloc_survives_drivers () =
+  (* RT.2: every driver reports allocation exhaustion as E0921, however a native driver, the
+     scheduler or a sampler wrapped the evaluator's error *)
+  let store, ctx = prepared "alloc-drivers" "grow(n) = { let _ = (n, n); grow(add(n, 1)) }\n" in
+  let code_of = function
+    | Ok _ -> "posterior"
+    | Error diagnostics -> String.concat "," (List.map Diag.code_or_uncoded diagnostics)
+  in
+  let bounded source run =
+    let model = expression store source in
+    Eval.with_invocation ~alloc:500 ctx (fun _ -> code_of (run (Eval.expr_state model)))
+  in
+  Alcotest.(check string)
+    "a native driver" "E0921"
+    (bounded "dist.sample-lw(fn () -> grow(0), 3, 1)" (Infer_dist.enumerate_v1 ctx));
+  Alcotest.(check string)
+    "likelihood weighting" "E0921"
+    (bounded "{ let _ = `op:sample`(Bernoulli(0.5)); grow(0) }" (fun state ->
+         Infer_dist.likelihood_weighting_v1 ctx ~seed:1 ~samples:3 (fun () -> state)));
+  let scheduled =
+    expression store
+      "async.scope(fn () -> { let _ = async.spawn(fn () -> grow(0)); let b = async.spawn(fn () -> \
+       7); async.await(b) })"
+  in
+  Alcotest.(check string)
+    "a scheduled task" "E0921"
+    (Eval.with_invocation ~alloc:500 ctx (fun _ -> failure (Round_robin.run_expr ctx scheduled)));
+  (* exhaustion is sticky: a driver entered after the invocation ran out reports it *)
+  let spent = expression store "grow(0)" and model = expression store "1" in
+  Alcotest.(check string)
+    "a driver entered after exhaustion" "E0921"
+    (Eval.with_invocation ~alloc:500 ctx (fun _ ->
+         ignore (Eval.run_expr ctx spent);
+         code_of (Infer_dist.enumerate_v1 ctx (Eval.expr_state model))))
+
 let test_fuel_outside_runs () =
   let store, ctx = prepared "fuel-outside" "spin(n) = spin(add(n, 1))\n" in
   (* a driver applying a native outside any run never raises exhaustion; the next run reports it *)
@@ -1380,6 +1415,8 @@ let suite =
       test_fuel_does_not_retry_side_effects;
     Alcotest.test_case "every value walk draws on the budget" `Quick test_fuel_bounds_deep_natives;
     Alcotest.test_case "wrapped exhaustion stays E0919" `Quick test_fuel_survives_nested_drivers;
+    Alcotest.test_case "drivers report allocation exhaustion as E0921" `Quick
+      test_alloc_survives_drivers;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;
     Alcotest.test_case "fuel scopes cap one branch of the aggregate" `Quick test_fuel_scopes;
     Alcotest.test_case "typed root events are ordered and single" `Quick test_typed_events;

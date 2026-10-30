@@ -929,3 +929,16 @@ DOC.1 completes the SKILL.md fix: a new `skill-greet` example runs `greet`
 with `grants=console` and checks what it prints, so a SKILL.md example now
 exercises Console authority end to end. The source inventory is now
 `1222 / 82 / 57`.
+
+RT.2 slice 2a makes every driver treat allocation exhaustion as it treats fuel
+exhaustion: the scheduler stops the whole run instead of failing one task,
+exact enumeration and likelihood weighting keep E0921 instead of reporting a
+model failure (E0902), an observation transcript records the run as
+`incomplete code=E0921` (and refuses `failed code=E0921`), and bounded
+commands exit 2. `Eval.exhaustion` names whichever budget ran out, fuel first.
+`jacquard infer enumerate|lw` and `jacquard host worker` accept `--alloc`.
+`test_invocation.ml` adds a case covering a wrapping native driver, likelihood
+weighting, a scheduled task and a driver entered after exhaustion;
+`test_observation_policy.ml` extends its status and impossible-transcript
+cases; `alloc.t` and `host-worker.t` show the new options. The source
+inventory is now `1223 / 82 / 57`.

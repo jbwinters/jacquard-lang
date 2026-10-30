@@ -182,6 +182,14 @@ val fuel_error : ctx -> Runtime_err.t
 (** [fuel_error ctx] is the E0919 error for the active invocation's budget, for a driver that
     catches {!Fuel_meter.Exceeded} from a value walk outside any run. *)
 
+val exhaustion : ctx -> Runtime_err.t option
+(** [exhaustion ctx] is the error for whichever budget of the active bounded invocation has run out,
+    fuel (E0919) before allocation (E0921), or [None]. Drivers use it to recognise exhaustion
+    however a native or nested driver wrapped the error: either makes the run incomplete. *)
+
+val exhausted : ctx -> bool
+(** [exhausted ctx] holds when {!exhaustion} is [Some _]. *)
+
 val fuel_budget : invocation -> int option
 (** [fuel_budget invocation] is the budget [invocation] was started with, if bounded. *)
 

@@ -66,6 +66,14 @@ field:
   $ jacquard host worker --store store --fuel 100000 < pure.in > fuel-ok.out
   $ cmp pure.out fuel-ok.out
 
+With `--alloc` it is bounded the same way (RT.2): running out aborts with E0921.
+
+  $ jacquard host worker --store store --alloc 0 < pure.in > alloc.out
+  $ unframe < alloc.out | names | grep -o '"code":"E0921"'
+  "code":"E0921"
+  $ jacquard host worker --store store --alloc 100000 < pure.in > alloc-ok.out
+  $ cmp pure.out alloc-ok.out
+
 One configured once operation: Core emits the request, the host answers, and
 the outcome records the request order and the accepted observation.
 
@@ -134,5 +142,5 @@ Startup configuration failures happen before any frame is written.
   [1]
   $ jacquard host worker > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
   exit=124
-  Usage: jacquard host worker [--help] [--diagnostic-format=FORMAT]
-         [--fuel=UNITS] --store=DIR [OPTION]…
+  Usage: jacquard host worker [--help] [OPTION]…
+  jacquard: required option --store is missing

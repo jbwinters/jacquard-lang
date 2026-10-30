@@ -61,3 +61,36 @@ allocates forever stops at the budget.
     Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
   alloc: 10 of 10 cell(s) used (alloc-v1)
   [2]
+
+Every driver honours the budget the same way. Every scheduled task shares the
+invocation's allocation, and a growing child stops the whole run:
+
+  $ cat > tasks.jac <<'JAC'
+  > grow(n) = { let _ = (n, n); grow(add(n, 1)) }
+  > 
+  > async.scope(fn () -> {
+  >   let _ = async.spawn(fn () -> grow(0))
+  >   let quick = async.spawn(fn () -> 7)
+  >   async.await(quick)
+  > })
+  > JAC
+  $ timeout 20 jacquard run --alloc 5000 tasks.jac > tasks.out 2>&1 || echo "exit=$?"; head -1 < tasks.out
+  exit=2
+  error[E0921]: The allocation budget was exhausted
+
+Exact enumeration and likelihood weighting draw on one budget across every
+branch or run; running out is E0921, not a model failure (E0902):
+
+  $ jacquard infer enumerate --alloc 1000 ../../demos/inference/m3-two-coins.jac
+  0.666667  true
+  0.333333  false
+  alloc: 47 of 1000 cell(s) used (alloc-v1)
+  $ jacquard infer enumerate --alloc 10 ../../demos/inference/m3-two-coins.jac
+  error[E0921]: The allocation budget was exhausted
+    Cause: allocation budget exhausted: the alloc-v1 budget of 10 cell(s) ran out before evaluation finished; the result is incomplete
+    Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
+  alloc: 10 of 10 cell(s) used (alloc-v1)
+  [2]
+  $ jacquard infer lw --seed 1 --samples 50 --alloc 50 ../../demos/inference/m3-two-coins.jac > lw.out 2>&1 || echo "exit=$?"; head -1 < lw.out
+  exit=2
+  error[E0921]: The allocation budget was exhausted

@@ -102,8 +102,10 @@ let field_of_value policy value =
 
 let failure_code error = Diag.code_or_uncoded (Runtime_err.to_diag error)
 
-(* every incomplete run is stopped by its fuel budget *)
+(* every incomplete run is stopped by its fuel budget (E0919) or, RT.2, its allocation budget
+   (E0921); a field left unfinished is always fuel's, since projecting allocates nothing *)
 let fuel_code = "E0919"
+let incomplete_codes = [ fuel_code; "E0921" ]
 let uncoded = "uncoded"
 
 let recorded_arguments policy (rule : Observation_policy.rule) arguments =
@@ -227,7 +229,7 @@ let record recorder ctx run =
                 match field_of_value recorder.policy (Observation.of_value value) with
                 | field -> Complete (Some field)
                 | exception Fuel_meter.Exceeded -> Incomplete fuel_code))
-        | Error error when Runtime_err.is_fuel_exhausted error -> Incomplete fuel_code
+        | Error error when Runtime_err.is_incomplete error -> Incomplete (failure_code error)
         | Error error -> Failed (failure_code error)
       in
       let events = List.rev_map finished recorder.current_rev in
@@ -469,15 +471,17 @@ let parse_run policy cursor ~expected_index =
         let* () = expect cursor " code=" in
         let offset = cursor.Strict_cursor.offset in
         let* code = word cursor in
-        if String.equal code fuel_code then
-          invalid_at offset "a run stopped by fuel is incomplete, not failed"
+        if List.mem code incomplete_codes then
+          invalid_at offset "a run stopped by its budget is incomplete, not failed"
         else Ok (`Failed code)
     | "incomplete" ->
         let* () = expect cursor " code=" in
         let offset = cursor.Strict_cursor.offset in
         let* code = word cursor in
-        if String.equal code fuel_code then Ok (`Incomplete code)
-        else invalid_at offset "only fuel exhaustion (E0919) makes a run incomplete"
+        if List.mem code incomplete_codes then Ok (`Incomplete code)
+        else
+          invalid_at offset
+            "only fuel (E0919) or allocation (E0921) exhaustion makes a run incomplete"
     | _ -> invalid_at offset "a run status is unknown"
   in
   let* () = expect cursor " events=" in

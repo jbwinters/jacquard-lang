@@ -10,7 +10,13 @@
   drivers (`infer`, `test`, `model eval`, Warp, the host worker) honour the
   budget. Slice 3 adds the registry ceilings (§4), the refusal for native
   builds (§7) and the overhead measurement (§8). Until slice 2, natives
-  allocate uncharged.
+  allocate uncharged. Slice 2a makes every driver report allocation exhaustion
+  as incomplete E0921, as it reports fuel's E0919: the scheduler, exact
+  enumeration and likelihood weighting, observation transcripts
+  (`incomplete code=E0921`) and exit codes; it adds `--alloc` to
+  `jacquard infer` and `jacquard host worker`. `jacquard test --alloc` (per
+  test, with Warp's cache key) and the natives are slice 2b. A model document
+  has no allocation budget, so `model eval` cannot run out of one yet.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
   replays that term's recorded cells per segment, after the segment's fuel. When

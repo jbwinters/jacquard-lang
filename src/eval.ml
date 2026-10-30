@@ -845,6 +845,13 @@ let alloc_error ctx =
   Runtime_err.Alloc_exhausted
     { model = alloc_model; limit = Option.value ctx.alloc_limit ~default:!Alloc_meter.budget }
 
+let exhaustion ctx =
+  if Fuel_meter.exhausted () then Some (fuel_error ctx)
+  else if Alloc_meter.exhausted () then Some (alloc_error ctx)
+  else None
+
+let exhausted ctx = Option.is_some (exhaustion ctx)
+
 (** [charge_alloc ctx cells] charges [cells] of logical allocation before the transition that
     allocates them. A charge that would pass the ceiling exhausts the invocation: inside a run it
     raises E0921; outside any run (a driver resuming a continuation) the next run raises it as it
