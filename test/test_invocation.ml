@@ -1275,6 +1275,167 @@ let test_alloc_wrapped_native_exhaustion () =
   in
   Alcotest.(check (pair bool bool)) "a forged E0921 exhausts nothing" (false, true) after
 
+let test_alloc_natives () =
+  let store, ctx =
+    prepared "alloc-natives"
+      "type T = | L | N(left: T, right: T)\n\
+       dbl(x, k) = if eq(k, 0) then x else dbl(N(x, x), sub(k, 1))\n"
+  in
+  (* every trusted native the prelude installs has an allocation class *)
+  Alcotest.(check (list string))
+    "every native is classified" []
+    (List.filter
+       (fun name -> Option.is_none (Native_alloc.classify name))
+       (Eval.trusted_builtin_names ctx));
+  Alcotest.(check bool)
+    "the inventory is not empty" true
+    (List.length (Eval.trusted_builtin_names ctx) > 40);
+  (* a native's result costs its new cells: text one plus one per started 8 bytes, a boolean one *)
+  let cost source = snd (allocated ctx store source) in
+  Alcotest.(check int) "short text" 2 (cost "text.concat(\"ab\", \"cd\")");
+  Alcotest.(check int) "longer text" 3 (cost "text.concat(\"abcdefgh\", \"i\")");
+  Alcotest.(check int) "scalar" 0 (cost "add(1, 2)");
+  Alcotest.(check int) "boolean" 1 (cost "eq(1, 2)");
+  (* a list of pieces: per piece a cons (3) and its text (2), then nil *)
+  Alcotest.(check int) "split" ((2 * (3 + 2)) + 1) (cost "text.split(\"a,b\", \",\")");
+  (* splitting code shares its children: some, the pair, the head, a cons and wrapper each *)
+  let form = "code.form(\"pair\", [code.of-int(1), code.of-int(2)])" in
+  Alcotest.(check int)
+    "un-form shares the children"
+    (2 + 3 + 1 + (2 * 4) + 1)
+    (cost (Printf.sprintf "code.un-form(%s)" form) - cost form);
+  (* the result is charged before the program receives it: one cell short is incomplete *)
+  let concat = "text.concat(\"abcdefgh\", \"i\")" in
+  Alcotest.(check (pair string int))
+    "exact boundary" ("\"abcdefghi\"", 3)
+    (allocated ~budget:3 ctx store concat);
+  Alcotest.(check string) "one cell short" "E0921" (fst (allocated ~budget:2 ctx store concat));
+  (* rendering an exponentially shared value stops at the budget while the text is built *)
+  Alcotest.(check (pair string int))
+    "rendering is guarded" ("E0921", 1_000)
+    (allocated ~budget:1_000 ctx store "text.length(debug.inspect(dbl(L, 40)))");
+  (* a sampler retains one pair per finished run, so a model that allocates nothing per run still
+     stops at the budget instead of retaining runs without bound *)
+  Alcotest.(check (pair string int))
+    "sampling is bounded" ("E0921", 1_000)
+    (allocated ~budget:1_000 ctx store "dist.sample-lw(fn () -> 1, 100000000, 1)");
+  (* joining pays for its separators before building: many pieces and a long separator stop at the
+     budget instead of first building the text *)
+  let separator = String.make 1_000 'x' in
+  Alcotest.(check string)
+    "joining is guarded" "E0921"
+    (fst
+       (allocated ~budget:100 ctx store
+          (Printf.sprintf "text.join-list([\"\", \"\", \"\", \"\", \"\"], \"%s\")" separator)));
+  (* nodes are counted once each: a value shared 2^40 ways costs its 40 distinct nodes *)
+  let rec shared k value =
+    if k = 0 then value else shared (k - 1) (Value.VTuple [ value; value ])
+  in
+  Alcotest.(check int)
+    "distinct nodes" (40 * 3)
+    (Native_alloc.fresh_cells (shared 40 (Value.VInt 0)));
+  (* and what a result shares with the native's inputs is not charged again *)
+  let input = shared 10 (Value.VText "abcdefghijklmnop") in
+  Alcotest.(check int)
+    "inputs are already paid for" (3 + 2)
+    (Native_alloc.cells Native_alloc.Posterior ~args:[ input ]
+       (Value.VTuple [ input; Value.VText "ab" ]));
+  (* a Bernoulli's support makes its two booleans as well as the list of pairs *)
+  Alcotest.(check int)
+    "support"
+    ((2 * 6) + 1 + 2)
+    (cost "support(Bernoulli(0.5))" - cost "Bernoulli(0.5)");
+  (* a code literal's text is already held: extracting it adds only the option and the wrapper *)
+  let literal = Printf.sprintf "code.of-text(\"%s\")" (String.make 800 'x') in
+  Alcotest.(check int)
+    "to-text shares its bytes" 3
+    (cost (Printf.sprintf "code.to-text(%s)" literal) - cost literal);
+  (* comparing allocates nothing: equal forms need only the room for "identical" *)
+  let wide k = Printf.sprintf "wide(code.of-int(1), %d)" k in
+  let store, ctx =
+    prepared "alloc-natives-code"
+      "wide(c, k) = if eq(k, 0) then c else wide(code.form(\"p\", [c, c]), sub(k, 1))\n"
+  in
+  let diff = Printf.sprintf "code.diff(%s, %s)" (wide 12) (wide 12) in
+  let result, used = allocated ctx store diff in
+  Alcotest.(check string) "equal forms" "\"identical\"" result;
+  Alcotest.(check (pair string int))
+    "fit their exact budget" (result, used)
+    (allocated ~budget:used ctx store diff);
+  (* a hash charges the text it renders, and completes at exactly that cost *)
+  let hash = Printf.sprintf "code.hash(%s)" (wide 3) in
+  Alcotest.(check bool) "hash" true (snd (allocated ctx store hash) > 5);
+  Alcotest.(check string)
+    "and one cell short is incomplete" "E0921"
+    (fst (allocated ~budget:(snd (allocated ctx store hash) - 1) ctx store hash));
+  let store, ctx =
+    prepared "alloc-natives-shared"
+      "type T = | L | N(left: T, right: T)\n\
+       dbl(x, k) = if eq(k, 0) then x else dbl(N(x, x), sub(k, 1))\n"
+  in
+  (* a sampler keys its runs by rendering them: that rendering stops at the budget too *)
+  Alcotest.(check (pair string int))
+    "sampling a shared value" ("E0921", 1_000)
+    (allocated ~budget:1_000 ctx store "dist.sample-lw(fn () -> dbl(L, 40), 1, 0)");
+  (* a refused rendering leaves nothing behind *)
+  let big = expression store "debug.inspect(dbl(L, 40))"
+  and small = expression store "debug.inspect(dbl(L, 2))" in
+  Alcotest.(check bool)
+    "the invocation continues after a refused rendering" true
+    (Eval.with_invocation ~alloc:100_000 ctx (fun _ ->
+         let _, report = Eval.with_scope ctx ~alloc:100 (fun () -> Eval.run_expr ctx big) in
+         Option.is_some report.Eval.exhaustion && Result.is_ok (Eval.run_expr ctx small)));
+  (* comparing by rendering stops at the budget as well *)
+  Alcotest.(check (pair string int))
+    "pmf over a shared value" ("E0921", 1_000)
+    (allocated ~budget:1_000 ctx store "pmf(Categorical([mk-pair(dbl(L, 40), 1.0)]), dbl(L, 40))");
+  (* a form holds a reference per child, so repeating one over a list pays for each spine *)
+  let form_store, form_ctx = prepared "alloc-natives-form" "" in
+  let bare = "code.of-int(1)" in
+  let cost_form source = snd (allocated form_ctx form_store source) in
+  let two = Printf.sprintf "[%s, %s]" bare bare in
+  Alcotest.(check int)
+    "a form costs one plus its children" 3
+    (cost_form (Printf.sprintf "code.form(\"p\", %s)" two) - cost_form two);
+  (* differing scalars are counted as they are found: a 2^40-way difference stops at the budget *)
+  let diverging_store, diverging_ctx =
+    prepared "alloc-natives-diff"
+      "wide(c, k) = if eq(k, 0) then c else wide(code.form(\"p\", [c, c]), sub(k, 1))\n"
+  in
+  Alcotest.(check (pair string int))
+    "differing scalars" ("E0921", 1_000)
+    (allocated ~budget:1_000 diverging_ctx diverging_store
+       "code.diff(wide(code.of-int(1), 40), wide(code.of-int(2), 40))");
+  (* a form of many scalars is checked at each one, so it overshoots by at most one *)
+  let many = Form.form "p" (List.init 100_000 (fun _ -> Form.Text (String.make 80 'x'))) in
+  Alcotest.(check bool)
+    "a wide form stops within one scalar" true
+    (Eval.with_invocation ~alloc:50 ctx (fun _ ->
+         Eval.with_rendered ctx
+           ~exceeded:(fun _ -> true)
+           (fun () ->
+             ignore (Printer.print_compact many);
+             false)));
+  (* a nested rendering counts what the enclosing one has pending *)
+  Alcotest.(check bool)
+    "nested renderings share the allowance" true
+    (Eval.with_invocation ~alloc:50 ctx (fun _ ->
+         Eval.with_rendered ctx
+           ~exceeded:(fun _ -> true)
+           (fun () ->
+             ignore (Value.show (Value.VText (String.make 300 'x')));
+             (* about 31 cells: it fits alone, but not over the 39 the outer one has pending *)
+             Eval.with_rendered ctx
+               ~exceeded:(fun _ -> true)
+               (fun () ->
+                 ignore (Value.show (Value.VTuple (List.init 20 (fun _ -> Value.VText "xxxxxxxx"))));
+                 false))));
+  let rendered = "debug.inspect(dbl(L, 2))" in
+  let text, used = allocated ctx store rendered in
+  Alcotest.(check (pair string int))
+    "and completes at exactly its cost" (text, used)
+    (allocated ~budget:used ctx store rendered)
+
 (* --- typed observation (RF.3) --- *)
 
 let describe = function
@@ -1536,6 +1697,7 @@ let suite =
     Alcotest.test_case "drivers report allocation exhaustion as E0921" `Quick
       test_alloc_survives_drivers;
     Alcotest.test_case "allocation scopes cap one branch of an invocation" `Quick test_alloc_scopes;
+    Alcotest.test_case "every native is classified and charged" `Quick test_alloc_natives;
     Alcotest.test_case "a native's wrapped E0921 exhausts its invocation" `Quick
       test_alloc_wrapped_native_exhaustion;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;

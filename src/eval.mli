@@ -58,6 +58,25 @@ val register_builtin : ctx -> Hash.t -> Value.t -> unit
     values are rejected with the evaluator's runtime exception; custom callbacks are guarded before
     and after every invocation. *)
 
+val charge_driver_alloc : ctx -> int -> unit
+(** [charge_driver_alloc ctx cells] charges [cells] of alloc-v1 allocation that a driver makes
+    between runs (say, retaining a finished run's result). Running out exhausts the invocation; the
+    next run, or the driver's own exhaustion check, reports E0921. *)
+
+val charge_native_alloc : ctx -> int -> unit
+(** [charge_native_alloc ctx cells] charges [cells] from inside a native, before it builds them;
+    running out raises E0921 in the run that called the native. *)
+
+val with_rendered : ctx -> exceeded:(Runtime_err.t -> 'a) -> (unit -> 'a) -> 'a
+(** [with_rendered ctx ~exceeded body] counts every value and code rendering [body] makes against
+    the allocation budget as its text grows. A rendering that cannot fit stops, exhausts the
+    invocation and returns [exceeded] applied to E0921; otherwise the text's cells are charged when
+    [body] ends. *)
+
+val trusted_builtin_names : ctx -> string list
+(** [trusted_builtin_names ctx] lists the names of the trusted natives installed on [ctx], sorted.
+*)
+
 val register_root_handler :
   ctx -> Hash.t -> (Value.t list -> (Value.t, Runtime_err.t) result) -> unit
 (** [register_root_handler ctx op handler] installs an explicitly granted root operation handler.

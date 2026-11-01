@@ -96,7 +96,7 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
     in
     [
       {
-        path;
+        path = Alloc_meter.rendered_piece path;
         a = render_authority_row ~effect_name_of old_row;
         b = render_authority_row ~effect_name_of new_row;
       };
@@ -115,7 +115,7 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
     let show = function Kernel.Multi -> "multi" | Kernel.Once -> "once" in
     [
       {
-        path;
+        path = Alloc_meter.rendered_piece path;
         a = Printf.sprintf "op `%s`: %s" name (show a_mode);
         b =
           Printf.sprintf "op `%s`: %s%s" name (show b_mode)
@@ -125,7 +125,13 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
       };
     ]
   else if fa.Form.head <> fb.Form.head || List.length fa.Form.args <> List.length fb.Form.args then
-    [ { path; a = render_form syntax fa; b = render_form syntax fb } ]
+    [
+      {
+        path = Alloc_meter.rendered_piece path;
+        a = render_form syntax fa;
+        b = render_form syntax fb;
+      };
+    ]
   else
     List.concat
       (List.mapi
@@ -150,9 +156,9 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
                     shape; scalar_to_string on a form raised (task 73 review) *)
                  let render = function
                    | Form.F g -> Printer.inline_form g
-                   | scalar -> Printer.scalar_to_string scalar
+                   | scalar -> Alloc_meter.rendered_piece (Printer.scalar_to_string scalar)
                  in
-                 [ { path; a = render a; b = render b } ])
+                 [ { path = Alloc_meter.rendered_piece path; a = render a; b = render b } ])
          (List.combine fa.Form.args fb.Form.args))
 
 (** [form_divergences ~path old new] finds the smallest disagreeing subtrees with head paths. If

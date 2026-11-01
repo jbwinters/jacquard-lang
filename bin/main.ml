@@ -2399,8 +2399,9 @@ let alloc_arg =
         ~doc:
           "Bound the whole run to CELLS of alloc-v1 logical allocation (see \
            docs/designs/allocation-limits.md). Running out stops with E0921: the run is \
-           incomplete, neither a pass nor a failure. Without it allocation is unbounded. The \
-           evaluator's own allocation is charged; values built inside natives are not yet.")
+           incomplete, neither a pass nor a failure. Without it allocation is unbounded. Text read \
+           from outside (files, the console, the network) and code given to eval are not yet \
+           charged.")
 
 let required_seed_arg =
   Arg.(
@@ -2962,8 +2963,7 @@ let test_alloc_arg =
           "Give each discovered test its own alloc-v1 allocation budget of CELLS (see \
            docs/designs/allocation-limits.md). A test that runs out is reported INCOMPLETE, is \
            never cached, and makes the run exit 2 unless a test failed. Results are cached under \
-           the budget, never shared with unbounded runs. Values built inside natives are not yet \
-           charged.")
+           the budget, never shared with unbounded runs.")
 
 let test_t =
   Cmd.v

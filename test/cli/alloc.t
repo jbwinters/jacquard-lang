@@ -14,20 +14,20 @@ A bounded run reports the cells it used; the count is the same on every run.
 
   $ jacquard run chain.jac --alloc 100000
   100
-  alloc: 605 of 100000 cell(s) used (alloc-v1)
+  alloc: 706 of 100000 cell(s) used (alloc-v1)
   $ jacquard run chain.jac --alloc 100000 2> again.err > /dev/null; cat again.err
-  alloc: 605 of 100000 cell(s) used (alloc-v1)
+  alloc: 706 of 100000 cell(s) used (alloc-v1)
 
 It completes at exactly its cost, and one cell less is incomplete.
 
-  $ jacquard run chain.jac --alloc 605
+  $ jacquard run chain.jac --alloc 706
   100
-  alloc: 605 of 605 cell(s) used (alloc-v1)
-  $ jacquard run chain.jac --alloc 604
+  alloc: 706 of 706 cell(s) used (alloc-v1)
+  $ jacquard run chain.jac --alloc 705
   error[E0921]: The allocation budget was exhausted
-    Cause: allocation budget exhausted: the alloc-v1 budget of 604 cell(s) ran out before evaluation finished; the result is incomplete
+    Cause: allocation budget exhausted: the alloc-v1 budget of 705 cell(s) ran out before evaluation finished; the result is incomplete
     Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
-  alloc: 604 of 604 cell(s) used (alloc-v1)
+  alloc: 705 of 705 cell(s) used (alloc-v1)
   [2]
 
 Without `--alloc` nothing changes; with both budgets, the one that runs out
@@ -84,7 +84,7 @@ branch or run; running out is E0921, not a model failure (E0902):
   $ jacquard infer enumerate --alloc 1000 ../../demos/inference/m3-two-coins.jac
   0.666667  true
   0.333333  false
-  alloc: 47 of 1000 cell(s) used (alloc-v1)
+  alloc: 85 of 1000 cell(s) used (alloc-v1)
   $ jacquard infer enumerate --alloc 10 ../../demos/inference/m3-two-coins.jac
   error[E0921]: The allocation budget was exhausted
     Cause: allocation budget exhausted: the alloc-v1 budget of 10 cell(s) ran out before evaluation finished; the result is incomplete

@@ -97,6 +97,7 @@ let rec show_into ?(redact = false) buffer value =
   (* one buffer for the whole rendering keeps it linear in its output; each node and byte ticks
      computation fuel (RT.1) *)
   Fuel_meter.tick 1;
+  Alloc_meter.rendered_so_far (Buffer.length buffer);
   let add = Buffer.add_string buffer in
   let items_into items =
     Buffer.add_char buffer '(';
@@ -156,6 +157,7 @@ let rec show_into ?(redact = false) buffer value =
 let show value =
   let buffer = Buffer.create 64 in
   show_into buffer value;
+  Alloc_meter.rendering_done (Buffer.length buffer);
   Buffer.contents buffer
 
 (** [display value] is {!show} for user-facing output: a value of an opaque type renders as
@@ -164,6 +166,7 @@ let show value =
 let display value =
   let buffer = Buffer.create 64 in
   show_into ~redact:true buffer value;
+  Alloc_meter.rendering_done (Buffer.length buffer);
   Buffer.contents buffer
 
 let pp fmt v = Format.pp_print_string fmt (show v)

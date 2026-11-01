@@ -596,6 +596,8 @@ let likelihood_weighting (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.s
     | Error e -> Error e
     | Ok (Validated_done v) ->
         runs := { value = v; weight } :: !runs;
+        (* alloc-v1: the retained run is a pair of its value and weight *)
+        Eval.charge_driver_alloc ctx 3;
         Ok ()
     | Ok (Validated_op { op; name = "sample"; args = [ dv ]; resume; _ })
       when is_dist_op ctx op "sample" -> (
@@ -801,7 +803,10 @@ let lw_surviving_runs (ctx : Eval.ctx) ~seed ~samples (model : unit -> Eval.stat
     match run_until_op_validated ctx state with
     | Error e -> Error e
     | Ok (Validated_done v) ->
-        if possible then runs := { value = v; weight } :: !runs;
+        if possible then (
+          runs := { value = v; weight } :: !runs;
+          (* alloc-v1: the retained run is a pair of its value and weight *)
+          Eval.charge_driver_alloc ctx 3);
         Ok ()
     | Ok (Validated_op { op; name = "sample"; args = [ dv ]; resume; _ })
       when is_dist_op ctx op "sample" -> (
@@ -872,7 +877,7 @@ let guard_walks ctx run =
   match Eval.exhaustion ctx with
   | Some error -> exhausted error
   | None -> (
-      match run () with
+      match Eval.with_rendered ctx ~exceeded:exhausted run with
       | result -> ( match Eval.exhaustion ctx with Some error -> exhausted error | None -> result)
       | exception Fuel_meter.Exceeded -> exhausted (Eval.fuel_error ctx))
 

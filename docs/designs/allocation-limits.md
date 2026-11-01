@@ -9,8 +9,7 @@
   §3.2). Slice 2 classifies and charges every native and makes the other
   drivers (`infer`, `test`, `model eval`, Warp, the host worker) honour the
   budget. Slice 3 adds the registry ceilings (§4), the refusal for native
-  builds (§7) and the overhead measurement (§8). Until slice 2c, natives
-  allocate uncharged. Slice 2a makes every driver report allocation exhaustion
+  builds (§7) and the overhead measurement (§8). Slice 2a makes every driver report allocation exhaustion
   as incomplete E0921, as it reports fuel's E0919: the scheduler, exact
   enumeration and likelihood weighting, observation transcripts
   (`incomplete code=E0921`) and exit codes; it adds `--alloc` to
@@ -19,9 +18,23 @@
   epoch for both caps), Warp keys bounded results on `alloc=alloc-v1:CELLS`,
   and a native that returns a nested invocation's E0921, even wrapped in a
   diagnostic, exhausts the enclosing invocation when an invocation really ran
-  out while the native ran. Charging the natives is
-  slice 2c. A model document has no allocation budget, so `model eval` cannot
-  run out of one yet.
+  out while the native ran. Slice 2c charges every trusted native as §3.1
+  says (`Native_alloc`). A native that knows its result's size charges it
+  before building it (`text.concat`, `text.join-list`, `text.slice`, `support`
+  and the others); `text.split` charges per piece as it goes; a rendering
+  counts its output bytes as they grow and stops at the remaining allowance,
+  including text it discards (`code.hash`, `pmf`, an inference key), while
+  comparing without rendering costs nothing. `code.diff` counts each path and
+  scalar it keeps, then charges its joined text before building it. A result of constant size is charged on return, which comes
+  to the same count. Nodes are counted once each by physical identity, a
+  result does not charge what it shares with its inputs, and likelihood
+  weighting charges a pair per retained run, separately from the list a
+  sampling native returns. Owner decision (2026-11-02): `code.form` costs one
+  cell plus one per child, as a constructor does, since it holds a reference
+  per child; other code stays one cell per node. A test fails on any installed trusted native without
+  a class. Root handlers that return
+  external text and `eval` are slice 2d. A model document has no allocation
+  budget, so `model eval` cannot run out of one yet.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
   replays that term's recorded cells per segment, after the segment's fuel. When
