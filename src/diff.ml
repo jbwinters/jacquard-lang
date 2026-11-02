@@ -39,7 +39,7 @@ let render_form syntax form =
   | Bootstrap -> Printer.inline_form form
   | Surface -> (
       match Surface_print.print_fragment form with
-      | Ok text when not (String.equal text "") -> text
+      | Ok text when not (String.equal text "") -> Alloc_meter.rendered_piece text
       | Ok _ | Error _ -> Printer.inline_form form)
 
 let operation_mode (form : Form.t) =
@@ -97,8 +97,8 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
     [
       {
         path = Alloc_meter.rendered_piece path;
-        a = render_authority_row ~effect_name_of old_row;
-        b = render_authority_row ~effect_name_of new_row;
+        a = Alloc_meter.rendered_piece (render_authority_row ~effect_name_of old_row);
+        b = Alloc_meter.rendered_piece (render_authority_row ~effect_name_of new_row);
       };
     ]
   else if
@@ -116,12 +116,13 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
     [
       {
         path = Alloc_meter.rendered_piece path;
-        a = Printf.sprintf "op `%s`: %s" name (show a_mode);
+        a = Alloc_meter.rendered_piece (Printf.sprintf "op `%s`: %s" name (show a_mode));
         b =
-          Printf.sprintf "op `%s`: %s%s" name (show b_mode)
-            (match (a_mode, b_mode) with
-            | Kernel.Multi, Kernel.Once -> " (handlers may no longer resume repeatedly)"
-            | _ -> "");
+          Alloc_meter.rendered_piece
+            (Printf.sprintf "op `%s`: %s%s" name (show b_mode)
+               (match (a_mode, b_mode) with
+               | Kernel.Multi, Kernel.Once -> " (handlers may no longer resume repeatedly)"
+               | _ -> ""));
       };
     ]
   else if fa.Form.head <> fb.Form.head || List.length fa.Form.args <> List.length fb.Form.args then

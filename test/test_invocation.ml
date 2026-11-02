@@ -1416,6 +1416,25 @@ let test_alloc_natives () =
            (fun () ->
              ignore (Printer.print_compact many);
              false)));
+  (* a changed operation mode is rendered with the operation's name: one divergence whose path is
+     tiny still stops at the budget when the name is long *)
+  let name = String.make 10_000 'n' in
+  let leaf = Form.form "lit" [ Form.Int 0 ] in
+  let op mode = Form.form "op" ((Form.Sym name :: mode) @ [ Form.F leaf; Form.F leaf ]) in
+  let rec spread k form =
+    if k = 0 then form else spread (k - 1) (Form.form "p" [ Form.F form; Form.F form ])
+  in
+  Alcotest.(check bool)
+    "operation-mode divergences are counted" true
+    (Eval.with_invocation ~alloc:1_000 ctx (fun _ ->
+         Eval.with_rendered ctx
+           ~exceeded:(fun _ -> true)
+           (fun () ->
+             ignore
+               (Diff.form_divergences ~path:"log"
+                  (spread 0 (op []))
+                  (spread 0 (op [ Form.Sym "once" ])));
+             false)));
   (* a nested rendering counts what the enclosing one has pending *)
   Alcotest.(check bool)
     "nested renderings share the allowance" true
