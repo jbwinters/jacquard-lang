@@ -797,13 +797,30 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       match args with
       | [ Value.VCode a; Value.VCode b ] ->
           let ds = Diff.form_divergences ~path:"log" a b in
-          let pieces =
-            List.map (fun { Diff.path; a; b } -> Printf.sprintf "at %s: - %s + %s" path a b) ds
+          (* "at PATH: - A + B" per divergence, joined by "; ": sized and charged before it is
+             built, then written once *)
+          let line { Diff.path; a; b } =
+            String.length path + String.length a + String.length b + String.length "at : -  + "
           in
-          charge_text
-            (if ds = [] then String.length "identical"
-             else List.fold_left (fun total piece -> total + String.length piece + 2) (-2) pieces);
-          Ok (Value.VText (if ds = [] then "identical" else String.concat "; " pieces))
+          let bytes =
+            if ds = [] then String.length "identical"
+            else List.fold_left (fun total d -> total + line d + 2) (-2) ds
+          in
+          charge_text bytes;
+          if ds = [] then Ok (Value.VText "identical")
+          else
+            let buffer = Buffer.create bytes in
+            List.iteri
+              (fun index { Diff.path; a; b } ->
+                if index > 0 then Buffer.add_string buffer "; ";
+                Buffer.add_string buffer "at ";
+                Buffer.add_string buffer path;
+                Buffer.add_string buffer ": - ";
+                Buffer.add_string buffer a;
+                Buffer.add_string buffer " + ";
+                Buffer.add_string buffer b)
+              ds;
+            Ok (Value.VText (Buffer.contents buffer))
       | args -> type_err "code.diff" args);
   optional "code.render" (fun args ->
       match args with

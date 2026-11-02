@@ -39,7 +39,7 @@ let render_form syntax form =
   | Bootstrap -> Printer.inline_form form
   | Surface -> (
       match Surface_print.print_fragment form with
-      | Ok text when not (String.equal text "") -> Alloc_meter.rendered_piece text
+      | Ok text when not (String.equal text "") -> text
       | Ok _ | Error _ -> Printer.inline_form form)
 
 let operation_mode (form : Form.t) =
@@ -70,7 +70,8 @@ let render_authority_row ~effect_name_of (effects, tail) =
   let effects =
     effects
     |> List.map (fun identity ->
-        Effect_registry.render_resolved ~name_hint:(effect_name_of identity) identity)
+        Alloc_meter.rendered_piece
+          (Effect_registry.render_resolved ~name_hint:(effect_name_of identity) identity))
     |> List.sort String.compare
   in
   let items = match tail with Some tail -> effects @ [ "| " ^ tail ] | None -> effects in
