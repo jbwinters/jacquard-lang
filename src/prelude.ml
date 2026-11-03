@@ -318,6 +318,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
              (Printf.sprintf "%s expects two reals, got %s" name
                 (String.concat ", " (List.map Value.display args))))
   in
+  (* alloc-v1: a native that knows its result's size charges it before building it (Native_alloc) *)
+  let charge = Eval.charge_native_alloc ctx in
+  let charge_text bytes = charge (Alloc_meter.text_cells bytes) in
   let optional name native =
     match lookup_hash store ~kind:Resolve.KTerm name with
     | Error _ -> () (* prelude without this layer *)
@@ -402,7 +405,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
   in
   optional "text.length"
     (text1 "text.length" (fun s -> Ok (Value.VInt (List.length (utf8_boundaries s) - 1))));
-  optional "text.concat" (text2 "text.concat" (fun a b -> Ok (Value.VText (a ^ b))));
+  optional "text.concat"
+    (text2 "text.concat" (fun a b ->
+         charge_text (String.length a + String.length b);
+         Ok (Value.VText (a ^ b))));
   optional "text.slice" (fun args ->
       match args with
       | [ Value.VText s; Value.VInt a; Value.VInt b ] ->
@@ -411,7 +417,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           let len = Array.length bs - 1 in
           let clamp i = max 0 (min len i) in
           let a = clamp a and b = clamp b in
-          Ok (Value.VText (if a >= b then "" else String.sub s bs.(a) (bs.(b) - bs.(a))))
+          let bytes = if a >= b then 0 else bs.(b) - bs.(a) in
+          charge_text bytes;
+          Ok (Value.VText (if a >= b then "" else String.sub s bs.(a) bytes))
       | args -> type_err "text.slice" args);
   optional "text.trim"
     (text1 "text.trim" (fun s ->
@@ -425,6 +433,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
          while !j > !i && ws s.[!j - 1] do
            decr j
          done;
+         charge_text (!j - !i);
          Ok (Value.VText (String.sub s !i (!j - !i)))));
   let substring_at s sub i =
     String.length sub <= String.length s - i && String.sub s i (String.length sub) = sub
@@ -491,11 +500,16 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       in
       optional "text.split"
         (text2 "text.split" (fun s sep ->
+             (* counted while built: nil, then a cons and its text per piece *)
+             charge 1;
+             let piece bytes = charge (3 + Alloc_meter.text_cells bytes) in
              if sep = "" then
                (* singleton-codepoint texts: consistent with the deliberate absence of Char *)
                let bs = utf8_boundaries s in
                let rec pieces = function
-                 | a :: (b :: _ as rest) -> String.sub s a (b - a) :: pieces rest
+                 | a :: (b :: _ as rest) ->
+                     piece (b - a);
+                     String.sub s a (b - a) :: pieces rest
                  | _ -> []
                in
                Ok (vlist_of_texts (pieces bs))
@@ -504,12 +518,14 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                let sn = String.length s and pn = String.length sep in
                while !i <= sn - pn do
                  if String.sub s !i pn = sep then begin
+                   piece (!i - !start);
                    out := String.sub s !start (!i - !start) :: !out;
                    start := !i + pn;
                    i := !i + pn
                  end
                  else incr i
                done;
+               piece (sn - !start);
                out := String.sub s !start (sn - !start) :: !out;
                Ok (vlist_of_texts (List.rev !out))
              end));
@@ -521,9 +537,12 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                   (* the pieces sit inside a list the native measure does not open: pay for
                      the joined bytes before building them (RT.1) *)
                   let count = List.length texts in
-                  Fuel_meter.tick
-                    (List.fold_left (fun total text -> total + String.length text) 0 texts
-                    + (max 0 (count - 1) * String.length separator));
+                  let bytes =
+                    List.fold_left (fun total text -> total + String.length text) 0 texts
+                    + (max 0 (count - 1) * String.length separator)
+                  in
+                  Fuel_meter.tick bytes;
+                  charge_text bytes;
                   Value.VText (String.concat separator texts))
                 (texts_of_vlist texts)
           | args -> type_err "text.join" args);
@@ -539,6 +558,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                      (Printf.sprintf "text.join expects Text at argument %d, got %s" index
                         (Value.display value)))
           in
+          charge_text
+            (List.fold_left
+               (fun total -> function Value.VText text -> total + String.length text | _ -> total)
+               0 args);
           join (Buffer.create 32) 1 args)
   | _ -> ());
   (* TS.2 instance tokens (design §10 A2.1): a non-token argument, reachable only through an eval
@@ -734,7 +757,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                          (Printf.sprintf "code.form: %S is not a valid form head" head))
                   else
                     Result.map
-                      (fun fs -> Value.VCode (Form.form head (List.map (fun f -> Form.F f) fs)))
+                      (fun fs ->
+                        charge (1 + List.length fs);
+                        Value.VCode (Form.form head (List.map (fun f -> Form.F f) fs)))
                       (codes_of_vlist xs)
               | args -> type_err "code.form" args);
           optional "code.un-form" (fun args ->
@@ -745,7 +770,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                   in
                   (* forms with scalar args (lit payloads) split only when every arg is a
                      form; scalars stay opaque behind to-int/to-text *)
-                  if List.length sub_forms = List.length f.Form.args then
+                  if List.length sub_forms = List.length f.Form.args then (
+                    (* some, the pair, the head, nil, and a cons and code wrapper per child; the
+                       children and the head's bytes are the input's *)
+                    charge (2 + 3 + 1 + 1 + (4 * List.length sub_forms));
                     Ok
                       (vsome
                          (Value.VTuple
@@ -754,8 +782,10 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                               List.fold_right
                                 (fun g acc -> vcons (Value.VCode g) acc)
                                 sub_forms vnil;
-                            ]))
-                  else Ok vnone
+                            ])))
+                  else (
+                    charge 1;
+                    Ok vnone)
               | args -> type_err "code.un-form" args)
       | _ -> ())
   | _ -> ());
@@ -767,14 +797,30 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       match args with
       | [ Value.VCode a; Value.VCode b ] ->
           let ds = Diff.form_divergences ~path:"log" a b in
-          Ok
-            (Value.VText
-               (if ds = [] then "identical"
-                else
-                  String.concat "; "
-                    (List.map
-                       (fun { Diff.path; a; b } -> Printf.sprintf "at %s: - %s + %s" path a b)
-                       ds)))
+          (* "at PATH: - A + B" per divergence, joined by "; ": sized and charged before it is
+             built, then written once *)
+          let line { Diff.path; a; b } =
+            String.length path + String.length a + String.length b + String.length "at : -  + "
+          in
+          let bytes =
+            if ds = [] then String.length "identical"
+            else List.fold_left (fun total d -> total + line d + 2) (-2) ds
+          in
+          charge_text bytes;
+          if ds = [] then Ok (Value.VText "identical")
+          else
+            let buffer = Buffer.create bytes in
+            List.iteri
+              (fun index { Diff.path; a; b } ->
+                if index > 0 then Buffer.add_string buffer "; ";
+                Buffer.add_string buffer "at ";
+                Buffer.add_string buffer path;
+                Buffer.add_string buffer ": - ";
+                Buffer.add_string buffer a;
+                Buffer.add_string buffer " + ";
+                Buffer.add_string buffer b)
+              ds;
+            Ok (Value.VText (Buffer.contents buffer))
       | args -> type_err "code.diff" args);
   optional "code.render" (fun args ->
       match args with
@@ -800,6 +846,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
             (Runtime_err.Type_error
                (Printf.sprintf "pmf expects a distribution and a value, got %s"
                   (String.concat ", " (List.map Value.display args)))));
+  (* a list of mk-pair(value, real): nil, then a cons and a pair per entry; the values are charged
+     where they were made *)
+  let charge_pairs entries = charge (1 + (6 * entries)) in
   optional "dist.sample-lw" (fun args ->
       match args with
       | [ thunk; Value.VInt samples; Value.VInt seed ] -> (
@@ -827,6 +876,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
                         ~next_step:"Correct the reported model runtime failure and rerun inference."
                         ~contrast:None ()))
             | Ok p -> (
+                charge_pairs (List.length p.Infer_dist.entries);
                 match
                   ( Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon,
                     Prelude_identity.lookup_kind store "cons" Resolve.KCon,
@@ -873,6 +923,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
             | Error [] ->
                 Error (Runtime_err.Arithmetic "the inference driver failed without a cause")
             | Ok runs -> (
+                charge_pairs (List.length runs);
                 match
                   ( Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon,
                     Prelude_identity.lookup_kind store "cons" Resolve.KCon,
@@ -908,6 +959,9 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
       | [ dv ] ->
           Result.bind (Infer_dist.dist_of_value ctx dv) (fun d ->
               Result.bind (Infer_dist.support ctx d) (fun entries ->
+                  (* a Bernoulli's support also makes its two booleans *)
+                  charge (match d with Infer_dist.Bernoulli _ -> 2 | _ -> 0);
+                  charge_pairs (List.length entries);
                   match
                     ( Prelude_identity.lookup_kind store "mk-pair" Resolve.KCon,
                       Prelude_identity.lookup_kind store "cons" Resolve.KCon,

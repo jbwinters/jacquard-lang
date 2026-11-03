@@ -25,5 +25,35 @@ let trip () =
     really did run out, not just an error that carries the code. *)
 let nested_exhaustions = ref 0
 
+(** Text rendered while a counted rendering runs (RT.2, §3.1 "counted while built"). [rendering] is
+    on inside {!Eval.with_rendered}; [rendered] holds the cells of the renderings finished so far,
+    charged when it ends. *)
+let rendering = ref false
+
+let rendered = ref 0
+
+(** Cells pending in the renderings enclosing this one, charged when they end. *)
+let outer_rendered = ref 0
+
+exception Built_exceeded
+
+let text_cells bytes = 1 + ((bytes + 7) / 8)
+
+(** [rendered_so_far bytes] checks a rendering's output against the remaining allowance as it grows,
+    raising {!Built_exceeded} at most one element past it. *)
+let[@inline] rendered_so_far bytes =
+  if !rendering && !outer_rendered + !rendered + text_cells bytes > !ceiling - !used then
+    raise Built_exceeded
+
+(** [rendering_done bytes] records a finished rendering. *)
+let[@inline] rendering_done bytes = if !rendering then rendered := !rendered + text_cells bytes
+
+(** [rendered_piece text] records a piece of text a counted rendering keeps, stopping at the
+    remaining allowance, and returns it. *)
+let rendered_piece text =
+  rendering_done (String.length text);
+  if !rendering && !outer_rendered + !rendered > !ceiling - !used then raise Built_exceeded;
+  text
+
 (** [exhausted ()] holds once a bounded invocation has run out of allocation. *)
 let exhausted () = !ceiling < 0

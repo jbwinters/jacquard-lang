@@ -959,5 +959,24 @@ allowance is smaller than its cap reports that allowance as the limit.
 reached and the limit that bound it, first budget out, no exhaustion left
 behind after a smaller nested or scoped cap, memo cost per scope) and the
 native error (wrapped nested exhaustion, and a forged E0921 that exhausts
-nothing), both failing without their fixes; `alloc.t` shows `test --alloc`. The source inventory is now
-`1225 / 82 / 57`.
+nothing), both failing without their fixes; `alloc.t` shows `test --alloc`.
+The source inventory is now `1225 / 82 / 57`.
+
+RT.2 slice 2c charges every trusted native as the design's table says, through
+the classes in `Native_alloc`. A native that knows its result's size charges it
+before building it; `text.split` charges per piece as it goes; a rendering
+counts its output bytes as they grow and stops at the remaining allowance, so
+an exponentially shared value stops at the budget, and text it discards
+(`code.hash`, `pmf`, an inference key) is charged too. Comparing without
+rendering costs nothing; `code.diff` counts what it keeps and charges its text
+before joining it; `code.form` costs one cell plus one per child. A
+result of constant size is charged on return. Nodes are counted once each by
+physical identity, a result does not charge what it shares with its inputs, and
+likelihood weighting charges each run it retains, so `dist.sample-lw` and
+`infer lw` stop at the budget even for a model that allocates nothing per run.
+`test_invocation.ml` adds a case: every installed trusted native is classified,
+exact costs, the boundary, rendering and join limits, distinct-node counting,
+shared inputs, equal forms fitting their budget, and bounded sampling. Counts
+that include natives grow: `alloc.t`'s chain costs 706 cells, and exact
+enumeration pays for its keys. External reads and `eval` are next. The source
+inventory is now `1226 / 82 / 57`.

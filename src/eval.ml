@@ -1262,6 +1262,19 @@ let reject_recovery_state ctx state = scan_recovery_state ctx ~static_trusted:fa
 
 (** [register_builtin ctx hash value] installs a native term implementation after rejecting any
     recovery-marked runtime graph. Custom callbacks remain guarded before and after every call. *)
+let charge_driver_alloc = charge_alloc_outside
+
+let charge_native_alloc = charge_alloc
+
+let trusted_builtin_names ctx =
+  Hashtbl.fold
+    (fun _ value names ->
+      match value with
+      | Value.VTrustedBuiltin builtin -> Trusted_builtin.name builtin :: names
+      | _ -> names)
+    ctx.builtins []
+  |> List.sort_uniq String.compare
+
 let register_builtin ctx hash value =
   if ctx.observing then
     invalid_arg "Eval.register_builtin: an observation callback cannot install a native";
@@ -1572,11 +1585,54 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
       if Fuel_meter.exhausted () then exhaust ctx;
       rt error
 
+(* alloc-v1: a rendering found while it is built is counted as its text grows and stops at the
+   remaining allowance (docs/designs/allocation-limits.md §3.1) *)
+let with_rendered ctx ~exceeded body =
+  let saved = !Alloc_meter.rendering
+  and saved_cells = !Alloc_meter.rendered
+  and saved_outer = !Alloc_meter.outer_rendered in
+  let restore () =
+    Alloc_meter.rendering := saved;
+    Alloc_meter.rendered := saved_cells;
+    Alloc_meter.outer_rendered := saved_outer
+  in
+  Alloc_meter.rendering := true;
+  Alloc_meter.rendered := 0;
+  Alloc_meter.outer_rendered := saved_outer + saved_cells;
+  match body () with
+  | result ->
+      let cells = !Alloc_meter.rendered in
+      restore ();
+      charge_alloc_outside ctx cells;
+      result
+  | exception Alloc_meter.Built_exceeded ->
+      restore ();
+      Alloc_meter.trip ();
+      exceeded (alloc_error ctx)
+  | exception exn ->
+      let backtrace = Printexc.get_raw_backtrace () in
+      restore ();
+      Printexc.raise_with_backtrace exn backtrace
+
+(* a native that sizes its result charges it before building ([charge_native_alloc]); one of constant
+   size, or embedding its inputs, is charged by class when it returns *)
+let invoke_trusted_builtin ctx builtin args =
+  let kind = Native_alloc.kind (Trusted_builtin.name builtin) in
+  let run () = Trusted_builtin.invoke builtin args in
+  let result =
+    if Native_alloc.renders kind then with_rendered ctx ~exceeded:(fun error -> Error error) run
+    else run ()
+  in
+  (match result with
+  | Ok value -> charge_alloc ctx (Native_alloc.cells kind ~args value)
+  | Error _ -> ());
+  result
+
 let invoke_trusted_native ctx builtin args kont =
   if Fuel_meter.exhausted () then exhaust ctx;
   charge_native ctx args;
   let nested = !Alloc_meter.nested_exhaustions in
-  let result = Trusted_builtin.invoke builtin args in
+  let result = invoke_trusted_builtin ctx builtin args in
   match charge_native_result ctx ~nested result with
   | Ok value -> checked_result_state ctx value kont
   | Error error -> rt error

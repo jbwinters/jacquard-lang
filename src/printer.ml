@@ -69,6 +69,7 @@ let scalar_to_string = function
    output; each node, scalar and byte ticks computation fuel (RT.1). *)
 let rec inline_form_into buffer (f : Form.t) =
   Fuel_meter.tick (1 + String.length f.Form.head);
+  Alloc_meter.rendered_so_far (Buffer.length buffer);
   Buffer.add_char buffer '(';
   if f.Form.head = "group" then
     (* a group whose first element is a scalar reparses as a headed form *)
@@ -91,11 +92,13 @@ and inline_arg_into buffer = function
   | Form.F f -> inline_form_into buffer f
   | scalar ->
       Fuel_meter.tick 1;
+      Alloc_meter.rendered_so_far (Buffer.length buffer);
       Buffer.add_string buffer (scalar_to_string scalar)
 
 let inline_form (f : Form.t) =
   let buffer = Buffer.create 64 in
   inline_form_into buffer f;
+  Alloc_meter.rendering_done (Buffer.length buffer);
   Buffer.contents buffer
 
 let inline_arg = function
