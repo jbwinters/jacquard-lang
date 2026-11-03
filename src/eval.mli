@@ -74,7 +74,7 @@ val alloc_remaining : unit -> int option
 val text_read_limit : unit -> int option
 (** [text_read_limit ()] is the length in bytes of the largest text the remaining allocation
     allowance admits (alloc-v1: one cell plus one per started 8 bytes), or [None] without a budget.
-    A root handler reading external text of unknown length reads at most one byte more. *)
+    A root handler reading external text of unknown length keeps at most one byte more. *)
 
 val admit_text : ctx -> bytes:int -> (unit, Runtime_err.t) result
 (** [admit_text ctx ~bytes] checks, before a root handler reads (or keeps) external text of [bytes]

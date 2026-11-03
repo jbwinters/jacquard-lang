@@ -2400,8 +2400,8 @@ let alloc_arg =
           "Bound the whole run to CELLS of alloc-v1 logical allocation (see \
            docs/designs/allocation-limits.md). Running out stops with E0921: the run is \
            incomplete, neither a pass nor a failure. Without it allocation is unbounded. A file \
-           too large for what remains is refused before it is read; a console line is read at most \
-           one byte past what remains, then refused.")
+           too large for what remains is refused before it is read; of a console line at most one \
+           byte past what remains is kept, then the line is refused and its rest discarded.")
 
 let required_seed_arg =
   Arg.(

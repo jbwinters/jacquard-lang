@@ -36,8 +36,11 @@
   (granted effects) on return for the nodes their result adds to its
   arguments; a handler that runs code (`eval`, a behaviour review's modeled
   operation) is charged by the evaluator instead. `fs.read` checks the file's
-  length, and an infer cache entry's, before reading; console lines are read
-  at most one byte past the remaining allowance; `net` and `infer` are stubs
+  length, and an infer cache entry's, before reading; of a console line at most
+  one byte past the remaining allowance is kept, and the rest of a refused
+  line is discarded without being kept (§3.1's "read at most" bounds what is
+  held: draining allocates nothing, and the next read starts at the next
+  line); `net` and `infer` are stubs
   whose text is built from their input. `eval` charges one cell per kernel
   node, a shared subform once per occurrence, before converting the payload.
   A directory listing is charged on return, bounded by the directory. A model document has no allocation

@@ -1349,7 +1349,7 @@ let test_alloc_root_handlers () =
   Alcotest.(check string)
     "and is refused one cell short" "E0921"
     (fst (run ~budget:2 (Printf.sprintf "read(%S)" hello)));
-  (* a console line past the allowance is refused, and stdin is read at most one byte past it *)
+  (* a console line past the allowance is refused; of stdin at most one byte past it is kept *)
   lines := [ String.make 10_000 'x' ];
   Alcotest.(check (pair string int))
     "a long line is refused" ("E0921", 100) (run ~budget:100 "read-line()");
@@ -1428,7 +1428,9 @@ let test_alloc_root_handlers () =
         | _ -> Alcotest.fail "expected a captured read")
   in
   Alcotest.(check (pair string int)) "a routed read" ("\"hello, world\"", 3) (routed hello);
-  Alcotest.(check string) "a routed read past the budget" "E0921" (fst (routed large));
+  let (outcome, _), bytes = heap_bytes (fun () -> routed large) in
+  Alcotest.(check string) "a routed read past the budget" "E0921" outcome;
+  Alcotest.(check bool) "is refused without reading" true (bytes < 16. *. 1024. *. 1024.);
   (* a scope's own budget bounds a read inside it, and the enclosing invocation goes on *)
   Alcotest.(check (pair string string))
     "a scope bounds its reads" ("E0921", "\"hello, world\"")

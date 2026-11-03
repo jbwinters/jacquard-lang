@@ -1066,7 +1066,8 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
 let install_console ?next_line ?read_line (ctx : Eval.ctx) ~(out : string -> unit) :
     (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  (* stdin is read at most one byte past what the allocation allowance admits (RT.2 §3.1) *)
+  (* of a stdin line at most one byte past what the allocation allowance admits is kept; the rest
+     of a longer line is discarded without being kept (RT.2 §3.1) *)
   let next_line =
     match next_line with
     | Some next_line -> next_line
