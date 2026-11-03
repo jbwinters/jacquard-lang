@@ -988,16 +988,17 @@ per started 8 bytes); a handler that runs code, such as `eval-code`, is charged
 by the evaluator instead, so its result is not charged twice. External text is
 bounded before it is read: `read` checks the file's length against the
 remaining allowance and refuses with E0921 without reading, an infer cache
-entry likewise, and of a console line at most one byte past the
-allowance is kept. `eval-code` charges one cell per kernel node before converting its
+entry likewise, and console lines are read at most one byte past the
+allowance. `eval-code` charges one cell per kernel node before converting its
 payload, counting a shared subform once per occurrence, so code shared
 exponentially is refused instead of expanded. `test_invocation.ml` adds a case:
 exact handler costs, a 256 MiB sparse file and a 2^22-node payload refused
 without being read or converted, the bounded line reader, and the two handler
 classes. The source inventory is now `1227 / 82 / 57`.
 
-A follow-up drains the rest of a console line that was too long, so a later
-read (the next test under `test --alloc`) starts at the next line, and corrects
-the `run --alloc` help: a file is refused before it is read; of a console line
-at most one byte past the allowance is kept, and the rest is discarded. The root-handler case also covers a driver
+A follow-up ends console input once a line is refused as too long (owner
+decision 2026-11-03), so no later read (the next test under `test --alloc`)
+sees the rest of that line, which is never read; and corrects the `run --alloc`
+help: a file is refused before it is read, a console line one byte past the
+allowance. The root-handler case also covers a driver
 dispatching a captured operation and a scope's own budget bounding a read.

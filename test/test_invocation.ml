@@ -1349,7 +1349,7 @@ let test_alloc_root_handlers () =
   Alcotest.(check string)
     "and is refused one cell short" "E0921"
     (fst (run ~budget:2 (Printf.sprintf "read(%S)" hello)));
-  (* a console line past the allowance is refused; of stdin at most one byte past it is kept *)
+  (* a console line past the allowance is refused, and stdin is read at most one byte past it *)
   lines := [ String.make 10_000 'x' ];
   Alcotest.(check (pair string int))
     "a long line is refused" ("E0921", 100) (run ~budget:100 "read-line()");
@@ -1359,10 +1359,17 @@ let test_alloc_root_handlers () =
         "a bounded read stops one byte past its limit" (Some 11)
         (Option.map String.length (Prelude.read_line_within ic ~limit:(Some 10))));
   In_channel.with_open_bin long (fun ic ->
-      ignore (Prelude.read_line_within ~drain:true ic ~limit:(Some 10));
+      let source = Prelude.line_source_within ic in
+      Alcotest.(check (option int))
+        "a refused line is read one byte past the limit" (Some 11)
+        (Option.map String.length (source ~limit:(Some 10)));
       Alcotest.(check (option string))
-        "a drained line leaves the next one" (Some "next")
-        (Prelude.read_line_within ic ~limit:(Some 10)));
+        "then input has ended, so no read sees its rest" None (source ~limit:(Some 1_000_000)));
+  In_channel.with_open_bin long (fun ic ->
+      let source = Prelude.line_source_within ic in
+      ignore (source ~limit:None);
+      Alcotest.(check (option string))
+        "a line within its limit leaves the next one" (Some "next") (source ~limit:(Some 10)));
   In_channel.with_open_bin long (fun ic ->
       let first = Prelude.read_line_within ic ~limit:None in
       Alcotest.(check (option int)) "unbounded" (Some 100_000) (Option.map String.length first);

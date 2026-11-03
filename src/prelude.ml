@@ -56,20 +56,14 @@ let read_file_within ctx path =
       let length = in_channel_length ic in
       Result.map (fun () -> really_input_string ic length) (Eval.admit_text ctx ~bytes:length))
 
-(** [read_line_within ?drain ic ~limit] reads one line from [ic] without its newline, like
-    [Stdlib.input_line], but with [Some limit] it keeps at most [limit + 1] bytes. The rest of a
-    longer line is left unread, or with [drain] consumed without being kept, so the next read starts
-    at the next line. [None] at end of input. *)
-let read_line_within ?(drain = false) ic ~limit =
-  let rec skip_rest () =
-    match input_char ic with '\n' -> () | _ -> skip_rest () | exception End_of_file -> ()
-  in
+(** [read_line_within ic ~limit] reads one line from [ic] without its newline, like
+    [Stdlib.input_line], but with [Some limit] it reads at most [limit + 1] bytes, leaving the rest
+    of a longer line unread. [None] at end of input. *)
+let read_line_within ic ~limit =
   let buffer = Buffer.create 80 in
   let full () = match limit with Some limit -> Buffer.length buffer > limit | None -> false in
   let rec loop () =
-    if full () then (
-      if drain then skip_rest ();
-      Some (Buffer.contents buffer))
+    if full () then Some (Buffer.contents buffer)
     else
       match input_char ic with
       | '\n' -> Some (Buffer.contents buffer)
@@ -80,6 +74,23 @@ let read_line_within ?(drain = false) ic ~limit =
           if Buffer.length buffer = 0 then None else Some (Buffer.contents buffer)
   in
   loop ()
+
+(** [line_source_within ic] reads lines from [ic] with {!read_line_within}. A line longer than its
+    limit is returned (to be refused) and ends the source: its rest is never read, and every later
+    call returns [None], so no later read sees part of a refused line. *)
+let line_source_within ic =
+  let ended = ref false in
+  fun ~limit ->
+    if !ended then None
+    else
+      let line = read_line_within ic ~limit in
+      (match (line, limit) with
+      | Some line, Some limit when String.length line > limit -> ended := true
+      | _ -> ());
+      line
+
+(* the process's console input: once a line is refused, stdin has ended for every later read *)
+let stdin_lines = lazy (line_source_within stdin)
 
 (** [load ~dir store] loads the prelude sources into [store]. Returns
     [(relative file name, hashes of each declaration in file order)] per file, in load order. Fails
@@ -1066,15 +1077,15 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
 let install_console ?next_line ?read_line (ctx : Eval.ctx) ~(out : string -> unit) :
     (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
-  (* of a stdin line at most one byte past what the allocation allowance admits is kept; the rest
-     of a longer line is discarded without being kept (RT.2 §3.1) *)
+  (* stdin is read at most one byte past what the allocation allowance admits; a longer line is
+     refused and ends console input (RT.2 §3.1) *)
   let next_line =
     match next_line with
     | Some next_line -> next_line
     | None ->
         fun () ->
           flush stdout;
-          read_line_within ~drain:true stdin ~limit:(Eval.text_read_limit ())
+          Lazy.force stdin_lines ~limit:(Eval.text_read_limit ())
   in
   let read_line =
     match read_line with
