@@ -670,7 +670,14 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
     invocation.alloc_final <- Some (!Alloc_meter.used - invocation.alloc_start);
-    if Alloc_meter.exhausted () then incr Alloc_meter.nested_exhaustions;
+    (* a ceiling reached inside counts as this invocation running out too, remembered so a native
+       returning its E0921 leaves the enclosing invocation with the same ceiling reached *)
+    if Alloc_meter.exhausted () then (
+      incr Alloc_meter.nested_exhaustions;
+      Retain_meter.last_nested := None)
+    else if Retain_meter.exhausted () then (
+      incr Alloc_meter.nested_exhaustions;
+      Retain_meter.last_nested := !Retain_meter.reached);
     if
       Alloc_meter.exhausted ()
       && invocation.saved_alloc_ceiling >= 0
@@ -931,17 +938,22 @@ let with_fuel_scope ctx ~fuel body =
     raises E0921; outside any run (a driver resuming a continuation) the next run raises it as it
     starts. *)
 let charge_cells_now ctx cells =
-  let used = !Alloc_meter.used + cells in
-  if used > !Alloc_meter.ceiling then (
+  (* compared without adding, so a charge the program sizes (a channel's capacity) cannot wrap
+     the count past the ceiling; unbounded, the count saturates *)
+  if cells <= !Alloc_meter.ceiling - !Alloc_meter.used then
+    Alloc_meter.used := !Alloc_meter.used + cells
+  else if !Alloc_meter.ceiling = max_int then Alloc_meter.used := max_int
+  else (
     Alloc_meter.trip ();
     if not ctx.deferring then rt (alloc_error ctx))
-  else Alloc_meter.used := used
 
 let[@inline] charge_alloc ctx cells =
   charge_cells_now ctx cells;
   (* a memo sub-run records its own cells per segment, so a warm hit replays them *)
   match !memo_frames with
-  | frame :: _ -> frame.segment_cells <- frame.segment_cells + cells
+  | frame :: _ ->
+      frame.segment_cells <-
+        (if cells > max_int - frame.segment_cells then max_int else frame.segment_cells + cells)
   | [] -> ()
 
 (* [charge_alloc_outside ctx cells] charges cells a driver allocates outside any run (reinstalling a
@@ -1594,8 +1606,13 @@ let note_returned_exhaustion ctx ~nested = function
   | Error error
     when Runtime_err.is_alloc_exhausted error
          && !Fuel_meter.depth > 0
-         && !Alloc_meter.nested_exhaustions > nested ->
-      Alloc_meter.trip ()
+         && !Alloc_meter.nested_exhaustions > nested -> (
+      (* the invocation that ran out last says which: allocation, or a registry ceiling *)
+      match !Retain_meter.last_nested with
+      | Some reached when Option.is_none !Retain_meter.reached ->
+          Retain_meter.reached := Some reached
+      | Some _ -> ()
+      | None -> Alloc_meter.trip ())
   | Ok _ | Error _ -> ()
 
 let charge_native_result ctx ~nested result =

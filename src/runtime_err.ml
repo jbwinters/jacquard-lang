@@ -47,9 +47,10 @@ let is_fuel_exhausted = function
   | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0919"
   | _ -> false
 
-(** [is_alloc_exhausted error] recognises allocation exhaustion (E0921) the same way. *)
+(** [is_alloc_exhausted error] recognises E0921, allocation exhaustion or a reached registry
+    ceiling, the same way. *)
 let is_alloc_exhausted = function
-  | Alloc_exhausted _ -> true
+  | Alloc_exhausted _ | Ceiling_reached _ -> true
   | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0921"
   | _ -> false
 

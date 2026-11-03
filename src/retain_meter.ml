@@ -33,6 +33,11 @@ type reached = { registry : registry; limit : int; wanted : int }
 
 let reached : reached option ref = ref None
 
+(** The ceiling reached by the invocation that most recently ended with one reached ([None] when it
+    ran out of allocation instead), so a native returning that invocation's E0921 reaches it in the
+    enclosing invocation too. Counted by [Alloc_meter.nested_exhaustions]. *)
+let last_nested : reached option ref = ref None
+
 (** [acquire registry] retains one entry. It refuses, and records the ceiling as reached, when the
     entry would pass the registry's ceiling or a ceiling was already reached. *)
 let acquire registry =

@@ -208,3 +208,14 @@ A channel's buffer is paid for when it opens: its declared capacity, in cells.
   Usage: jacquard run [--help] [OPTION]… FILE
   jacquard: option '--max-tasks': expected a non-negative count
   [124]
+
+A capacity near the largest Int is refused against the budget rather than
+wrapping the count:
+
+  $ sed 's/opens(2, 1000)/opens(2, 4611686018427387903)/' opens.jac > huge.jac
+  $ jacquard run huge.jac --alloc 1500
+  error[E0921]: The allocation budget was exhausted
+    Cause: allocation budget exhausted: the alloc-v1 budget of 1500 cell(s) ran out before evaluation finished; the result is incomplete
+    Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
+  alloc: 1500 of 1500 cell(s) used (alloc-v1)
+  [2]

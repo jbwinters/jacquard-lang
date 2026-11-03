@@ -1360,13 +1360,42 @@ let test_registry_ceilings () =
   | exception Exit -> ());
   Alcotest.(check (pair int int)) "released after an exception" (0, 0) (counts ());
   Alcotest.(check bool) "nothing held after the invocation" false (Retain_meter.exhausted ());
+  (* a native returning a nested invocation's ceiling E0921, even wrapped, leaves the enclosing
+     invocation with that ceiling reached *)
+  let outer_store, outer_ctx = prepared "registry-ceilings-outer" "bridge(u) = 0\n" in
+  (match Store.lookup_kind outer_store "bridge" Resolve.KTerm with
+  | Some { Resolve.hash; _ } ->
+      Eval.register_builtin outer_ctx hash
+        (Value.VBuiltin
+           ( "bridge",
+             fun _ ->
+               match
+                 Eval.with_invocation ~max_tasks:1 ctx (fun _ -> Round_robin.run_expr ctx spawns)
+               with
+               | Error error -> Error (Runtime_err.Diagnostic (Runtime_err.to_diag error))
+               | Ok _ -> Ok (Value.VInt 0) ))
+  | None -> Alcotest.fail "bridge not declared");
+  let call = expression outer_store "bridge(1)" and sum = expression outer_store "add(1, 2)" in
+  Alcotest.(check (triple string bool string))
+    "a nested ceiling exhausts the enclosing invocation" ("E0921", true, "E0921")
+    (Eval.with_invocation ~max_tasks:100 outer_ctx (fun _ ->
+         let first = outcome (Eval.run_expr outer_ctx call) in
+         (first, Eval.exhausted outer_ctx, outcome (Eval.run_expr outer_ctx sum))));
+  Alcotest.(check bool) "and nothing is held after it" false (Retain_meter.exhausted ());
   (* a channel's buffer is paid for in advance, as cells *)
   let cells size =
     Eval.with_invocation ~alloc:1_000_000 ctx (fun invocation ->
         ignore (Round_robin.run_expr ctx (channels size));
         Eval.alloc_used invocation)
   in
-  Alcotest.(check int) "declared capacity is charged" (2 * 999) (cells 1000 - cells 1)
+  Alcotest.(check int) "declared capacity is charged" (2 * 999) (cells 1000 - cells 1);
+  (* a capacity the program sizes cannot wrap the count past the budget *)
+  let huge = expression store "async.scope(fn () -> opens(2, 4611686018427387903))" in
+  Alcotest.(check (pair string bool))
+    "a huge capacity is refused" ("E0921", true)
+    (Eval.with_invocation ~alloc:1_000 ctx (fun invocation ->
+         let result = outcome (Round_robin.run_expr ctx huge) in
+         (result, Eval.alloc_used invocation >= 0)))
 
 let heap_bytes f =
   let before = Gc.allocated_bytes () in
