@@ -45,6 +45,36 @@ let read_file path =
   close_in ic;
   s
 
+(** [read_file_within ctx path] reads [path] for a root handler under an allocation budget: the
+    file's length is checked against the remaining allowance before any byte is read
+    ({!Eval.admit_text}), and at most that many bytes are read. Raises [Sys_error] on IO failure. *)
+let read_file_within ctx path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+      let length = in_channel_length ic in
+      Result.map (fun () -> really_input_string ic length) (Eval.admit_text ctx ~bytes:length))
+
+(** [read_line_within ic ~limit] reads one line from [ic] without its newline, like
+    [Stdlib.input_line], but with [Some limit] it stops after [limit + 1] bytes, leaving the rest of
+    the line unread. [None] at end of input. *)
+let read_line_within ic ~limit =
+  let buffer = Buffer.create 80 in
+  let full () = match limit with Some limit -> Buffer.length buffer > limit | None -> false in
+  let rec loop () =
+    if full () then Some (Buffer.contents buffer)
+    else
+      match input_char ic with
+      | '\n' -> Some (Buffer.contents buffer)
+      | c ->
+          Buffer.add_char buffer c;
+          loop ()
+      | exception End_of_file ->
+          if Buffer.length buffer = 0 then None else Some (Buffer.contents buffer)
+  in
+  loop ()
+
 (** [load ~dir store] loads the prelude sources into [store]. Returns
     [(relative file name, hashes of each declaration in file order)] per file, in load order. Fails
     with the first diagnostic batch (E0701 wraps IO problems).
@@ -1027,14 +1057,27 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
     shipped contract). [next-line] resumes with [some line], or [none] once [next_line] has returned
     [None]; that end is sticky, so later calls resume with [none] without reading again. A reduced
     prelude without [console-input] (or without [Option]) installs [console] alone. *)
-let install_console
-    ?(next_line = fun () -> try Some (Stdlib.read_line ()) with End_of_file -> None) ?read_line
-    (ctx : Eval.ctx) ~(out : string -> unit) : (unit, Diag.t list) result =
+let install_console ?next_line ?read_line (ctx : Eval.ctx) ~(out : string -> unit) :
+    (unit, Diag.t list) result =
   let ( let* ) = Result.bind in
+  (* stdin is read at most one byte past what the allocation allowance admits (RT.2 §3.1) *)
+  let next_line =
+    match next_line with
+    | Some next_line -> next_line
+    | None ->
+        fun () ->
+          flush stdout;
+          read_line_within stdin ~limit:(Eval.text_read_limit ())
+  in
   let read_line =
     match read_line with
     | Some read_line -> read_line
     | None -> fun () -> Option.value (next_line ()) ~default:""
+  in
+  let admitted line k =
+    match Eval.admit_text ctx ~bytes:(String.length line) with
+    | Ok () -> k line
+    | Error error -> Error error
   in
   let* print_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "print" in
   let* read_op = lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "read-line" in
@@ -1051,7 +1094,7 @@ let install_console
                   (String.concat ", " (List.map Value.display args)))));
   Eval.register_root_handler ctx read_op (fun args ->
       match args with
-      | [] -> Ok (Value.VText (read_line ()))
+      | [] -> admitted (read_line ()) (fun line -> Ok (Value.VText line))
       | args ->
           Error
             (Runtime_err.Type_error
@@ -1072,7 +1115,8 @@ let install_console
               else
                 match next_line () with
                 | Some line ->
-                    Ok (Value.VCon { con = some_h; name = "some"; args = [ Value.VText line ] })
+                    admitted line (fun line ->
+                        Ok (Value.VCon { con = some_h; name = "some"; args = [ Value.VText line ] }))
                 | None ->
                     ended := true;
                     Ok vnone)
@@ -1120,7 +1164,8 @@ let install_fs (ctx : Eval.ctx) : (unit, Diag.t list) result =
   let io f = try f () with Sys_error m -> Error (Runtime_err.Io m) in
   Eval.register_root_handler ctx read_op (fun args ->
       match args with
-      | [ Value.VText path ] -> io (fun () -> Ok (Value.VText (read_file path)))
+      | [ Value.VText path ] ->
+          io (fun () -> Result.map (fun text -> Value.VText text) (read_file_within ctx path))
       | args ->
           Error
             (Runtime_err.Type_error
@@ -1184,7 +1229,7 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
   in
   let cached text model k =
     match cache_dir with
-    | None -> k ()
+    | None -> Ok (k ())
     | Some dir -> (
         (* length-prefixed fields: a prompt text containing the separator cannot collide
            across the text/model split, and future prompt fields extend the same scheme
@@ -1208,18 +1253,24 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
         (* a READABLE entry is a hit; absent or corrupt is a miss that recomputes and
            (re)writes. Cache IO failures fall back to uncached — the completion still
            happens and the CLI exit-code contract survives a bad --infer-cache. *)
+        (* the entry is external text: its length is checked against the allocation allowance
+           before it is read (RT.2 §3.1) *)
         let stored =
           if Sys.file_exists path then
-            match Reader.parse_one ~file:path (read_file path) with
-            | Ok { Form.args = [ _; Form.F { Form.args = [ Form.Text c ]; _ } ]; _ } -> Some c
-            | _ -> None
-          else None
+            Result.map
+              (fun text ->
+                match Reader.parse_one ~file:path text with
+                | Ok { Form.args = [ _; Form.F { Form.args = [ Form.Text c ]; _ } ]; _ } -> Some c
+                | _ -> None)
+              (read_file_within ctx path)
+          else Ok None
         in
         match stored with
-        | Some c ->
+        | Error error -> Error error
+        | Ok (Some c) ->
             Printf.eprintf "infer-cache hit %s\n%!" (String.sub key 0 8);
-            c
-        | None ->
+            Ok c
+        | Ok None ->
             Printf.eprintf "infer-cache miss %s\n%!" (String.sub key 0 8);
             let c = k () in
             (* the cache entry is store IO: rendered unmetered, before the file is opened (RT.1) *)
@@ -1230,7 +1281,7 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
                output_string oc entry;
                close_out oc
              with Sys_error m -> Printf.eprintf "infer-cache unavailable (%s)\n%!" m);
-            c)
+            Ok c)
   in
   Eval.register_root_handler ctx complete_op (fun args ->
       match args with
@@ -1240,7 +1291,7 @@ let install_infer ?cache_dir (ctx : Eval.ctx) : (unit, Diag.t list) result =
             | Value.VCon { name = "some"; args = [ Value.VText m ]; _ } -> Some m
             | _ -> None
           in
-          Ok (Value.VText (cached text model (fun () -> stub text model)))
+          Result.map (fun c -> Value.VText c) (cached text model (fun () -> stub text model))
       | args ->
           Error
             (Runtime_err.Type_error
@@ -1393,12 +1444,25 @@ let install_eval (ctx : Eval.ctx) : (unit, Diag.t list) result =
   match lookup_hash (Eval.store ctx) ~kind:Resolve.KOp "eval-code" with
   | Error ds -> Error ds
   | Ok eval_op ->
-      Eval.register_root_handler ctx eval_op (fun args ->
+      (* the evaluator charges what the payload builds as it runs *)
+      Eval.register_root_handler ~alloc:Native_alloc.Evaluated ctx eval_op (fun args ->
           match args with
           | [ Value.VCode payload ] -> (
               let diags_msg ds = String.concat "; " (List.map Diag.to_cause_string ds) in
-              match Kernel.expr_of_form payload with
-              | Error ds -> Error (Runtime_err.Eval_error (diags_msg ds))
+              (* alloc-v1: one cell per kernel node, charged before the payload is converted; a
+                 subform shared in the code value becomes one node per occurrence (§3.1) *)
+              let nodes =
+                Native_alloc.form_tree_nodes
+                  ~limit:(Option.value (Eval.alloc_remaining ()) ~default:max_int)
+                  payload
+              in
+              match
+                Result.bind (Eval.reserve_alloc ctx nodes) (fun () ->
+                    Result.map_error
+                      (fun ds -> Runtime_err.Eval_error (diags_msg ds))
+                      (Kernel.expr_of_form payload))
+              with
+              | Error error -> Error error
               | Ok e -> (
                   let resolved =
                     match Eval.code_resolver ctx with

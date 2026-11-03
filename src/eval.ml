@@ -188,9 +188,10 @@ type ctx = {
       (** exact memo root plus the reachable mutable cells and their validated contents *)
   native_mutable_snapshots : native_snapshot_lru;
       (** bounded physical-root LRU for mutable-capable native arguments *)
-  root_handlers : (Hash.t, Value.t list -> (Value.t, Runtime_err.t) result) Hashtbl.t;
-      (** op hash -> granted native handler; shallow (the op resumes exactly once with the native
-          result), installed only by explicit grants *)
+  root_handlers :
+    (Hash.t, (Value.t list -> (Value.t, Runtime_err.t) result) * Native_alloc.root) Hashtbl.t;
+      (** op hash -> granted native handler and how its result is charged; shallow (the op resumes
+          exactly once with the native result), installed only by explicit grants *)
   mutable root_observer : (Observation.event -> unit) option;
       (** disabled-by-default, dynamically scoped recorder seam for root-reaching operations *)
   mutable observing : bool;
@@ -461,15 +462,16 @@ let reject_task_escape ctx ~scope_path root =
   value root;
   match List.rev !diagnostics with [] -> Ok () | found -> Error found
 
-(** [register_root_handler ctx op handler] installs one explicitly granted root handler. Arguments,
-    continuation state, callback mutation, and callback results are guarded at dispatch time. *)
-let register_root_handler ctx op handler =
+(** [register_root_handler ?alloc ctx op handler] installs one explicitly granted root handler.
+    Arguments, continuation state, callback mutation, and callback results are guarded at dispatch
+    time; [alloc] (default [New_nodes]) says how the result is charged. *)
+let register_root_handler ?(alloc = Native_alloc.New_nodes) ctx op handler =
   if ctx.observing then
     invalid_arg "Eval.register_root_handler: an observation callback cannot grant an operation";
   (* an instance operation is served only by its scope (TS.2, design §10 A2.4) *)
   if Instance_contract.is_instance_operation op then
     invalid_arg "Eval.register_root_handler: a scoped instance operation cannot be granted";
-  Hashtbl.replace ctx.root_handlers op handler
+  Hashtbl.replace ctx.root_handlers op (handler, alloc)
 
 (** [with_observer] scopes a typed root observer to one caller-controlled evaluation extent. The
     saved observer is restored even across an internal runtime exception. *)
@@ -1259,12 +1261,39 @@ let scan_recovery_state ctx ~static_trusted (state : state) =
       kont ~check_static:(not static_trusted) frames
 
 let reject_recovery_state ctx state = scan_recovery_state ctx ~static_trusted:false state
-
-(** [register_builtin ctx hash value] installs a native term implementation after rejecting any
-    recovery-marked runtime graph. Custom callbacks remain guarded before and after every call. *)
 let charge_driver_alloc = charge_alloc_outside
-
 let charge_native_alloc = charge_alloc
+
+(* alloc-v1 for root handlers (slice 2d): the bytes of the largest text the remaining allowance
+   admits, and the check a handler makes before reading external text *)
+let alloc_remaining () =
+  if !Alloc_meter.ceiling = max_int then None
+  else Some (max 0 (!Alloc_meter.ceiling - !Alloc_meter.used))
+
+let text_read_limit () = Option.map (fun cells -> 8 * max 0 (cells - 1)) (alloc_remaining ())
+
+let refuse_alloc ctx =
+  Alloc_meter.trip ();
+  Error (alloc_error ctx)
+
+let admit_text ctx ~bytes =
+  if Alloc_meter.exhausted () then Error (alloc_error ctx)
+  else
+    match text_read_limit () with
+    | Some limit when bytes > limit -> refuse_alloc ctx
+    | Some _ | None -> Ok ()
+
+let reserve_alloc ctx cells =
+  charge_alloc_outside ctx cells;
+  if Alloc_meter.exhausted () then Error (alloc_error ctx) else Ok ()
+
+(* a root handler's result: its new nodes are charged on return, by the handler's class *)
+let charge_root_result ctx alloc args = function
+  | Ok value -> (
+      match reserve_alloc ctx (Native_alloc.root_cells alloc ~args value) with
+      | Ok () -> Ok value
+      | Error error -> Error error)
+  | Error _ as error -> error
 
 let trusted_builtin_names ctx =
   Hashtbl.fold
@@ -1275,6 +1304,8 @@ let trusted_builtin_names ctx =
     ctx.builtins []
   |> List.sort_uniq String.compare
 
+(** [register_builtin ctx hash value] installs a native term implementation after rejecting any
+    recovery-marked runtime graph. Custom callbacks remain guarded before and after every call. *)
 let register_builtin ctx hash value =
   if ctx.observing then
     invalid_arg "Eval.register_builtin: an observation callback cannot install a native";
@@ -1548,7 +1579,7 @@ let charge_native_result ctx ~nested result =
         result
     | Error _ -> result
 
-let invoke_untrusted_native ?observed ctx fn native args kont =
+let invoke_untrusted_native ?(alloc = Native_alloc.New_nodes) ?observed ctx fn native args kont =
   (* a root observer or an earlier native may have exhausted the invocation since this step was
      charged: no native or root handler runs after exhaustion *)
   if Fuel_meter.exhausted () then exhaust ctx;
@@ -1573,7 +1604,7 @@ let invoke_untrusted_native ?observed ctx fn native args kont =
   let observe result =
     Option.iter (fun (operation, call) -> notify_root_result ctx ~call operation result) observed
   in
-  match charge_native_result ctx ~nested result with
+  match charge_root_result ctx alloc args (charge_native_result ctx ~nested result) with
   | Ok value ->
       let next = checked_result_state ctx value kont in
       observe (Ok value);
@@ -1699,7 +1730,7 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
            callback can influence them; the mode is read only when the operation is captured *)
         let native =
           match Hashtbl.find_opt ctx.root_handlers op with
-          | Some native when not ctx.capture_root_handlers -> Some native
+          | Some handler when not ctx.capture_root_handlers -> Some handler
           | Some _ | None -> None
         in
         let mode =
@@ -1709,8 +1740,8 @@ let perform_unchecked ?site ctx (op : Hash.t) ~name ~effect_ (args : Value.t lis
         notify_root_operation ?site ?choice ctx ~call op ~name args;
         if Fuel_meter.exhausted () then exhaust ctx;
         match (native, mode) with
-        | Some native, _ ->
-            invoke_untrusted_native ~observed:(op, call) ctx
+        | Some (native, alloc), _ ->
+            invoke_untrusted_native ~alloc ~observed:(op, call) ctx
               (VOp { op; name; effect_ })
               native args k
         | None, Some mode ->
@@ -2365,7 +2396,7 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
     match Hashtbl.find_opt ctx.root_handlers op with
     | None -> Error (Runtime_err.Unhandled { effect_; op = name })
     | Some _ when Fuel_meter.exhausted () -> Error (fuel_error ctx)
-    | Some native -> (
+    | Some (native, alloc) -> (
         try
           let roots = [ VOp { op; name; effect_ }; VTuple args; resume ] in
           List.iter (prepare_native_argument ctx) roots;
@@ -2377,7 +2408,7 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
           if Alloc_meter.exhausted () then raise (Rt (alloc_error ctx));
           List.iter (check_native_argument ctx) roots;
-          match charge_native_result ctx ~nested result with
+          match charge_root_result ctx alloc args (charge_native_result ctx ~nested result) with
           | Ok value ->
               if not (atomic_non_task_value value) then reject_recovery_result_value ctx value;
               notify_root_result ctx ~call op (Ok value);

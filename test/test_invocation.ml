@@ -1275,6 +1275,138 @@ let test_alloc_wrapped_native_exhaustion () =
   in
   Alcotest.(check (pair bool bool)) "a forged E0921 exhausts nothing" (false, true) after
 
+(* bytes the program allocates while [f] runs, in the OCaml heap *)
+let heap_bytes f =
+  let before = Gc.allocated_bytes () in
+  let result = f () in
+  (result, Gc.allocated_bytes () -. before)
+
+let test_alloc_root_handlers () =
+  let store, ctx =
+    prepared "alloc-roots"
+      "cdbl(c, k) = if eq(k, 0) then c else cdbl(code.form(\"tuple\", [c, c]), sub(k, 1))\n"
+  in
+  let dir = fresh_root "alloc-roots-files" in
+  Sys.mkdir dir 0o755;
+  let file name contents =
+    let path = Filename.concat dir name in
+    Out_channel.with_open_bin path (fun oc -> output_string oc contents);
+    path
+  in
+  let lines = ref [] in
+  let console_read () =
+    match !lines with
+    | line :: rest ->
+        lines := rest;
+        Some line
+    | [] -> None
+  in
+  let printed = Buffer.create 16 in
+  let run ?budget source =
+    Eval.with_invocation ~coverage:false ?alloc:budget ctx (fun invocation ->
+        List.iter
+          (fun effect_ ->
+            expect_ok effect_
+              (Prelude.grant ~console_read ctx effect_ ~infer_cache:None
+                 ~out:(Buffer.add_string printed) ~seed:0))
+          [ "clock"; "console"; "eval"; "fs" ];
+        let outcome =
+          match Eval.run_expr ctx (expression store source) with
+          | Ok value -> Fuel_meter.unmetered (fun () -> Value.show value)
+          | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+        in
+        (outcome, Eval.alloc_used invocation))
+  in
+  let cost source = snd (run source) in
+  (* a handler's result is charged on return: its new nodes, by the cells a native's would cost *)
+  Alcotest.(check int) "a scalar result" 0 (cost "now()");
+  Alcotest.(check int) "unit" 1 (cost "print(\"x\")");
+  let hello = file "hello.txt" "hello, world" in
+  Alcotest.(check (pair string int))
+    "a file's text" ("\"hello, world\"", 3)
+    (run (Printf.sprintf "read(%S)" hello));
+  let listed = Filename.concat dir "listed" in
+  Sys.mkdir listed 0o755;
+  List.iter (fun name -> ignore (file (Filename.concat "listed" name) "")) [ "a"; "b"; "c" ];
+  Alcotest.(check int)
+    "a directory listing: per entry a cons and its text, then nil"
+    ((3 * (3 + 2)) + 1)
+    (cost (Printf.sprintf "list-dir(%S)" listed));
+  lines := [ "abcdefghi" ];
+  Alcotest.(check (pair string int)) "a console line" ("\"abcdefghi\"", 3) (run "read-line()");
+  (* a file's length is checked before it is read: a large file under a small budget is refused
+     without reading it *)
+  let large = Filename.concat dir "large.bin" in
+  let fd = Unix.openfile large [ Unix.O_WRONLY; Unix.O_CREAT ] 0o644 in
+  Unix.ftruncate fd (256 * 1024 * 1024);
+  Unix.close fd;
+  let outcome, bytes = heap_bytes (fun () -> run ~budget:1_000 (Printf.sprintf "read(%S)" large)) in
+  Alcotest.(check (pair string int)) "a large file is refused" ("E0921", 1_000) outcome;
+  Alcotest.(check bool) "and not read" true (bytes < 16. *. 1024. *. 1024.);
+  Alcotest.(check (pair string int))
+    "a file fits at exactly its cost" ("\"hello, world\"", 3)
+    (run ~budget:3 (Printf.sprintf "read(%S)" hello));
+  Alcotest.(check string)
+    "and is refused one cell short" "E0921"
+    (fst (run ~budget:2 (Printf.sprintf "read(%S)" hello)));
+  (* a console line past the allowance is refused, and stdin is read at most one byte past it *)
+  lines := [ String.make 10_000 'x' ];
+  Alcotest.(check (pair string int))
+    "a long line is refused" ("E0921", 100) (run ~budget:100 "read-line()");
+  let long = file "long.txt" (String.make 100_000 'y' ^ "\nnext\n") in
+  In_channel.with_open_bin long (fun ic ->
+      Alcotest.(check (option int))
+        "a bounded read stops one byte past its limit" (Some 11)
+        (Option.map String.length (Prelude.read_line_within ic ~limit:(Some 10))));
+  In_channel.with_open_bin long (fun ic ->
+      let first = Prelude.read_line_within ic ~limit:None in
+      Alcotest.(check (option int)) "unbounded" (Some 100_000) (Option.map String.length first);
+      Alcotest.(check (option string))
+        "the next line" (Some "next")
+        (Prelude.read_line_within ic ~limit:None);
+      Alcotest.(check (option string)) "end of input" None (Prelude.read_line_within ic ~limit:None));
+  (* eval charges one cell per kernel node before converting the payload; what the payload builds
+     is charged by the evaluator, and its result is not charged again *)
+  Alcotest.(check int)
+    "eval of one node" 1
+    (cost "eval-code(code.of-int(5))" - cost "code.of-int(5)");
+  Alcotest.(check int)
+    "eval of a tuple" (3 + 3)
+    (cost "eval-code(code.form(\"tuple\", [code.of-int(1), code.of-int(2)]))"
+    - cost "code.form(\"tuple\", [code.of-int(1), code.of-int(2)])");
+  (* code sharing a subform 2^22 ways is 2^22 kernel nodes: refused before it is converted *)
+  let outcome, bytes =
+    heap_bytes (fun () -> run ~budget:1_000 "eval-code(cdbl(code.of-int(0), 22))")
+  in
+  Alcotest.(check (pair string int)) "shared code is refused" ("E0921", 1_000) outcome;
+  Alcotest.(check bool) "before it is converted" true (bytes < 64. *. 1024. *. 1024.);
+  (* by class: a handler returning its argument adds nothing; one that charges itself adds nothing
+     on return *)
+  let print_op =
+    match Prelude_identity.lookup_kind store "print" Resolve.KOp with
+    | Some { Resolve.hash; _ } -> hash
+    | None -> Alcotest.fail "print"
+  in
+  let with_handler alloc handler source =
+    Eval.with_invocation ~coverage:false ctx (fun invocation ->
+        Eval.register_root_handler ?alloc ctx print_op handler;
+        ignore (Eval.run_expr ctx (expression store source));
+        Eval.alloc_used invocation)
+  in
+  let text = "\"abcdefghijklmnopq\"" in
+  let base = cost (Printf.sprintf "text.length(%s)" text) in
+  let echo = function [ value ] -> Ok value | _ -> Error (Runtime_err.Eval_error "arity") in
+  let fresh = function _ -> Ok (Value.VText (String.make 100 'z')) in
+  Alcotest.(check int)
+    "an echo is shared" 0
+    (with_handler None echo (Printf.sprintf "print(%s)" text) - base);
+  Alcotest.(check int)
+    "a fresh result is new" (1 + 13)
+    (with_handler None fresh (Printf.sprintf "print(%s)" text) - base);
+  Alcotest.(check int)
+    "an evaluated result is not charged again" 0
+    (with_handler (Some Native_alloc.Evaluated) fresh (Printf.sprintf "print(%s)" text) - base)
+
 let test_alloc_natives () =
   let store, ctx =
     prepared "alloc-natives"
@@ -1421,19 +1553,13 @@ let test_alloc_natives () =
   let name = String.make 10_000 'n' in
   let leaf = Form.form "lit" [ Form.Int 0 ] in
   let op mode = Form.form "op" ((Form.Sym name :: mode) @ [ Form.F leaf; Form.F leaf ]) in
-  let rec spread k form =
-    if k = 0 then form else spread (k - 1) (Form.form "p" [ Form.F form; Form.F form ])
-  in
   Alcotest.(check bool)
     "operation-mode divergences are counted" true
     (Eval.with_invocation ~alloc:1_000 ctx (fun _ ->
          Eval.with_rendered ctx
            ~exceeded:(fun _ -> true)
            (fun () ->
-             ignore
-               (Diff.form_divergences ~path:"log"
-                  (spread 0 (op []))
-                  (spread 0 (op [ Form.Sym "once" ])));
+             ignore (Diff.form_divergences ~path:"log" (op []) (op [ Form.Sym "once" ]));
              false)));
   (* a nested rendering counts what the enclosing one has pending *)
   Alcotest.(check bool)
@@ -1717,6 +1843,8 @@ let suite =
       test_alloc_survives_drivers;
     Alcotest.test_case "allocation scopes cap one branch of an invocation" `Quick test_alloc_scopes;
     Alcotest.test_case "every native is classified and charged" `Quick test_alloc_natives;
+    Alcotest.test_case "root handlers charge their results and bound external reads" `Quick
+      test_alloc_root_handlers;
     Alcotest.test_case "a native's wrapped E0921 exhausts its invocation" `Quick
       test_alloc_wrapped_native_exhaustion;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;

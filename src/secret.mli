@@ -10,3 +10,7 @@ val of_string : string -> t
 val expose : t -> string
 (** [expose secret] crosses the trusted explicit-exposure boundary. Generic rendering must never
     call this function. *)
+
+val length : t -> int
+(** [length secret] is the number of bytes [secret] holds, without exposing them (for accounting).
+*)

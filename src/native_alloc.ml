@@ -46,6 +46,7 @@ let rec value_cells seen (value : Value.t) =
     | Value.VInt _ | Value.VReal _ -> 0
     | Value.VText text -> text_cells (String.length text)
     | Value.VHash _ -> 5
+    | Value.VSecret secret -> text_cells (Secret.length secret)
     | Value.VCode form -> form_cells seen form
     | Value.VTuple items | Value.VCon { args = items; _ } ->
         List.fold_left
@@ -72,6 +73,33 @@ let cells kind ~args result =
   | Fresh | Rendering -> fresh_cells result
   | Shared_text -> ( match result with Value.VCon { args = [ _ ]; _ } -> 3 | _ -> 1)
   | Posterior -> fresh_cells_over ~shared:args result
+
+(** How a root handler's result is charged when it returns (RT.2 slice 2d). *)
+type root =
+  | New_nodes
+      (** every node of the result not already in its arguments is new, charged on return. A handler
+          that reads external text first checks its size against the remaining allowance
+          ([Eval.admit_text]), so no read is unbounded under a budget *)
+  | Evaluated
+      (** the result was built, and charged, by the evaluator (the handler runs code), or the
+          handler charged what it built itself *)
+
+(** [root_cells root ~args result] is what a root handler's [result] adds on return. *)
+let root_cells root ~args result =
+  match root with New_nodes -> fresh_cells_over ~shared:args result | Evaluated -> 0
+
+(** [form_tree_nodes ~limit form] counts the nodes of [form] as a tree, a shared subform once per
+    occurrence (the kernel expression built from it does not share), stopping once the count passes
+    [limit]: the result is at most [limit + 1]. *)
+let form_tree_nodes ~limit (form : Form.t) =
+  let rec walk count (form : Form.t) =
+    if count > limit then count
+    else
+      List.fold_left
+        (fun count -> function Form.F child -> walk count child | _ -> count)
+        (count + 1) form.Form.args
+  in
+  walk 0 form
 
 (** [renders kind] holds for classes whose renderings are counted while they are built. *)
 let renders = function
