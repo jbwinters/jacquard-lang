@@ -1002,3 +1002,16 @@ sees the rest of that line, which is never read; and corrects the `run --alloc`
 help: a file is refused before it is read, a console line one byte past the
 allowance. The root-handler case also covers a driver
 dispatching a captured operation and a scope's own budget bounding a read.
+
+Slice 3a adds the first registry ceilings (§4): `jacquard run --max-tasks N`
+and `--max-channels N` bound the tasks retained (spawned, or a nested scope's
+body) and the channels open at once across the whole run, counted by
+`Retain_meter` and scoped by `Eval.with_invocation` and `Eval.with_scope` as
+the allocation budget is. Entries are released when the run's scopes are torn
+down, so a nested scope that finished early stays counted until its run ends.
+The entry past a ceiling is the incomplete outcome E0921, naming the ceiling
+(`Runtime_err.Ceiling_reached`), and sticky. Opening a channel now charges its
+declared capacity as cells. `test_invocation.ml` adds a case (exact ceilings,
+stickiness, a scope's own ceiling, release after an exception, the capacity
+charge) and `test/cli/alloc.t` the command line. The source inventory is now
+`1228 / 82 / 57`.

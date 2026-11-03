@@ -994,7 +994,7 @@ let cache_store ~cache_dir key outcomes : unit =
   let key = bounded_key key in
   match cache_dir with
   | None -> ()
-  | Some _ when Fuel_meter.exhausted () || Alloc_meter.exhausted () ->
+  | Some _ when Fuel_meter.exhausted () || Alloc_meter.exhausted () || Retain_meter.exhausted () ->
       (* an exhausted test is incomplete: nothing it produced is a verdict worth caching *)
       ()
   | Some dir -> (

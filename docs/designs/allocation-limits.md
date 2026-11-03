@@ -43,7 +43,19 @@
   whose text is built from their input. `eval` charges one cell per kernel
   node, a shared subform once per occurrence, before converting the payload.
   A directory listing is charged on return, bounded by the directory. A model document has no allocation
-  budget, so `model eval` cannot run out of one yet.
+  budget, so `model eval` cannot run out of one yet. Slice 3a adds the task
+  and channel ceilings (`Retain_meter`, `Eval.with_invocation` and
+  `Eval.with_scope ~max_tasks ~max_channels`, `jacquard run --max-tasks
+  --max-channels`): a spawned task and a nested scope's body count as retained
+  tasks, an opened channel as an open channel, each until the run's scopes are
+  torn down. A nested scope is torn down with the run that opened it, so the
+  tasks of a scope that finished early stay counted until that run ends, as
+  they stay held. Opening a channel charges its declared capacity as cells.
+  The entry past a ceiling is refused with E0921 naming the ceiling, sticky
+  like allocation exhaustion; a nested invocation or scope stays within the
+  enclosing ceiling, and every entry is released when the invocation ends,
+  however it ends. The frontier ceiling, the other drivers' flags, the native
+  refusal and the overhead measurement follow.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
   replays that term's recorded cells per segment, after the segment's fuel. When

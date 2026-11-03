@@ -1276,6 +1276,98 @@ let test_alloc_wrapped_native_exhaustion () =
   Alcotest.(check (pair bool bool)) "a forged E0921 exhausts nothing" (false, true) after
 
 (* bytes the program allocates while [f] runs, in the OCaml heap *)
+let test_registry_ceilings () =
+  (* RT.2 §4: retained tasks and open channels are counted across the invocation, released when
+     the run's scopes are torn down; the entry past a ceiling is E0921, sticky like allocation *)
+  let store, ctx =
+    prepared "registry-ceilings"
+      "count(n) = if eq(n, 0) then 0 else { let t = async.spawn(fn () -> n); let v = match \
+       async.await(t) { | Done(v) -> v | _ -> 100 }; add(v, count(sub(n, 1))) }\n\
+       opens(n, size) = if eq(n, 0) then 0 else match channel.open(size) { | Err(_) -> 100 | Ok(_) \
+       -> add(1, opens(sub(n, 1), size)) }\n"
+  in
+  let spawns = expression store "async.scope(fn () -> count(3))"
+  and channels size = expression store (Printf.sprintf "async.scope(fn () -> opens(2, %d))" size)
+  and pure = expression store "add(1, 2)" in
+  let outcome = function
+    | Ok value -> Value.show value
+    | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+  in
+  let counts () = (Retain_meter.tasks.count, Retain_meter.channels.count) in
+  let run ?max_tasks ?max_channels expr =
+    Eval.with_invocation ?max_tasks ?max_channels ctx (fun _ ->
+        let result = outcome (Round_robin.run_expr ctx expr) in
+        (result, counts ()))
+  in
+  (* the scope body and three spawned tasks are retained until the run ends *)
+  Alcotest.(check (pair string (pair int int)))
+    "four tasks fit"
+    ("done(6)", (0, 0))
+    (run ~max_tasks:4 spawns);
+  Alcotest.(check (pair string (pair int int)))
+    "the fifth is refused"
+    ("E0921", (0, 0))
+    (run ~max_tasks:3 spawns);
+  Alcotest.(check string)
+    "the ceiling is named"
+    "registry ceiling reached: the --max-tasks ceiling of 3 retained task(s) was reached before \
+     evaluation finished; the result is incomplete"
+    (Eval.with_invocation ~max_tasks:3 ctx (fun _ ->
+         match Round_robin.run_expr ctx spawns with
+         | Error error -> Runtime_err.to_string error
+         | Ok _ -> "completed"));
+  Alcotest.(check (pair string (pair int int)))
+    "two channels fit"
+    ("done(2)", (0, 0))
+    (run ~max_channels:2 (channels 4));
+  Alcotest.(check (pair string (pair int int)))
+    "the second channel is refused"
+    ("E0921", (0, 0))
+    (run ~max_channels:1 (channels 4));
+  (* reaching a ceiling is sticky: no later run of the invocation delivers a value *)
+  Alcotest.(check (pair string string))
+    "sticky" ("E0921", "E0921")
+    (Eval.with_invocation ~max_tasks:1 ctx (fun _ ->
+         let first = outcome (Round_robin.run_expr ctx spawns) in
+         (first, outcome (Eval.run_expr ctx pure))));
+  (* a scope's ceiling is its own outcome, and a scope cannot raise the invocation's *)
+  let scoped, later, held =
+    Eval.with_invocation ~max_tasks:100 ctx (fun _ ->
+        let _, report =
+          Eval.with_scope ctx ~max_tasks:2 (fun () -> Round_robin.run_expr ctx spawns)
+        in
+        let later = outcome (Round_robin.run_expr ctx spawns) in
+        ( Option.map (fun e -> Diag.code_or_uncoded (Runtime_err.to_diag e)) report.exhaustion,
+          later,
+          Eval.exhausted ctx ))
+  in
+  Alcotest.(check (option string)) "the scope reached its ceiling" (Some "E0921") scoped;
+  Alcotest.(check (pair string bool)) "the invocation continues" ("done(6)", false) (later, held);
+  Alcotest.(check string)
+    "a scope cannot raise the ceiling" "E0921"
+    (Eval.with_invocation ~max_tasks:3 ctx (fun _ ->
+         let result, _ =
+           Eval.with_scope ctx ~max_tasks:10 (fun () -> Round_robin.run_expr ctx spawns)
+         in
+         outcome result));
+  (* every entry is released when the invocation ends, even one a raising body left counted *)
+  (match
+     Eval.with_invocation ~max_tasks:5 ctx (fun _ ->
+         ignore (Retain_meter.acquire Retain_meter.Tasks);
+         raise Exit)
+   with
+  | () -> Alcotest.fail "expected Exit"
+  | exception Exit -> ());
+  Alcotest.(check (pair int int)) "released after an exception" (0, 0) (counts ());
+  Alcotest.(check bool) "nothing held after the invocation" false (Retain_meter.exhausted ());
+  (* a channel's buffer is paid for in advance, as cells *)
+  let cells size =
+    Eval.with_invocation ~alloc:1_000_000 ctx (fun invocation ->
+        ignore (Round_robin.run_expr ctx (channels size));
+        Eval.alloc_used invocation)
+  in
+  Alcotest.(check int) "declared capacity is charged" (2 * 999) (cells 1000 - cells 1)
+
 let heap_bytes f =
   let before = Gc.allocated_bytes () in
   let result = f () in
@@ -1889,6 +1981,8 @@ let suite =
     Alcotest.test_case "every native is classified and charged" `Quick test_alloc_natives;
     Alcotest.test_case "root handlers charge their results and bound external reads" `Quick
       test_alloc_root_handlers;
+    Alcotest.test_case "registry ceilings bound retained tasks and open channels" `Quick
+      test_registry_ceilings;
     Alcotest.test_case "a native's wrapped E0921 exhausts its invocation" `Quick
       test_alloc_wrapped_native_exhaustion;
     Alcotest.test_case "work outside runs is charged and never raises" `Quick test_fuel_outside_runs;

@@ -215,6 +215,7 @@ let runtime_kind (e : Runtime_err.t) d =
       | Eval_error _ -> "eval"
       | Fuel_exhausted _ -> "fuel"
       | Alloc_exhausted _ -> "alloc"
+      | Ceiling_reached _ -> "ceiling"
       | Stale_capability _ -> "stale-capability"
       | Diagnostic _ -> "uncoded")
 
