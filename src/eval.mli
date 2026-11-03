@@ -67,6 +67,24 @@ val charge_native_alloc : ctx -> int -> unit
 (** [charge_native_alloc ctx cells] charges [cells] from inside a native, before it builds them;
     running out raises E0921 in the run that called the native. *)
 
+val alloc_remaining : unit -> int option
+(** [alloc_remaining ()] is the number of cells the innermost bounded invocation can still allocate,
+    or [None] without a budget. *)
+
+val text_read_limit : unit -> int option
+(** [text_read_limit ()] is the length in bytes of the largest text the remaining allocation
+    allowance admits (alloc-v1: one cell plus one per started 8 bytes), or [None] without a budget.
+    A root handler reading external text of unknown length reads at most one byte more. *)
+
+val admit_text : ctx -> bytes:int -> (unit, Runtime_err.t) result
+(** [admit_text ctx ~bytes] checks, before a root handler reads (or keeps) external text of [bytes]
+    bytes, that the remaining allowance admits it. If not, it exhausts the invocation and returns
+    E0921, which the handler returns. It charges nothing: the text is charged with the result. *)
+
+val reserve_alloc : ctx -> int -> (unit, Runtime_err.t) result
+(** [reserve_alloc ctx cells] charges [cells] a root handler is about to build; running out exhausts
+    the invocation and returns E0921, which the handler returns. *)
+
 val with_rendered : ctx -> exceeded:(Runtime_err.t -> 'a) -> (unit -> 'a) -> 'a
 (** [with_rendered ctx ~exceeded body] counts every value and code rendering [body] makes against
     the allocation budget as its text grows. A rendering that cannot fit stops, exhausts the
@@ -78,10 +96,17 @@ val trusted_builtin_names : ctx -> string list
 *)
 
 val register_root_handler :
-  ctx -> Hash.t -> (Value.t list -> (Value.t, Runtime_err.t) result) -> unit
-(** [register_root_handler ctx op handler] installs an explicitly granted root operation handler.
-    Its arguments, continuation mutation, and result are guarded at dispatch; callback failures are
-    returned as runtime errors. *)
+  ?alloc:Native_alloc.root ->
+  ctx ->
+  Hash.t ->
+  (Value.t list -> (Value.t, Runtime_err.t) result) ->
+  unit
+(** [register_root_handler ?alloc ctx op handler] installs an explicitly granted root operation
+    handler. Its arguments, continuation mutation, and result are guarded at dispatch; callback
+    failures are returned as runtime errors. Under an allocation budget its result is charged by
+    [alloc] when it returns: by default ([New_nodes]) every node not already in its arguments;
+    [Evaluated] for a handler that runs code, whose result the evaluator has charged, or that
+    charges what it builds itself ({!reserve_alloc}). *)
 
 val with_named_choices : ctx -> Hash.t option -> (unit -> 'a) -> 'a
 (** [with_named_choices ctx named f] runs [f] with [named] as the [dist.named] member identity

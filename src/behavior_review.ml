@@ -766,7 +766,9 @@ let run_cases options (p : prepared) (cases : int list list) ~runnable =
   Eval.with_invocation ~coverage:false ~fuel:options.fuel p.ctx @@ fun _ ->
   List.iter
     (fun (op, handler) ->
-      Eval.register_root_handler p.ctx op (fun args -> Eval.call p.ctx handler args))
+      (* the handler runs code: the evaluator charges its result *)
+      Eval.register_root_handler ~alloc:Native_alloc.Evaluated p.ctx op (fun args ->
+          Eval.call p.ctx handler args))
     p.handler_fns;
   let stopped = ref false in
   List.mapi

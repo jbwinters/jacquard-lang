@@ -980,3 +980,18 @@ shared inputs, equal forms fitting their budget, and bounded sampling. Counts
 that include natives grow: `alloc.t`'s chain costs 706 cells, and exact
 enumeration pays for its keys. External reads and `eval` are next. The source
 inventory is now `1226 / 82 / 57`.
+
+RT.2 slice 2d charges root handlers, the grants that answer effects at the
+root. A handler's result is charged on return for the nodes it adds to its
+arguments (a scalar costs nothing, unit one cell, a file's text one plus one
+per started 8 bytes); a handler that runs code, such as `eval-code`, is charged
+by the evaluator instead, so its result is not charged twice. External text is
+bounded before it is read: `read` checks the file's length against the
+remaining allowance and refuses with E0921 without reading, an infer cache
+entry likewise, and console lines are read at most one byte past the
+allowance. `eval-code` charges one cell per kernel node before converting its
+payload, counting a shared subform once per occurrence, so code shared
+exponentially is refused instead of expanded. `test_invocation.ml` adds a case:
+exact handler costs, a 256 MiB sparse file and a 2^22-node payload refused
+without being read or converted, the bounded line reader, and the two handler
+classes. The source inventory is now `1227 / 82 / 57`.

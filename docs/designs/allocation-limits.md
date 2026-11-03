@@ -32,8 +32,15 @@
   sampling native returns. Owner decision (2026-11-02): `code.form` costs one
   cell plus one per child, as a constructor does, since it holds a reference
   per child; other code stays one cell per node. A test fails on any installed trusted native without
-  a class. Root handlers that return
-  external text and `eval` are slice 2d. A model document has no allocation
+  a class. Slice 2d charges root handlers
+  (granted effects) on return for the nodes their result adds to its
+  arguments; a handler that runs code (`eval`, a behaviour review's modeled
+  operation) is charged by the evaluator instead. `fs.read` checks the file's
+  length, and an infer cache entry's, before reading; console lines are read
+  at most one byte past the remaining allowance; `net` and `infer` are stubs
+  whose text is built from their input. `eval` charges one cell per kernel
+  node, a shared subform once per occurrence, before converting the payload.
+  A directory listing is charged on return, bounded by the directory. A model document has no allocation
   budget, so `model eval` cannot run out of one yet.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
