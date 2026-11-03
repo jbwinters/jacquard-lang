@@ -995,3 +995,10 @@ exponentially is refused instead of expanded. `test_invocation.ml` adds a case:
 exact handler costs, a 256 MiB sparse file and a 2^22-node payload refused
 without being read or converted, the bounded line reader, and the two handler
 classes. The source inventory is now `1227 / 82 / 57`.
+
+A follow-up ends console input once a line is refused as too long (owner
+decision 2026-11-03), so no later read (the next test under `test --alloc`)
+sees the rest of that line, which is never read; and corrects the `run --alloc`
+help: a file is refused before it is read, a console line one byte past the
+allowance. The root-handler case also covers a driver
+dispatching a captured operation and a scope's own budget bounding a read.

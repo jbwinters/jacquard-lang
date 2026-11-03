@@ -1359,6 +1359,18 @@ let test_alloc_root_handlers () =
         "a bounded read stops one byte past its limit" (Some 11)
         (Option.map String.length (Prelude.read_line_within ic ~limit:(Some 10))));
   In_channel.with_open_bin long (fun ic ->
+      let source = Prelude.line_source_within ic in
+      Alcotest.(check (option int))
+        "a refused line is read one byte past the limit" (Some 11)
+        (Option.map String.length (source ~limit:(Some 10)));
+      Alcotest.(check (option string))
+        "then input has ended, so no read sees its rest" None (source ~limit:(Some 1_000_000)));
+  In_channel.with_open_bin long (fun ic ->
+      let source = Prelude.line_source_within ic in
+      ignore (source ~limit:None);
+      Alcotest.(check (option string))
+        "a line within its limit leaves the next one" (Some "next") (source ~limit:(Some 10)));
+  In_channel.with_open_bin long (fun ic ->
       let first = Prelude.read_line_within ic ~limit:None in
       Alcotest.(check (option int)) "unbounded" (Some 100_000) (Option.map String.length first);
       Alcotest.(check (option string))
@@ -1405,7 +1417,39 @@ let test_alloc_root_handlers () =
     (with_handler None fresh (Printf.sprintf "print(%s)" text) - base);
   Alcotest.(check int)
     "an evaluated result is not charged again" 0
-    (with_handler (Some Native_alloc.Evaluated) fresh (Printf.sprintf "print(%s)" text) - base)
+    (with_handler (Some Native_alloc.Evaluated) fresh (Printf.sprintf "print(%s)" text) - base);
+  (* a driver dispatching a captured operation charges the handler's result the same way *)
+  let routed path =
+    Eval.with_invocation ~coverage:false ~alloc:1_000 ctx (fun invocation ->
+        expect_ok "fs" (Prelude.grant ctx "fs" ~infer_cache:None ~out:ignore ~seed:0);
+        let state = Eval.expr_state (expression store (Printf.sprintf "read(%S)" path)) in
+        match Eval.run_state_capturing_once_routed ctx state with
+        | Ok (Eval.OCOp { call; op; name; args; resume }) ->
+            let before = Eval.alloc_used invocation in
+            let outcome =
+              match Eval.dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_:"" args with
+              | Ok value -> Value.show value
+              | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+            in
+            (outcome, Eval.alloc_used invocation - before)
+        | _ -> Alcotest.fail "expected a captured read")
+  in
+  Alcotest.(check (pair string int)) "a routed read" ("\"hello, world\"", 3) (routed hello);
+  let (outcome, _), bytes = heap_bytes (fun () -> routed large) in
+  Alcotest.(check string) "a routed read past the budget" "E0921" outcome;
+  Alcotest.(check bool) "is refused without reading" true (bytes < 16. *. 1024. *. 1024.);
+  (* a scope's own budget bounds a read inside it, and the enclosing invocation goes on *)
+  Alcotest.(check (pair string string))
+    "a scope bounds its reads" ("E0921", "\"hello, world\"")
+    (Eval.with_invocation ~coverage:false ~alloc:1_000 ctx (fun _ ->
+         expect_ok "fs" (Prelude.grant ctx "fs" ~infer_cache:None ~out:ignore ~seed:0);
+         let read () =
+           match Eval.run_expr ctx (expression store (Printf.sprintf "read(%S)" hello)) with
+           | Ok value -> Value.show value
+           | Error error -> Diag.code_or_uncoded (Runtime_err.to_diag error)
+         in
+         let scoped, _ = Eval.with_scope ctx ~alloc:2 read in
+         (scoped, read ())))
 
 let test_alloc_natives () =
   let store, ctx =
