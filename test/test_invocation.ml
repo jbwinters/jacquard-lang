@@ -1404,7 +1404,25 @@ let test_registry_ceilings () =
     ( unbounded,
       Eval.with_invocation ~alloc:1_000 ctx (fun invocation ->
           let result = outcome (Round_robin.run_expr ctx huge) in
-          (result, Eval.alloc_used invocation <= 1_000)) )
+          (result, Eval.alloc_used invocation <= 1_000)) );
+  (* a capacity that fits leaves the count near [max_int]: a later run still counts from zero, and
+     a scope bounded inside the same run fails closed rather than becoming unbounded *)
+  let near = expression store "async.scope(fn () -> opens(2, 4611686018427387000))" in
+  ignore (Eval.with_invocation ctx (fun _ -> outcome (Round_robin.run_expr ctx near)));
+  Alcotest.(check (pair string string))
+    "a later run keeps its whole allowance" ("done(2)", "E0921")
+    ( Eval.with_invocation ~alloc:100_000 ctx (fun _ ->
+          outcome (Round_robin.run_expr ctx (channels 1000))),
+      Eval.with_invocation ~alloc:1_000 ctx (fun _ -> outcome (Round_robin.run_expr ctx huge)) );
+  Alcotest.(check (pair string bool))
+    "a scope bounded near the top fails closed" ("E0921", true)
+    (Eval.with_invocation ctx (fun _ ->
+         ignore (Round_robin.run_expr ctx near);
+         let result, report =
+           Eval.with_scope ctx ~alloc:100_000 (fun () ->
+               outcome (Round_robin.run_expr ctx (channels 1000)))
+         in
+         (result, report.Eval.alloc_used >= 0)))
 
 let heap_bytes f =
   let before = Gc.allocated_bytes () in

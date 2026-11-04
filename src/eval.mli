@@ -301,7 +301,10 @@ val alloc_model : string
     one segment's charges. When both run out inside one memoized term's first evaluation, they may
     report different codes and counts; both are incomplete. [with_invocation ~alloc] bounds an
     invocation like [~fuel] does: a nested invocation stays within the outer allowance, exhaustion
-    is sticky, and running out is the incomplete outcome E0921, never a value. *)
+    is sticky, and running out is the incomplete outcome E0921, never a value. A top-level
+    invocation counts from zero, so an earlier unbounded run never shrinks its allowance; an
+    allowance nested so deep in a near-full count that it would reach the largest integer fails
+    closed. *)
 
 val alloc_used : invocation -> int
 (** [alloc_used invocation] is the number of {!alloc_model} cells charged so far in [invocation]. *)

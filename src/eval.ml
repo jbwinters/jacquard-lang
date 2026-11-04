@@ -585,6 +585,11 @@ let reset_fuel ctx =
   ctx.alloc_limit <- None;
   ignore ctx
 
+(* [alloc_bound ~start limit] is the ceiling of an allowance of [limit] cells counted from [start].
+   It stays below [max_int], which means unbounded: an allowance that would pass it fails closed
+   (owner decision 2026-11-03) *)
+let alloc_bound ~start limit = if limit >= max_int - start then max_int - 1 else start + limit
+
 let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
   if Option.is_some ctx.invocation then
     invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
@@ -599,6 +604,11 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
   let saved_coverage = ctx.track_coverage
   and saved_observer = ctx.root_observer
   and saved_handlers = Hashtbl.copy ctx.root_handlers in
+  (* a top-level invocation counts allocation from zero, so cells an earlier unbounded run charged
+     (a channel's capacity can be near [max_int]) never shrink a later run's allowance (owner
+     decision 2026-11-03). Only when nothing bounds the meter: a ceiling tripped outside any run
+     stays tripped *)
+  if !Fuel_meter.depth = 0 && !Alloc_meter.ceiling = max_int then Alloc_meter.used := 0;
   let invocation =
     {
       active = true;
@@ -644,8 +654,7 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
   Option.iter
     (fun limit ->
       let start = !Alloc_meter.used in
-      let own = if limit > max_int - start then max_int else start + limit in
-      Alloc_meter.ceiling := min own invocation.saved_alloc_ceiling;
+      Alloc_meter.ceiling := min (alloc_bound ~start limit) invocation.saved_alloc_ceiling;
       Alloc_meter.budget := limit;
       ctx.alloc_limit <- Some limit)
     alloc;
@@ -864,7 +873,7 @@ let with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels body =
     fuel;
   Option.iter
     (fun alloc ->
-      let own = if alloc > max_int - alloc_start then max_int else alloc_start + alloc in
+      let own = alloc_bound ~start:alloc_start alloc in
       if own <= saved_alloc_ceiling then (
         Alloc_meter.ceiling := own;
         Alloc_meter.budget := alloc;
@@ -2058,7 +2067,9 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                            keeps them for its warm replay, as fuel's meter differences do *)
                         (match saved_frames with
                         | parent :: _ ->
-                            parent.segment_cells <- parent.segment_cells + frame.segment_cells
+                            parent.segment_cells <-
+                              (if frame.segment_cells > max_int - parent.segment_cells then max_int
+                               else parent.segment_cells + frame.segment_cells)
                         | [] -> ());
                         raise exn
                   in
