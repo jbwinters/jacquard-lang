@@ -1627,8 +1627,8 @@ let replay_cmd log_file program forks to_n compare prelude =
 
 (* Run the discovered Warp tests with the granted authority and print the suite summary; the exit
    status reflects failures. *)
-let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~seed ~cache_dir
-    ~no_cache ~default_cache_dir ~coverage ~prelude ~discover () =
+let run_suite ?fuel ?alloc ?(ceilings = (None, None, None)) ~store ~ctx ~cctx ~allows ~prop_mode
+    ~schedule_plan ~seed ~cache_dir ~no_cache ~default_cache_dir ~coverage ~prelude ~discover () =
   match Prelude_identity.lookup_kind store "test.run" Resolve.KTerm with
   | None -> print_diags [ cli_diagnostic ~code:"E0702" "prelude has no test.run" ]
   | Some { Resolve.hash = tr; _ } -> (
@@ -1659,6 +1659,10 @@ let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~
             }
           in
           let union = Hashtbl.create 64 in
+          let max_tasks, max_channels, max_frontier = ceilings in
+          let bounded =
+            List.exists Option.is_some [ fuel; alloc; max_tasks; max_channels; max_frontier ]
+          in
           let rec go = function
             | [] -> Ok ()
             | d :: rest -> (
@@ -1666,17 +1670,18 @@ let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~
                   Warp.run_discovered ctx cctx ~test_run ~prop_mode ~schedule_plan ~suite_seed:seed
                     ~cache_dir ~granted d
                 in
-                (* RT.1, RT.2: with --fuel or --alloc each test has its own caps on the suite's
-                   aggregate; a test that runs out is incomplete, reported as such and never
-                   cached *)
+                (* RT.1, RT.2: with --fuel, --alloc or a registry ceiling each test has its own caps
+                   on the suite's aggregate; a test that runs out is incomplete, reported as such
+                   and never cached *)
                 Warp.partial_outcomes := [];
                 let result, exhaustion =
-                  match (fuel, alloc) with
-                  | None, None -> (run (), None)
-                  | _ -> (
-                      match Eval.with_scope ctx ?fuel ?alloc run with
-                      | result, report -> (result, report.Eval.exhaustion)
-                      | exception Fuel_meter.Exceeded -> (Ok [], Some (Eval.fuel_error ctx)))
+                  if not bounded then (run (), None)
+                  else
+                    match
+                      Eval.with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier run
+                    with
+                    | result, report -> (result, report.Eval.exhaustion)
+                    | exception Fuel_meter.Exceeded -> (Ok [], Some (Eval.fuel_error ctx))
                 in
                 match (result, exhaustion) with
                 | _, Some exhaustion ->
@@ -1701,6 +1706,9 @@ let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~
                     | Runtime_err.Fuel_exhausted { model; limit } ->
                         Printf.printf "INCOMPLETE %s: computation fuel exhausted (%s, %d unit(s))\n"
                           name model limit
+                    | Runtime_err.Ceiling_reached { flag; noun; limit } ->
+                        Printf.printf "INCOMPLETE %s: registry ceiling reached (%s, %d %s(s))\n"
+                          name flag limit noun
                     | other ->
                         Printf.printf "INCOMPLETE %s: %s\n" name (Runtime_err.to_string other));
                     go rest
@@ -1720,8 +1728,7 @@ let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~
           | Ok () ->
               Printf.printf "%d passed, %d failed, %d skipped, %d refused" totals.Warp.passed
                 totals.Warp.failed totals.Warp.skipped totals.Warp.refused;
-              if Option.is_some fuel || Option.is_some alloc then
-                Printf.printf ", %d incomplete" totals.Warp.incomplete;
+              if bounded then Printf.printf ", %d incomplete" totals.Warp.incomplete;
               print_newline ();
               if cache_dir <> None then
                 Printf.printf "cache: %d hit, %d ran\n" totals.Warp.hits totals.Warp.ran;
@@ -1736,7 +1743,7 @@ let run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan ~
               else ok))
 
 let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhaustive budget
-    schedules fuel alloc =
+    schedules fuel alloc ceilings =
   let configuration =
     match (schedules, seed) with
     | Some count, _ when count <= 0 ->
@@ -1843,9 +1850,18 @@ let test_cmd files allows prelude cache_dir no_cache coverage seed samples exhau
                       | Ok () ->
                           Warp.fuel_budget := fuel;
                           Warp.alloc_budget := alloc;
-                          run_suite ?fuel ?alloc ~store ~ctx ~cctx ~allows ~prop_mode ~schedule_plan
-                            ~seed ~cache_dir ~no_cache ~default_cache_dir:"test-cache" ~coverage
-                            ~prelude
+                          (let max_tasks, max_channels, max_frontier = ceilings in
+                           Warp.ceiling_budgets :=
+                             List.filter_map
+                               (fun (flag, limit) -> Option.map (fun n -> (flag, n)) limit)
+                               [
+                                 ("max-tasks", max_tasks);
+                                 ("max-channels", max_channels);
+                                 ("max-frontier", max_frontier);
+                               ]);
+                          run_suite ?fuel ?alloc ~ceilings ~store ~ctx ~cctx ~allows ~prop_mode
+                            ~schedule_plan ~seed ~cache_dir ~no_cache
+                            ~default_cache_dir:"test-cache" ~coverage ~prelude
                             ~discover:(fun () -> Warp.discover store cctx)
                             ())))))
 
@@ -2410,8 +2426,9 @@ let alloc_arg =
            too large for what remains is refused before it is read; a console line is read at most \
            one byte past what remains, then refused, and console input ends.")
 
-(* RT.2 §4: registry ceilings, the most entries retained at once across the whole run *)
-let ceilings_arg =
+(* RT.2 §4: registry ceilings, the most entries retained at once across the whole run, or within
+   each discovered test for [jacquard test] *)
+let make_ceilings_arg ~within ~outcome =
   let count =
     let parse text =
       match int_of_string_opt text with
@@ -2425,20 +2442,34 @@ let ceilings_arg =
     const (fun tasks channels frontier -> (tasks, channels, frontier))
     $ ceiling "max-tasks" ~docv:"N"
         ~doc:
-          "Retain at most N tasks at once across the whole run: spawned tasks and nested \
-           async.scope bodies, each released when its scope is torn down. Reaching it stops with \
-           E0921: the run is incomplete. Without it the count is unbounded."
+          (Printf.sprintf
+             "Retain at most N tasks at once %s: spawned tasks and nested async.scope bodies, each \
+              released when its scope is torn down. %s Without it the count is unbounded."
+             within outcome)
     $ ceiling "max-channels" ~docv:"N"
         ~doc:
-          "Keep at most N channels open at once across the whole run, each released when its scope \
-           is torn down. Reaching it stops with E0921: the run is incomplete. Without it the count \
-           is unbounded."
+          (Printf.sprintf
+             "Keep at most N channels open at once %s, each released when its scope is torn down. \
+              %s Without it the count is unbounded."
+             within outcome)
     $ ceiling "max-frontier" ~docv:"N"
         ~doc:
-          "Keep at most N exact-enumeration entries pending at once across the whole run: the \
-           support entries not yet explored at every level of the search, each released as its \
-           branch starts. Reaching it stops with E0921: the run is incomplete. Without it the \
-           count is unbounded; --max-branches still bounds the total.")
+          (Printf.sprintf
+             "Keep at most N exact-enumeration entries pending at once %s: the support entries not \
+              yet explored at every level of the search, each released as its branch starts. %s \
+              Without it the count is unbounded; --max-branches still bounds the total."
+             within outcome))
+
+let ceilings_arg =
+  make_ceilings_arg ~within:"across the whole run"
+    ~outcome:"Reaching it stops with E0921: the run is incomplete."
+
+let test_ceilings_arg =
+  make_ceilings_arg ~within:"within each discovered test"
+    ~outcome:
+      "A test that reaches it is reported INCOMPLETE, is never cached, and makes the run exit 2 \
+       unless a test failed. Results are cached under each ceiling given, never shared with runs \
+       without it."
 
 let required_seed_arg =
   Arg.(
@@ -3012,7 +3043,7 @@ let test_t =
       const (configure_diagnostics test_cmd)
       $ diagnostic_format_arg $ test_files_arg $ allows_arg $ prelude_arg $ cache_dir_arg
       $ no_cache_arg $ coverage_arg $ seed_arg $ samples_arg $ exhaustive_arg $ budget_arg
-      $ schedules_arg $ test_fuel_arg $ test_alloc_arg)
+      $ schedules_arg $ test_fuel_arg $ test_alloc_arg $ test_ceilings_arg)
 
 (* --- tiers (PF.2 phase 1) --- *)
 
@@ -3405,7 +3436,7 @@ let best_effort_note text =
       try ignore (Unix.write_substring Unix.stderr line 0 (String.length line))
       with Unix.Unix_error _ -> ())
 
-let host_worker_cmd store_dir fuel alloc =
+let host_worker_cmd store_dir fuel alloc (max_tasks, max_channels, max_frontier) =
   match reopen_closed_standard_descriptors () with
   | exception Unix.Unix_error _ ->
       (* a closed descriptor could not be neutralized, so opening the store could hand it out:
@@ -3432,8 +3463,8 @@ let host_worker_cmd store_dir fuel alloc =
                 set_binary_mode_in stdin true;
                 set_binary_mode_out stdout true;
                 let status =
-                  Host_worker.serve ?fuel ?alloc prepared ~input:stdin ~output:stdout
-                    ~operator:stderr
+                  Host_worker.serve ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier prepared
+                    ~input:stdin ~output:stdout ~operator:stderr
                 in
                 (match status with
                 | Host_worker.Carrier_lost ->
@@ -3498,7 +3529,7 @@ let host_t =
                 ~doc:
                   "Existing local store holding the target and its complete closure. The prelude \
                    is not reloaded.")
-        $ fuel_arg $ alloc_arg)
+        $ fuel_arg $ alloc_arg $ ceilings_arg)
   in
   Cmd.group
     (Cmd.info "host" ~doc:"Opt-in host carriers for invoking checked Jacquard from another process.")
