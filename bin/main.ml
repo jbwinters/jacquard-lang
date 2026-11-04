@@ -304,11 +304,13 @@ let fuel_guard ctx body =
       print_runtime_error (Eval.fuel_error ctx);
       exit_runtime
 
-let run_program ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
-    ~requested_mode ~walk =
+let run_program ~ceilings ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run
+    ~schedule_record ~requested_mode ~walk =
   (* one invocation owns this run's grants and Once resumptions; run never reads
                  coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
-  Eval.with_invocation ~coverage:false ?fuel ?alloc ctx @@ fun invocation ->
+  let max_tasks, max_channels = ceilings in
+  Eval.with_invocation ~coverage:false ?fuel ?alloc ?max_tasks ?max_channels ctx
+  @@ fun invocation ->
   report_fuel invocation;
   report_alloc invocation;
   fuel_guard ctx @@ fun () ->
@@ -475,7 +477,7 @@ let relate_policy_check ~prelude ~syntax ~file ~source policy =
                     ~identity:(Interface.identity (Frontend.Checked.interface artifact)))))
 
 let rec run_cmd file allows prelude store_dir seed infer_cache origin dry_run schedule_record
-    schedule_replay schedule_fork fuel alloc syntax record =
+    schedule_replay schedule_fork fuel alloc ceilings syntax record =
   (* schedule flags are validated before any store is opened, as for a plain run *)
   match schedule_mode schedule_replay schedule_fork with
   | Error diagnostics -> print_diags diagnostics
@@ -486,17 +488,18 @@ let rec run_cmd file allows prelude store_dir seed infer_cache origin dry_run sc
           let source = read_file file in
           match record with
           | None ->
-              run_in ?alloc ~session ~source file allows seed infer_cache origin dry_run
+              run_in ?alloc ~ceilings ~session ~source file allows seed infer_cache origin dry_run
                 schedule_record schedule_replay schedule_fork fuel syntax
           | Some record ->
-              record_run ?alloc ~prelude ~store_dir ~session ~source file allows seed infer_cache
-                origin dry_run schedule_record schedule_replay schedule_fork fuel syntax record))
+              record_run ?alloc ~ceilings ~prelude ~store_dir ~session ~source file allows seed
+                infer_cache origin dry_run schedule_record schedule_replay schedule_fork fuel syntax
+                record))
 
 (* EXP.1: [run --record LOG] records every root-reaching operation and Dist choice, with its
    source span, into an owner-only exploration-log-v1; values, output and exit codes are those of
    the plain run *)
-and record_run ?alloc ~prelude ~store_dir ~session ~source file allows seed infer_cache origin
-    dry_run schedule_record schedule_replay schedule_fork fuel syntax
+and record_run ?alloc ~ceilings ~prelude ~store_dir ~session ~source file allows seed infer_cache
+    origin dry_run schedule_record schedule_replay schedule_fork fuel syntax
     (path, policy_path, record_output, max_steps, max_bytes) =
   let store, ctx = session in
   let refuse code cause =
@@ -568,8 +571,8 @@ and record_run ?alloc ~prelude ~store_dir ~session ~source file allows seed infe
             in
             Eval.with_named_choices ctx named (fun () ->
                 Eval.with_observer ctx (Exploration_log.on_event recorder) (fun () ->
-                    run_in ?alloc ~session ~source file allows (Some seed) infer_cache origin
-                      dry_run schedule_record schedule_replay schedule_fork fuel syntax))
+                    run_in ?alloc ~ceilings ~session ~source file allows (Some seed) infer_cache
+                      origin dry_run schedule_record schedule_replay schedule_fork fuel syntax))
           with
           | status -> status
           | exception Exploration_log.Bound_reached bound ->
@@ -602,8 +605,8 @@ and record_run ?alloc ~prelude ~store_dir ~session ~source file allows seed infe
         | Ok () -> status
         | Error cause -> refuse "E1016" ("cannot write the exploration log: " ^ cause))
 
-and run_in ?alloc ~session ~source file allows seed infer_cache origin dry_run schedule_record
-    schedule_replay schedule_fork fuel syntax =
+and run_in ?alloc ~ceilings ~session ~source file allows seed infer_cache origin dry_run
+    schedule_record schedule_replay schedule_fork fuel syntax =
   match schedule_mode schedule_replay schedule_fork with
   | Error diagnostics -> print_diags diagnostics
   | Ok requested_mode -> (
@@ -637,8 +640,8 @@ and run_in ?alloc ~session ~source file allows seed infer_cache origin dry_run s
       match expression_count with
       | Error diagnostics -> print_diags diagnostics
       | Ok () ->
-          run_program ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run ~schedule_record
-            ~requested_mode ~walk:(fun ~on_expr ->
+          run_program ~ceilings ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~dry_run
+            ~schedule_record ~requested_mode ~walk:(fun ~on_expr ->
               process_forms ?origin ~syntax store ~file source ~on_expr))
 
 (* --- relate --- *)
@@ -2403,6 +2406,30 @@ let alloc_arg =
            too large for what remains is refused before it is read; a console line is read at most \
            one byte past what remains, then refused, and console input ends.")
 
+(* RT.2 §4: registry ceilings, the most entries retained at once across the whole run *)
+let ceilings_arg =
+  let count =
+    let parse text =
+      match int_of_string_opt text with
+      | Some n when n >= 0 -> Ok n
+      | Some _ | None -> Error (`Msg "expected a non-negative count")
+    in
+    Arg.conv (parse, Format.pp_print_int)
+  in
+  let ceiling name ~docv ~doc = Arg.(value & opt (some count) None & info [ name ] ~docv ~doc) in
+  Term.(
+    const (fun tasks channels -> (tasks, channels))
+    $ ceiling "max-tasks" ~docv:"N"
+        ~doc:
+          "Retain at most N tasks at once across the whole run: spawned tasks and nested \
+           async.scope bodies, each released when its scope is torn down. Reaching it stops with \
+           E0921: the run is incomplete. Without it the count is unbounded."
+    $ ceiling "max-channels" ~docv:"N"
+        ~doc:
+          "Keep at most N channels open at once across the whole run, each released when its scope \
+           is torn down. Reaching it stops with E0921: the run is incomplete. Without it the count \
+           is unbounded.")
+
 let required_seed_arg =
   Arg.(
     required
@@ -2571,7 +2598,7 @@ let run_t =
       const (configure_diagnostics run_cmd)
       $ diagnostic_format_arg $ file_arg $ allows_arg $ prelude_arg $ store_dir_opt_arg $ seed_arg
       $ infer_cache_arg $ origin_arg $ dry_run_arg $ schedule_record_arg $ schedule_replay_arg
-      $ schedule_fork_arg $ fuel_arg $ alloc_arg $ syntax_arg $ record_arg)
+      $ schedule_fork_arg $ fuel_arg $ alloc_arg $ ceilings_arg $ syntax_arg $ record_arg)
 
 let relate_term format file variation seed allows prelude syntax policy =
   selected_diagnostic_format := format;
@@ -3885,7 +3912,8 @@ let project_run_source project prelude entry_name allows seed =
               | Error ds -> print_diags ds
               | Ok tops ->
                   let store = Project_frontend.store session in
-                  run_program ~alloc:None ~fuel:None ~store ~ctx:(Project_frontend.eval_ctx session)
+                  run_program ~ceilings:(None, None) ~alloc:None ~fuel:None ~store
+                    ~ctx:(Project_frontend.eval_ctx session)
                     ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
                     ~requested_mode:None ~walk:(fun ~on_expr ->
                       Project_frontend.walk_entry session tops ~on_resolved:(fun top _warnings ->
@@ -3993,9 +4021,10 @@ let project_run_bundle path prelude entry_name allows seed =
       | None -> bundle_entry_error path entry_name "run"
       | Some steps ->
           (* each step is a checked thunk; running it prints its value, as jacquard run does *)
-          run_program ~alloc:None ~fuel:None ~store:bundle.Project_bundle_reader.store
-            ~ctx:bundle.ctx ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
-            ~requested_mode:None ~walk:(fun ~on_expr ->
+          run_program ~ceilings:(None, None) ~alloc:None ~fuel:None
+            ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows ~seed
+            ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
+            ~walk:(fun ~on_expr ->
               List.fold_left
                 (fun acc step ->
                   Result.bind acc (fun () ->

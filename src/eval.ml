@@ -269,6 +269,8 @@ and invocation = {
   alloc_budget : int option;
   saved_alloc_ceiling : int;
   saved_alloc_budget : int;
+  saved_retain : Retain_meter.saved;  (** the registry ceilings to restore when it ends *)
+  retain_start : int * int;  (** retained tasks and open channels when it began *)
 }
 
 let next_audit_context_id = Atomic.make 0
@@ -583,7 +585,12 @@ let reset_fuel ctx =
   ctx.alloc_limit <- None;
   ignore ctx
 
-let with_invocation ?coverage ?fuel ?alloc ctx body =
+(* [alloc_bound ~start limit] is the ceiling of an allowance of [limit] cells counted from [start].
+   It stays below [max_int], which means unbounded: an allowance that would pass it fails closed
+   (owner decision 2026-11-03) *)
+let alloc_bound ~start limit = if limit >= max_int - start then max_int - 1 else start + limit
+
+let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
   if Option.is_some ctx.invocation then
     invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
   (match fuel with
@@ -592,9 +599,16 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
   (match alloc with
   | Some limit when limit < 0 -> invalid_arg "Eval.with_invocation: alloc must be non-negative"
   | Some _ | None -> ());
+  if List.exists (Option.fold ~none:false ~some:(fun n -> n < 0)) [ max_tasks; max_channels ] then
+    invalid_arg "Eval.with_invocation: registry ceilings must be non-negative";
   let saved_coverage = ctx.track_coverage
   and saved_observer = ctx.root_observer
   and saved_handlers = Hashtbl.copy ctx.root_handlers in
+  (* a top-level invocation counts allocation from zero, so cells an earlier unbounded run charged
+     (a channel's capacity can be near [max_int]) never shrink a later run's allowance (owner
+     decision 2026-11-03). Only when nothing bounds the meter: a ceiling tripped outside any run
+     stays tripped *)
+  if !Fuel_meter.depth = 0 && !Alloc_meter.ceiling = max_int then Alloc_meter.used := 0;
   let invocation =
     {
       active = true;
@@ -611,6 +625,8 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
       alloc_budget = alloc;
       saved_alloc_ceiling = !Alloc_meter.ceiling;
       saved_alloc_budget = !Alloc_meter.budget;
+      saved_retain = Retain_meter.save ();
+      retain_start = (Retain_meter.tasks.count, Retain_meter.channels.count);
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
@@ -638,11 +654,13 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
   Option.iter
     (fun limit ->
       let start = !Alloc_meter.used in
-      let own = if limit > max_int - start then max_int else start + limit in
-      Alloc_meter.ceiling := min own invocation.saved_alloc_ceiling;
+      Alloc_meter.ceiling := min (alloc_bound ~start limit) invocation.saved_alloc_ceiling;
       Alloc_meter.budget := limit;
       ctx.alloc_limit <- Some limit)
     alloc;
+  (* registry ceilings too (RT.2 §4): counted from what the enclosing invocation retains now *)
+  Option.iter (fun limit -> ignore (Retain_meter.bound Tasks limit)) max_tasks;
+  Option.iter (fun limit -> ignore (Retain_meter.bound Channels limit)) max_channels;
   ctx.invocation <- Some invocation;
   (* runs every callback exactly once, most recent first, then restores the configuration the
      invocation borrowed; returns the first callback exception *)
@@ -661,7 +679,14 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
     else Fuel_meter.ceiling := invocation.saved_ceiling;
     Fuel_meter.budget := invocation.saved_budget;
     invocation.alloc_final <- Some (!Alloc_meter.used - invocation.alloc_start);
-    if Alloc_meter.exhausted () then incr Alloc_meter.nested_exhaustions;
+    (* a ceiling reached inside counts as this invocation running out too, remembered so a native
+       returning its E0921 leaves the enclosing invocation with the same ceiling reached *)
+    if Alloc_meter.exhausted () then (
+      incr Alloc_meter.nested_exhaustions;
+      Retain_meter.last_nested := None)
+    else if Retain_meter.exhausted () then (
+      incr Alloc_meter.nested_exhaustions;
+      Retain_meter.last_nested := !Retain_meter.reached);
     if
       Alloc_meter.exhausted ()
       && invocation.saved_alloc_ceiling >= 0
@@ -672,6 +697,10 @@ let with_invocation ?coverage ?fuel ?alloc ctx body =
       Alloc_meter.trip ())
     else Alloc_meter.ceiling := invocation.saved_alloc_ceiling;
     Alloc_meter.budget := invocation.saved_alloc_budget;
+    Retain_meter.restore invocation.saved_retain;
+    (* scope teardown releases every entry; an invocation that failed part-way leaves none counted *)
+    Retain_meter.tasks.count <- fst invocation.retain_start;
+    Retain_meter.channels.count <- snd invocation.retain_start;
     decr Fuel_meter.depth;
     if !Fuel_meter.depth = 0 then
       Fuel_meter.active_epochs :=
@@ -795,20 +824,32 @@ let alloc_error ctx =
   Runtime_err.Alloc_exhausted
     { model = alloc_model; limit = Option.value ctx.alloc_limit ~default:!Alloc_meter.budget }
 
-let exhaustion ctx =
-  if Fuel_meter.exhausted () then Some (fuel_error ctx)
-  else if Alloc_meter.exhausted () then Some (alloc_error ctx)
-  else None
+let ceiling_error (reached : Retain_meter.reached) =
+  Runtime_err.Ceiling_reached
+    {
+      flag = Retain_meter.flag reached.registry;
+      noun = Retain_meter.noun reached.registry;
+      limit = reached.limit;
+    }
 
+(* allocation exhaustion or a reached registry ceiling: both sticky, both E0921 *)
+let held_error ctx =
+  if Alloc_meter.exhausted () then Some (alloc_error ctx)
+  else Option.map ceiling_error !Retain_meter.reached
+
+let[@inline] held () = Alloc_meter.exhausted () || Retain_meter.exhausted ()
+let exhaustion ctx = if Fuel_meter.exhausted () then Some (fuel_error ctx) else held_error ctx
 let exhausted ctx = Option.is_some (exhaustion ctx)
 
 type scope_report = { exhaustion : Runtime_err.t option; fuel_used : int; alloc_used : int }
 
-let with_scope ctx ?fuel ?alloc body =
+let with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels body =
   if Option.fold ~none:false ~some:(fun n -> n < 0) fuel then
     invalid_arg "Eval.with_scope: fuel must be non-negative";
   if Option.fold ~none:false ~some:(fun n -> n < 0) alloc then
     invalid_arg "Eval.with_scope: alloc must be non-negative";
+  if List.exists (Option.fold ~none:false ~some:(fun n -> n < 0)) [ max_tasks; max_channels ] then
+    invalid_arg "Eval.with_scope: registry ceilings must be non-negative";
   if not (invocation_active ctx) then
     invalid_arg "Eval.with_scope: no invocation is active on this evaluator";
   let saved_ceiling = !Fuel_meter.ceiling
@@ -816,7 +857,8 @@ let with_scope ctx ?fuel ?alloc body =
   and saved_limit = ctx.fuel_limit in
   let saved_alloc_ceiling = !Alloc_meter.ceiling
   and saved_alloc_budget = !Alloc_meter.budget
-  and saved_alloc_limit = ctx.alloc_limit in
+  and saved_alloc_limit = ctx.alloc_limit
+  and saved_retain = Retain_meter.save () in
   let start = !Fuel_meter.used and alloc_start = !Alloc_meter.used in
   Option.iter
     (fun fuel ->
@@ -831,12 +873,14 @@ let with_scope ctx ?fuel ?alloc body =
     fuel;
   Option.iter
     (fun alloc ->
-      let own = if alloc > max_int - alloc_start then max_int else alloc_start + alloc in
+      let own = alloc_bound ~start:alloc_start alloc in
       if own <= saved_alloc_ceiling then (
         Alloc_meter.ceiling := own;
         Alloc_meter.budget := alloc;
         ctx.alloc_limit <- Some alloc))
     alloc;
+  Option.iter (fun limit -> ignore (Retain_meter.bound Tasks limit)) max_tasks;
+  Option.iter (fun limit -> ignore (Retain_meter.bound Channels limit)) max_channels;
   (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
      what earlier scopes of the same invocation paid for *)
   let saved_epoch = !Fuel_meter.epoch and saved_pending = ctx.fuel_pending in
@@ -866,6 +910,7 @@ let with_scope ctx ?fuel ?alloc body =
     else Alloc_meter.ceiling := saved_alloc_ceiling;
     Alloc_meter.budget := saved_alloc_budget;
     ctx.alloc_limit <- saved_alloc_limit;
+    Retain_meter.restore saved_retain;
     Fuel_meter.active_epochs :=
       List.filter (fun epoch -> epoch <> !Fuel_meter.epoch) !Fuel_meter.active_epochs;
     Fuel_meter.epoch := saved_epoch;
@@ -902,17 +947,24 @@ let with_fuel_scope ctx ~fuel body =
     raises E0921; outside any run (a driver resuming a continuation) the next run raises it as it
     starts. *)
 let charge_cells_now ctx cells =
-  let used = !Alloc_meter.used + cells in
-  if used > !Alloc_meter.ceiling then (
+  (* compared without adding, so a charge the program sizes (a channel's capacity) cannot wrap
+     the count past the ceiling. Unbounded, a charge too large to add is skipped (owner decision
+     2026-11-03): no limit depends on the count then, and pinning it at [max_int] would leave a
+     later bounded invocation in the process no room for its own *)
+  if cells <= !Alloc_meter.ceiling - !Alloc_meter.used then
+    Alloc_meter.used := !Alloc_meter.used + cells
+  else if !Alloc_meter.ceiling = max_int then ()
+  else (
     Alloc_meter.trip ();
     if not ctx.deferring then rt (alloc_error ctx))
-  else Alloc_meter.used := used
 
 let[@inline] charge_alloc ctx cells =
   charge_cells_now ctx cells;
   (* a memo sub-run records its own cells per segment, so a warm hit replays them *)
   match !memo_frames with
-  | frame :: _ -> frame.segment_cells <- frame.segment_cells + cells
+  | frame :: _ ->
+      frame.segment_cells <-
+        (if cells > max_int - frame.segment_cells then max_int else frame.segment_cells + cells)
   | [] -> ()
 
 (* [charge_alloc_outside ctx cells] charges cells a driver allocates outside any run (reinstalling a
@@ -1287,6 +1339,13 @@ let reserve_alloc ctx cells =
   charge_alloc_outside ctx cells;
   if Alloc_meter.exhausted () then Error (alloc_error ctx) else Ok ()
 
+(* a refused entry leaves a ceiling reached, so [held_error] is set; allocation exhaustion, if
+   already held, is reported first *)
+let retain ctx registry =
+  if Retain_meter.acquire registry then Ok () else Error (Option.get (held_error ctx))
+
+let release_retained registry n = Retain_meter.release registry n
+
 (* a root handler's result: its new nodes are charged on return, by the handler's class *)
 let charge_root_result ctx alloc args = function
   | Ok value -> (
@@ -1558,14 +1617,19 @@ let note_returned_exhaustion ctx ~nested = function
   | Error error
     when Runtime_err.is_alloc_exhausted error
          && !Fuel_meter.depth > 0
-         && !Alloc_meter.nested_exhaustions > nested ->
-      Alloc_meter.trip ()
+         && !Alloc_meter.nested_exhaustions > nested -> (
+      (* the invocation that ran out last says which: allocation, or a registry ceiling *)
+      match !Retain_meter.last_nested with
+      | Some reached when Option.is_none !Retain_meter.reached ->
+          Retain_meter.reached := Some reached
+      | Some _ -> ()
+      | None -> Alloc_meter.trip ())
   | Ok _ | Error _ -> ()
 
 let charge_native_result ctx ~nested result =
   if Fuel_meter.exhausted () then Error (fuel_error ctx)
-  else if Alloc_meter.exhausted () then (* nor its allocation exhaustion *)
-    Error (alloc_error ctx)
+  else if held () then (* nor its allocation exhaustion or a ceiling it reached *)
+    Error (Option.get (held_error ctx))
   else
     match result with
     | Ok value ->
@@ -1597,8 +1661,8 @@ let invoke_untrusted_native ?(alloc = Native_alloc.New_nodes) ?observed ctx fn n
      it mutated *)
   note_returned_exhaustion ctx ~nested result;
   if Fuel_meter.exhausted () then exhaust ctx;
-  (* nor replace allocation exhaustion with a failure found while revalidating *)
-  if Alloc_meter.exhausted () then rt (alloc_error ctx);
+  (* nor replace allocation exhaustion or a reached ceiling with a failure found while revalidating *)
+  Option.iter rt (held_error ctx);
   List.iter (check_native_argument ctx) invocation_roots;
   (* the Result event reports only what the program receives, so it follows every post-call check *)
   let observe result =
@@ -2003,7 +2067,9 @@ let rec eval_ref ctx ~trusted (h : Hash.t) (kind : Kernel.refkind) (k : kont) : 
                            keeps them for its warm replay, as fuel's meter differences do *)
                         (match saved_frames with
                         | parent :: _ ->
-                            parent.segment_cells <- parent.segment_cells + frame.segment_cells
+                            parent.segment_cells <-
+                              (if frame.segment_cells > max_int - parent.segment_cells then max_int
+                               else parent.segment_cells + frame.segment_cells)
                         | [] -> ());
                         raise exn
                   in
@@ -2163,8 +2229,9 @@ and run_state_unchecked ctx state =
       let pending = ctx.fuel_pending in
       ctx.fuel_pending <- 0;
       charge ctx pending);
-    (* an exhausted allocation budget is sticky: no later run of the invocation delivers a value *)
-    if Alloc_meter.exhausted () then rt (alloc_error ctx);
+    (* an exhausted allocation budget or a reached ceiling is sticky: no later run of the
+       invocation delivers a value *)
+    Option.iter rt (held_error ctx);
     run_machine ctx state
   with
   | value ->
@@ -2184,7 +2251,7 @@ and run_machine ctx state =
   charge ctx 1;
   (* exhaustion is sticky at every state, so a nested run whose E0921 a native swallowed cannot
      let this one deliver a value *)
-  if Alloc_meter.exhausted () then rt (alloc_error ctx);
+  if held () then Option.iter rt (held_error ctx);
   match step_unchecked ctx state with
   | Some next -> run_machine ctx next
   | None -> (
@@ -2406,7 +2473,7 @@ let dispatch_root_operation ~call ctx ~resume ~op ~name ~effect_ args =
           let result = dispatching_as ctx call (fun () -> native args) in
           note_returned_exhaustion ctx ~nested result;
           if Fuel_meter.exhausted () then raise (Rt (fuel_error ctx));
-          if Alloc_meter.exhausted () then raise (Rt (alloc_error ctx));
+          Option.iter (fun error -> raise (Rt error)) (held_error ctx);
           List.iter (check_native_argument ctx) roots;
           match charge_root_result ctx alloc args (charge_native_result ctx ~nested result) with
           | Ok value ->

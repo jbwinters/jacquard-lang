@@ -145,7 +145,8 @@ When adding valid corpus files, regenerate the golden hashes with
   scopes grants, observers, coverage, and teardown to one evaluation over a
   reusable `Eval.ctx` (Once ownership stays evaluator-lifetime);
   `test/test_invocation.ml`.
-- Allocation limits (RT.2): `src/alloc_meter.ml`, `Eval.with_invocation ~alloc`, the alloc-v1
+- Allocation limits (RT.2): `src/alloc_meter.ml`, `Eval.with_invocation ~alloc`, registry
+  ceilings `src/retain_meter.ml` (`--max-tasks`, `--max-channels`), the alloc-v1
   charging points in `src/eval.ml` (`charge_alloc`), `jacquard run --alloc`, E0921;
   `docs/designs/allocation-limits.md`, `test/test_invocation.ml`, `test/cli/alloc.t`.
 - Result propagation (SX.29, D77): `try` block items in `src/surface_parse.ml`,

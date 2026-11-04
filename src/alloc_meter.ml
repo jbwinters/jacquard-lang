@@ -17,7 +17,8 @@ let budget = ref 0
     negative ceiling. *)
 let trip () =
   if !ceiling >= 0 then (
-    if !ceiling < max_int then used := !ceiling;
+    (* never lowers the count: a nested ceiling clamped below [max_int] can sit under it *)
+    if !ceiling < max_int then used := max !used !ceiling;
     ceiling := -1)
 
 (** The number of invocations that have ended with allocation exhausted. A native's E0921 exhausts

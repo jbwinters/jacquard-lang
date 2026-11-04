@@ -30,6 +30,9 @@ type t =
   | Alloc_exhausted of { model : string; limit : int }
       (** the invocation's logical-allocation budget ran out (RT.2). Incomplete, not a program
           failure: the same budget and program always stop at the same transition *)
+  | Ceiling_reached of { flag : string; noun : string; limit : int }
+      (** a registry ceiling of the invocation (RT.2 §4: [flag] sets it, [noun] names one entry) was
+          reached. Incomplete, not a program failure, like an exhausted allocation budget *)
   | Stale_capability of { op : string }
       (** a scoped instance operation found no frame of its scope on the current continuation (TS.2,
           design §10 A2.4): defence in depth, reachable only through unchecked eval *)
@@ -44,16 +47,18 @@ let is_fuel_exhausted = function
   | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0919"
   | _ -> false
 
-(** [is_alloc_exhausted error] recognises allocation exhaustion (E0921) the same way. *)
+(** [is_alloc_exhausted error] recognises E0921, allocation exhaustion or a reached registry
+    ceiling, the same way. *)
 let is_alloc_exhausted = function
-  | Alloc_exhausted _ -> true
+  | Alloc_exhausted _ | Ceiling_reached _ -> true
   | Diagnostic diagnostic -> Diag.code diagnostic = Some "E0921"
   | _ -> false
 
-(** [is_incomplete error] recognises a budget running out: computation fuel (E0919) or the
-    allocation budget (E0921), directly or wrapped in a subsystem [Diagnostic]. *)
+(** [is_incomplete error] recognises a budget running out: computation fuel (E0919), or the
+    allocation budget or a registry ceiling (E0921), directly or wrapped in a subsystem
+    [Diagnostic]. *)
 let is_incomplete = function
-  | Fuel_exhausted _ | Alloc_exhausted _ -> true
+  | Fuel_exhausted _ | Alloc_exhausted _ | Ceiling_reached _ -> true
   | Diagnostic diagnostic -> List.mem (Diag.code diagnostic) [ Some "E0919"; Some "E0921" ]
   | _ -> false
 
@@ -83,6 +88,11 @@ let to_string = function
         "allocation budget exhausted: the %s budget of %d cell(s) ran out before evaluation \
          finished; the result is incomplete"
         model limit
+  | Ceiling_reached { flag; noun; limit } ->
+      Printf.sprintf
+        "registry ceiling reached: the %s ceiling of %d %s(s) was reached before evaluation \
+         finished; the result is incomplete"
+        flag limit noun
   | Fuel_exhausted { model; limit } ->
       Printf.sprintf
         "computation fuel exhausted: the %s budget of %d unit(s) ran out before evaluation \
@@ -146,6 +156,14 @@ let to_diag error =
         ~next_step:
           "Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; \
            it neither passes nor fails."
+        ()
+  | Ceiling_reached { flag; _ } ->
+      make ~domain:Runtime ~code:"E0921" ~summary:"A registry ceiling was reached"
+        ~next_step:
+          (Printf.sprintf
+             "Raise the %s ceiling, or omit it to run unbounded. An incomplete run neither passes \
+              nor fails."
+             flag)
         ()
   | Fuel_exhausted _ ->
       make ~domain:Runtime ~code:"E0919" ~summary:"Computation fuel was exhausted"

@@ -293,7 +293,20 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
         Error diagnostics)
       else Ok ()
     in
+    (* RT.2 §4: tasks and channels retained across every scheduler of the invocation, released
+       when this run's scopes are torn down *)
+    let retained_tasks = ref 0 and retained_channels = ref 0 in
+    let retain registry retained =
+      match Eval.retain ctx registry with
+      | Ok () ->
+          incr retained;
+          Ok ()
+      | Error error ->
+          exhaustion := Some error;
+          Error [ Runtime_err.to_diag error ]
+    in
     let allocate_task () =
+      let* () = retain Retain_meter.Tasks retained_tasks in
       incr task_count;
       incr live_count;
       max_live := max !max_live !live_count;
@@ -759,6 +772,14 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
                         | Structured_scope.Channel_invalid_capacity requested ->
                             Ok (invalid_capacity_value requested)
                         | Structured_scope.Channel_opened channel ->
+                            (* its buffer is paid for in advance: the declared capacity, as cells *)
+                            let* () =
+                              Eval.reserve_alloc ctx capacity
+                              |> Result.map_error (fun error ->
+                                  exhaustion := Some error;
+                                  [ Runtime_err.to_diag error ])
+                            in
+                            let* () = retain Retain_meter.Channels retained_channels in
                             let* channel_value =
                               Structured_scope.channel_value Task_capability.runtime run.scope
                                 channel
@@ -987,7 +1008,12 @@ let run_state_global_unguarded ctx ~policy ~bounds ~program ~schedule_mode ~allo
           incr sequence;
           drive ()
     in
+    let release () =
+      Eval.release_retained Retain_meter.Tasks !retained_tasks;
+      Eval.release_retained Retain_meter.Channels !retained_channels
+    in
     let protected =
+      Fun.protect ~finally:release @@ fun () ->
       Structured_scope.protect root_scope ~drop
         ~escapes:(fun _ -> [])
         (fun _ ->

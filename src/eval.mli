@@ -85,6 +85,14 @@ val reserve_alloc : ctx -> int -> (unit, Runtime_err.t) result
 (** [reserve_alloc ctx cells] charges [cells] a root handler is about to build; running out exhausts
     the invocation and returns E0921, which the handler returns. *)
 
+val retain : ctx -> Retain_meter.registry -> (unit, Runtime_err.t) result
+(** [retain ctx registry] retains one registry entry (a task or a channel) for a driver. Past the
+    ceiling it is refused with E0921 and the ceiling stays reached; a driver releases what it
+    retained with {!release_retained} when the entries' scope is torn down. *)
+
+val release_retained : Retain_meter.registry -> int -> unit
+(** [release_retained registry n] releases [n] entries retained with {!retain}. *)
+
 val with_rendered : ctx -> exceeded:(Runtime_err.t -> 'a) -> (unit -> 'a) -> 'a
 (** [with_rendered ctx ~exceeded body] counts every value and code rendering [body] makes against
     the allocation budget as its text grows. A rendering that cannot fit stops, exhausts the
@@ -173,7 +181,15 @@ val note_root_output : ctx -> operation:Hash.t -> string -> unit
 type invocation
 (** One evaluation extent over a [ctx]. Abstract: it grants nothing and exposes no continuation. *)
 
-val with_invocation : ?coverage:bool -> ?fuel:int -> ?alloc:int -> ctx -> (invocation -> 'a) -> 'a
+val with_invocation :
+  ?coverage:bool ->
+  ?fuel:int ->
+  ?alloc:int ->
+  ?max_tasks:int ->
+  ?max_channels:int ->
+  ctx ->
+  (invocation -> 'a) ->
+  'a
 (** [with_invocation ctx body] runs [body] as one invocation: grants installed during [body] scoped
     to it, the coverage flag set to [coverage] when given, and the coverage flag and root handlers
     restored on every exit (the root observer is restored too, defensively: the public API only sets
@@ -188,7 +204,15 @@ val with_invocation : ?coverage:bool -> ?fuel:int -> ?alloc:int -> ctx -> (invoc
     that would pass the budget is refused with [Runtime_err.Fuel_exhausted] (E0919), and from then
     on every transition or terminal in the invocation fails the same way, so no later evaluation can
     turn exhaustion into a value. Without [fuel] the invocation is unbounded and behaves as before.
-    A negative [fuel] is [Invalid_argument]. *)
+    A negative [fuel] is [Invalid_argument].
+
+    [max_tasks] and [max_channels] are registry ceilings (RT.2 §4,
+    docs/designs/allocation-limits.md): at most that many tasks retained (spawned, or a nested
+    scope's body, until its scope is torn down) and channels open at once, across every scheduler
+    and scope of the invocation, within any ceiling of an enclosing invocation. The entry that would
+    pass one is refused with [Runtime_err.Ceiling_reached] (E0921), sticky like an exhausted
+    allocation budget. Every entry is released when the invocation ends, however it ends. A negative
+    ceiling is [Invalid_argument]. *)
 
 val fuel_model : string
 (** ["fuel-v1"]: the identity of the cost model below. Any change to what a unit pays for is a new
@@ -218,21 +242,29 @@ val with_fuel_scope : ctx -> fuel:int -> (unit -> 'a) -> 'a * bool * int
 
 type scope_report = {
   exhaustion : Runtime_err.t option;
-      (** the budget that ran out while the body ran, fuel (E0919) before allocation (E0921) *)
+      (** the budget that ran out while the body ran: fuel (E0919), then allocation, then a registry
+          ceiling (both E0921) *)
   fuel_used : int;  (** {!fuel_model} units the body charged *)
   alloc_used : int;  (** {!alloc_model} cells the body charged *)
 }
 
-val with_scope : ctx -> ?fuel:int -> ?alloc:int -> (unit -> 'a) -> 'a * scope_report
-(** [with_scope ctx ?fuel ?alloc body] runs [body] inside the active invocation under per-branch
-    caps of [fuel] units and [alloc] cells (docs/computation-fuel.md §4,
-    docs/designs/allocation-limits.md §6). Each cap draws on the invocation's aggregate, so it only
-    lowers what [body] may spend; running out of a cap is [body]'s outcome, reported in the
-    [scope_report], and the enclosing invocation keeps its remaining allowance unless the cap
-    reached it. A budget without a cap is still checked against the invocation's own. [body] runs in
-    its own memo epoch, as for {!with_fuel_scope}. A [Fuel_meter.Exceeded] escaping [body]
-    propagates after the caps are restored. [Invalid_argument] without an active invocation or for a
-    negative cap. *)
+val with_scope :
+  ctx ->
+  ?fuel:int ->
+  ?alloc:int ->
+  ?max_tasks:int ->
+  ?max_channels:int ->
+  (unit -> 'a) ->
+  'a * scope_report
+(** [with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels body] runs [body] inside the active
+    invocation under per-branch caps of [fuel] units, [alloc] cells and the registry ceilings
+    (docs/computation-fuel.md §4, docs/designs/allocation-limits.md §4, §6). Each cap draws on the
+    invocation's aggregate, so it only lowers what [body] may spend; running out of a cap is
+    [body]'s outcome, reported in the [scope_report], and the enclosing invocation keeps its
+    remaining allowance unless the cap reached it. A budget without a cap is still checked against
+    the invocation's own. [body] runs in its own memo epoch, as for {!with_fuel_scope}. A
+    [Fuel_meter.Exceeded] escaping [body] propagates after the caps are restored. [Invalid_argument]
+    without an active invocation or for a negative cap. *)
 
 val fuel_used : invocation -> int
 (** [fuel_used invocation] is the number of {!fuel_model} units charged so far in [invocation]. *)
@@ -269,7 +301,10 @@ val alloc_model : string
     one segment's charges. When both run out inside one memoized term's first evaluation, they may
     report different codes and counts; both are incomplete. [with_invocation ~alloc] bounds an
     invocation like [~fuel] does: a nested invocation stays within the outer allowance, exhaustion
-    is sticky, and running out is the incomplete outcome E0921, never a value. *)
+    is sticky, and running out is the incomplete outcome E0921, never a value. A top-level
+    invocation counts from zero, so an earlier unbounded run never shrinks its allowance; an
+    allowance nested so deep in a near-full count that it would reach the largest integer fails
+    closed. *)
 
 val alloc_used : invocation -> int
 (** [alloc_used invocation] is the number of {!alloc_model} cells charged so far in [invocation]. *)

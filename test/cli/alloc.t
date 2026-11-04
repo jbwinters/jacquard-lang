@@ -155,3 +155,67 @@ With both budgets, the one that runs out first is reported:
   $ timeout 60 jacquard test suite.jac --alloc 5000 --fuel 100000 --no-cache > both.out || echo "exit=$?"; head -1 < both.out
   exit=2
   INCOMPLETE grow-case: allocation budget exhausted (alloc-v1, 5000 cell(s))
+
+Registry ceilings (§4): `--max-tasks N` and `--max-channels N` bound what a
+run retains at once, across every scope. A nested scope's body and each
+spawned task count until the run's scopes are torn down; reaching a ceiling is
+the incomplete outcome E0921, exit 2.
+
+  $ cat > spawns.jac <<'JAC'
+  > count(n) = if eq(n, 0) then 0 else {
+  >   let t = async.spawn(fn () -> n)
+  >   let v = match async.await(t) { | Done(v) -> v | _ -> 100 }
+  >   add(v, count(sub(n, 1)))
+  > }
+  > 
+  > async.scope(fn () -> count(3))
+  > JAC
+  $ jacquard run spawns.jac --max-tasks 4
+  done(6)
+  $ jacquard run spawns.jac --max-tasks 3
+  error[E0921]: A registry ceiling was reached
+    Cause: registry ceiling reached: the --max-tasks ceiling of 3 retained task(s) was reached before evaluation finished; the result is incomplete
+    Next step: Raise the --max-tasks ceiling, or omit it to run unbounded. An incomplete run neither passes nor fails.
+  [2]
+  $ cat > opens.jac <<'JAC'
+  > opens(n, size) = if eq(n, 0) then 0 else match channel.open(size) {
+  >   | Err(_) -> 100
+  >   | Ok(_) -> add(1, opens(sub(n, 1), size))
+  > }
+  > 
+  > async.scope(fn () -> opens(2, 1000))
+  > JAC
+  $ jacquard run opens.jac --max-channels 2
+  done(2)
+  $ jacquard run opens.jac --max-channels 1
+  error[E0921]: A registry ceiling was reached
+    Cause: registry ceiling reached: the --max-channels ceiling of 1 open channel(s) was reached before evaluation finished; the result is incomplete
+    Next step: Raise the --max-channels ceiling, or omit it to run unbounded. An incomplete run neither passes nor fails.
+  [2]
+
+A channel's buffer is paid for when it opens: its declared capacity, in cells.
+
+  $ jacquard run opens.jac --alloc 3000
+  done(2)
+  alloc: 2017 of 3000 cell(s) used (alloc-v1)
+  $ jacquard run opens.jac --alloc 1500
+  error[E0921]: The allocation budget was exhausted
+    Cause: allocation budget exhausted: the alloc-v1 budget of 1500 cell(s) ran out before evaluation finished; the result is incomplete
+    Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
+  alloc: 1500 of 1500 cell(s) used (alloc-v1)
+  [2]
+  $ jacquard run opens.jac --max-tasks=-1
+  Usage: jacquard run [--help] [OPTION]… FILE
+  jacquard: option '--max-tasks': expected a non-negative count
+  [124]
+
+A capacity near the largest Int is refused against the budget rather than
+wrapping the count:
+
+  $ sed 's/opens(2, 1000)/opens(2, 4611686018427387903)/' opens.jac > huge.jac
+  $ jacquard run huge.jac --alloc 1500
+  error[E0921]: The allocation budget was exhausted
+    Cause: allocation budget exhausted: the alloc-v1 budget of 1500 cell(s) ran out before evaluation finished; the result is incomplete
+    Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
+  alloc: 1500 of 1500 cell(s) used (alloc-v1)
+  [2]
