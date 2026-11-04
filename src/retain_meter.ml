@@ -10,6 +10,9 @@ type registry =
   | Tasks
       (** retained tasks: spawned tasks and nested scope bodies, until their scope is torn down *)
   | Channels  (** open channels, until their scope is torn down *)
+  | Frontier
+      (** an exact enumeration's pending entries: the support entries not yet explored at every
+          level of its depth-first search, until the search returns past them *)
 
 type counter = {
   mutable count : int;  (** entries retained now *)
@@ -19,13 +22,20 @@ type counter = {
 
 let tasks = { count = 0; ceiling = max_int; limit = 0 }
 let channels = { count = 0; ceiling = max_int; limit = 0 }
-let counter = function Tasks -> tasks | Channels -> channels
+let frontier = { count = 0; ceiling = max_int; limit = 0 }
+let counter = function Tasks -> tasks | Channels -> channels | Frontier -> frontier
 
 (** [flag registry] is the command-line option that sets the registry's ceiling. *)
-let flag = function Tasks -> "--max-tasks" | Channels -> "--max-channels"
+let flag = function
+  | Tasks -> "--max-tasks"
+  | Channels -> "--max-channels"
+  | Frontier -> "--max-frontier"
 
 (** [noun registry] names one entry of the registry, for diagnostics. *)
-let noun = function Tasks -> "retained task" | Channels -> "open channel"
+let noun = function
+  | Tasks -> "retained task"
+  | Channels -> "open channel"
+  | Frontier -> "pending enumeration entry"
 
 type reached = { registry : registry; limit : int; wanted : int }
 (** The ceiling that was reached, with the count the refused entry would have made: sticky until the
@@ -38,13 +48,15 @@ let reached : reached option ref = ref None
     enclosing invocation too. Counted by [Alloc_meter.nested_exhaustions]. *)
 let last_nested : reached option ref = ref None
 
-(** [acquire registry] retains one entry. It refuses, and records the ceiling as reached, when the
-    entry would pass the registry's ceiling or a ceiling was already reached. *)
-let acquire registry =
+(** [acquire ?count registry] retains [count] entries (default 1, non-negative) at once. It refuses,
+    and records the ceiling as reached, when they would pass the registry's ceiling or a ceiling was
+    already reached; refused, none is retained. [Invalid_argument] for a negative [count]. *)
+let acquire ?(count = 1) registry =
+  if count < 0 then invalid_arg "Retain_meter.acquire: count must be non-negative";
   if Option.is_some !reached then false
   else
     let counter = counter registry in
-    let wanted = counter.count + 1 in
+    let wanted = if count > max_int - counter.count then max_int else counter.count + count in
     if wanted > counter.ceiling then (
       reached := Some { registry; limit = counter.limit; wanted };
       false)
@@ -63,7 +75,7 @@ let exhausted () = Option.is_some !reached
 type saved = { saved_ceilings : (int * int) list; saved_reached : reached option }
 (** A saved ceiling configuration, restored when a bounded invocation or scope ends. *)
 
-let registries = [ Tasks; Channels ]
+let registries = [ Tasks; Channels; Frontier ]
 
 let save () =
   {
@@ -103,3 +115,11 @@ let restore saved =
     | None, Some inner when inner.wanted > (counter inner.registry).ceiling ->
         Some { inner with limit = (counter inner.registry).limit }
     | None, (Some _ | None) -> None
+
+(** [counts ()] is every registry's count now, for {!reset_counts}. *)
+let counts () = List.map (fun registry -> (counter registry).count) registries
+
+(** [reset_counts counts] sets every registry's count back to [counts], taken by {!counts}: an
+    invocation or search that ends, however it ends, leaves none of its entries counted. *)
+let reset_counts counts =
+  List.iter2 (fun registry count -> (counter registry).count <- count) registries counts

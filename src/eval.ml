@@ -270,7 +270,7 @@ and invocation = {
   saved_alloc_ceiling : int;
   saved_alloc_budget : int;
   saved_retain : Retain_meter.saved;  (** the registry ceilings to restore when it ends *)
-  retain_start : int * int;  (** retained tasks and open channels when it began *)
+  retain_start : int list;  (** every registry's count when it began ({!Retain_meter.counts}) *)
 }
 
 let next_audit_context_id = Atomic.make 0
@@ -590,7 +590,7 @@ let reset_fuel ctx =
    (owner decision 2026-11-03) *)
 let alloc_bound ~start limit = if limit >= max_int - start then max_int - 1 else start + limit
 
-let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
+let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier ctx body =
   if Option.is_some ctx.invocation then
     invalid_arg "Eval.with_invocation: an invocation is already active on this evaluator";
   (match fuel with
@@ -599,8 +599,11 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
   (match alloc with
   | Some limit when limit < 0 -> invalid_arg "Eval.with_invocation: alloc must be non-negative"
   | Some _ | None -> ());
-  if List.exists (Option.fold ~none:false ~some:(fun n -> n < 0)) [ max_tasks; max_channels ] then
-    invalid_arg "Eval.with_invocation: registry ceilings must be non-negative";
+  if
+    List.exists
+      (Option.fold ~none:false ~some:(fun n -> n < 0))
+      [ max_tasks; max_channels; max_frontier ]
+  then invalid_arg "Eval.with_invocation: registry ceilings must be non-negative";
   let saved_coverage = ctx.track_coverage
   and saved_observer = ctx.root_observer
   and saved_handlers = Hashtbl.copy ctx.root_handlers in
@@ -626,7 +629,7 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
       saved_alloc_ceiling = !Alloc_meter.ceiling;
       saved_alloc_budget = !Alloc_meter.budget;
       saved_retain = Retain_meter.save ();
-      retain_start = (Retain_meter.tasks.count, Retain_meter.channels.count);
+      retain_start = Retain_meter.counts ();
     }
   in
   Option.iter (fun enabled -> ctx.track_coverage <- enabled) coverage;
@@ -661,6 +664,7 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
   (* registry ceilings too (RT.2 §4): counted from what the enclosing invocation retains now *)
   Option.iter (fun limit -> ignore (Retain_meter.bound Tasks limit)) max_tasks;
   Option.iter (fun limit -> ignore (Retain_meter.bound Channels limit)) max_channels;
+  Option.iter (fun limit -> ignore (Retain_meter.bound Frontier limit)) max_frontier;
   ctx.invocation <- Some invocation;
   (* runs every callback exactly once, most recent first, then restores the configuration the
      invocation borrowed; returns the first callback exception *)
@@ -699,8 +703,7 @@ let with_invocation ?coverage ?fuel ?alloc ?max_tasks ?max_channels ctx body =
     Alloc_meter.budget := invocation.saved_alloc_budget;
     Retain_meter.restore invocation.saved_retain;
     (* scope teardown releases every entry; an invocation that failed part-way leaves none counted *)
-    Retain_meter.tasks.count <- fst invocation.retain_start;
-    Retain_meter.channels.count <- snd invocation.retain_start;
+    Retain_meter.reset_counts invocation.retain_start;
     decr Fuel_meter.depth;
     if !Fuel_meter.depth = 0 then
       Fuel_meter.active_epochs :=
@@ -843,13 +846,16 @@ let exhausted ctx = Option.is_some (exhaustion ctx)
 
 type scope_report = { exhaustion : Runtime_err.t option; fuel_used : int; alloc_used : int }
 
-let with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels body =
+let with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier body =
   if Option.fold ~none:false ~some:(fun n -> n < 0) fuel then
     invalid_arg "Eval.with_scope: fuel must be non-negative";
   if Option.fold ~none:false ~some:(fun n -> n < 0) alloc then
     invalid_arg "Eval.with_scope: alloc must be non-negative";
-  if List.exists (Option.fold ~none:false ~some:(fun n -> n < 0)) [ max_tasks; max_channels ] then
-    invalid_arg "Eval.with_scope: registry ceilings must be non-negative";
+  if
+    List.exists
+      (Option.fold ~none:false ~some:(fun n -> n < 0))
+      [ max_tasks; max_channels; max_frontier ]
+  then invalid_arg "Eval.with_scope: registry ceilings must be non-negative";
   if not (invocation_active ctx) then
     invalid_arg "Eval.with_scope: no invocation is active on this evaluator";
   let saved_ceiling = !Fuel_meter.ceiling
@@ -881,6 +887,7 @@ let with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels body =
     alloc;
   Option.iter (fun limit -> ignore (Retain_meter.bound Tasks limit)) max_tasks;
   Option.iter (fun limit -> ignore (Retain_meter.bound Channels limit)) max_channels;
+  Option.iter (fun limit -> ignore (Retain_meter.bound Frontier limit)) max_frontier;
   (* a scope charges memoized terms as if it ran alone: a fresh epoch, so its cost never depends on
      what earlier scopes of the same invocation paid for *)
   let saved_epoch = !Fuel_meter.epoch and saved_pending = ctx.fuel_pending in
@@ -1341,8 +1348,8 @@ let reserve_alloc ctx cells =
 
 (* a refused entry leaves a ceiling reached, so [held_error] is set; allocation exhaustion, if
    already held, is reported first *)
-let retain ctx registry =
-  if Retain_meter.acquire registry then Ok () else Error (Option.get (held_error ctx))
+let retain ?count ctx registry =
+  if Retain_meter.acquire ?count registry then Ok () else Error (Option.get (held_error ctx))
 
 let release_retained registry n = Retain_meter.release registry n
 

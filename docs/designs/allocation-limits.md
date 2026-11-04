@@ -54,8 +54,13 @@
   The entry past a ceiling is refused with E0921 naming the ceiling, sticky
   like allocation exhaustion; a nested invocation or scope stays within the
   enclosing ceiling, and every entry is released when the invocation ends,
-  however it ends. The frontier ceiling, the other drivers' flags, the native
-  refusal and the overhead measurement follow.
+  however it ends. Slice 3b adds the frontier ceiling (`--max-frontier`,
+  `Retain_meter.Frontier`): exact enumeration retains a sample point's support
+  entries as it materializes them and releases each as its branch starts, so
+  the count is the entries not yet explored at every level; a search leaves
+  none counted however it ends. `jacquard run` gains `--max-frontier`, and
+  `jacquard infer` gains all three ceilings. The `test` and `host worker`
+  flags, cache keys, the native refusal and the overhead measurement follow.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
   replays that term's recorded cells per segment, after the segment's fuel. When

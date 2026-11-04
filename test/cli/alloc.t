@@ -95,6 +95,19 @@ branch or run; running out is E0921, not a model failure (E0902):
   exit=2
   error[E0921]: The allocation budget was exhausted
 
+`--max-frontier N` bounds an exact enumeration's pending entries: the support
+entries not yet explored at every level of the search. Two nested coins leave
+at most 3 pending (1 at the first level, 2 at the second):
+
+  $ jacquard infer enumerate --max-frontier 3 ../../demos/inference/m3-two-coins.jac
+  0.666667  true
+  0.333333  false
+  $ jacquard infer enumerate --max-frontier 2 ../../demos/inference/m3-two-coins.jac
+  error[E0921]: A registry ceiling was reached
+    Cause: registry ceiling reached: the --max-frontier ceiling of 2 pending enumeration entry(s) was reached before evaluation finished; the result is incomplete
+    Next step: Raise the --max-frontier ceiling, or omit it to run unbounded. An incomplete run neither passes nor fails.
+  [2]
+
 `jacquard test --alloc CELLS` gives each discovered test its own allocation
 budget, drawn from one run, as `--fuel` does: a test that runs out is
 INCOMPLETE, is never cached, and makes the run exit 2; bounded results are

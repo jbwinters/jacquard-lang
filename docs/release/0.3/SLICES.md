@@ -1015,3 +1015,16 @@ declared capacity as cells. `test_invocation.ml` adds a case (exact ceilings,
 stickiness, a scope's own ceiling, release after an exception, the capacity
 charge) and `test/cli/alloc.t` the command line. The source inventory is now
 `1228 / 82 / 57`.
+
+Slice 3b adds the frontier ceiling (§4): `--max-frontier N` bounds an exact
+enumeration's pending entries, the support entries not yet explored at every
+level of its depth-first search, in `Infer_dist.enumerate_v1` and
+`enumerate_risk_exact`. A sample point retains its whole support as it is
+materialized, each entry is released as its branch starts, and a search that
+ends, however it ends, leaves none counted. Reaching it is E0921 naming
+`--max-frontier`; allocation is reported before it and it before the branch
+budget. `jacquard run` gains `--max-frontier`, and `jacquard infer enumerate`
+and `infer lw` gain all three ceilings. `test_infer.ml` adds a case (the peak
+in both enumerators, check order, a scope's own ceiling) and
+`test/cli/alloc.t` the command line. The source inventory is now
+`1229 / 82 / 57`.

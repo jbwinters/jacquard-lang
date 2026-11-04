@@ -446,6 +446,12 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
       | Ok state -> Ok state
       | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
     in
+    (* RT.2 §4: a sample point's support entries are pending until each one's branch starts *)
+    let pending count =
+      match Eval.retain ~count ctx Frontier with
+      | Ok () -> Ok ()
+      | Error error -> Error [ Runtime_err.to_diag error ]
+    in
     let rec explore state path_weight theoretically_positive =
       match run_until_op ctx state with
       | Error error -> Error [ runtime_diagnostic ~code:"E0915" error ]
@@ -476,16 +482,22 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
               match distribution with
               | UniformInt (lo, hi) ->
                   let* probability = uniform_probability lo hi in
+                  let* () =
+                    pending (if hi - lo < 0 || hi - lo = max_int then max_int else hi - lo + 1)
+                  in
                   let rec visit_range value =
+                    Eval.release_retained Frontier 1;
                     let* () = visit (Value.VInt value) probability in
                     if value = hi then Ok () else visit_range (value + 1)
                   in
                   visit_range lo
               | Bernoulli _ | Categorical _ ->
                   let* entries = materialized_support "sample" distribution in
+                  let* () = pending (List.length entries) in
                   let rec visit_entries = function
                     | [] -> Ok ()
                     | (value, factor) :: rest ->
+                        Eval.release_retained Frontier 1;
                         let* () = visit value factor in
                         visit_entries rest
                   in
@@ -752,9 +764,13 @@ let enumerate_v1 ?max_branches (ctx : Eval.ctx) (model : Eval.state) :
           match Result.bind (dist_of_value ctx dv) (support ctx) with
           | Error e -> Error e
           | Ok entries ->
+              (* RT.2 §4: the support entries not yet explored are the pending frontier; each
+                 leaves it as its branch starts *)
+              Result.bind (Eval.retain ~count:(List.length entries) ctx Frontier) @@ fun () ->
               let rec branches = function
                 | [] -> Ok ()
                 | (x, p) :: rest ->
+                    Eval.release_retained Frontier 1;
                     Result.bind
                       (factor p
                          (fun () -> Eval.resume_captured_state ctx resume x)
@@ -881,8 +897,13 @@ let guard_walks ctx run =
       | result -> ( match Eval.exhaustion ctx with Some error -> exhausted error | None -> result)
       | exception Fuel_meter.Exceeded -> exhausted (Eval.fuel_error ctx))
 
+(* RT.2 §4: a search that ends, however it ends, leaves none of its pending entries counted *)
+let releasing_frontier run =
+  let start = Retain_meter.frontier.count in
+  Fun.protect ~finally:(fun () -> Retain_meter.frontier.count <- start) run
+
 let enumerate_v1 ?max_branches ctx model =
-  guard_walks ctx (fun () -> enumerate_v1 ?max_branches ctx model)
+  guard_walks ctx (fun () -> releasing_frontier (fun () -> enumerate_v1 ?max_branches ctx model))
 
 let likelihood_weighting_v1 ctx ~seed ~samples model =
   guard_walks ctx (fun () -> likelihood_weighting_v1 ctx ~seed ~samples model)
@@ -894,7 +915,8 @@ let lw_surviving_runs ctx ~seed ~samples model =
   guard_walks ctx (fun () -> lw_surviving_runs ctx ~seed ~samples model)
 
 let enumerate_risk_exact ctx ~max_branches model =
-  guard_walks ctx (fun () -> enumerate_risk_exact ctx ~max_branches model)
+  guard_walks ctx (fun () ->
+      releasing_frontier (fun () -> enumerate_risk_exact ctx ~max_branches model))
 
 (** The legacy success-or-diagnostic view of a classified outcome. *)
 let classified_to_result ~sampled (c : classified) : (posterior, Diag.t list) result =
