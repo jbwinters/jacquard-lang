@@ -64,8 +64,10 @@
   reaches one is `INCOMPLETE` and never cached, and Warp keys bounded results on
   each ceiling given (`max-tasks=N` and the others). `jacquard host worker`
   takes them for its invocation; a v0 target cannot spawn, open a channel or
-  enumerate, so none can be reached there yet. The native refusal and the
-  overhead measurement follow.
+  enumerate, so none can be reached there yet. Slice 3d refuses `--alloc`
+  and every ceiling on `jacquard build` and `jacquard project build` with
+  E1103 before compiling (§7), documents that a registered native charges its
+  own allocation (`Eval.register_builtin`), and measures the overhead (§8).
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
   replays that term's recorded cells per segment, after the segment's fuel. When
@@ -215,7 +217,8 @@ must require a budget.
 
 The native backend has no allocation or registry accounting. `--alloc` and every
 registry ceiling are refused for native builds (a diagnostic), never silently
-ignored. A host-registered native (`Eval.register_builtin`) must charge its own
+ignored: `jacquard build` and `jacquard project build` accept the four flags
+only to refuse them with E1103, naming each one given, before compiling. A host-registered native (`Eval.register_builtin`) must charge its own
 allocation through `Alloc_meter`, as it must tick fuel; documented as a limit.
 
 ## 8. Overhead and acceptance
@@ -225,6 +228,16 @@ budget). The overhead is measured on a fixed workload, the interpreter suite's
 `test_jacquard.exe` focused runs plus `demos/inference`, against the parent
 commit; the acceptance threshold is **at most 10 % wall-clock** (for scale, the evaluator's
 coverage bookkeeping measured 12 %, `eval.ml`). A larger overhead fails the slice.
+
+Measured (slice 3d, 2026-11-04): the parent of slice 1 (`4089c83`) against the
+code after slice 3c, five alternating rounds on one machine, each round the
+`test_jacquard.exe` suites `eval`, `stdlib`, `handlers`, `prelude`, `text`
+and `warp` (121 tests) plus the three `demos/inference` scripts, whose sources
+are identical at both commits. The suites that gained RT.2 tests
+(`invocation`, `infer`, `observation-policy`) are left out so the workload is
+the same on both sides. Median wall-clock 64.07 s before and 64.13 s after:
+**0.1 %**, within the threshold. The rounds spread over about 1 %, so the
+overhead is below what this measurement resolves.
 Acceptance (from the task):
 
 - large values, retained resumptions and an enumeration frontier exhaust their

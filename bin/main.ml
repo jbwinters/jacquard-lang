@@ -3345,53 +3345,91 @@ let native_build ~store ~prelude ~cache_root ~out tops =
           exit_diags
       | Error (`Toolchain m) -> print_diags [ cli_diagnostic ~code:"E1103" m ])
 
-let build_cmd file out prelude dry_run syntax =
-  if dry_run then begin
-    (* the consent sheet is an interpreter run: the dry handlers wrap live
+(* RT.2 §7: native code has no allocation or registry accounting, so a native build refuses the
+   limits rather than ignoring them *)
+let native_limits_arg =
+  let given name =
+    Term.(
+      const (fun n -> Option.map (fun (_ : int) -> "--" ^ name) n)
+      $ Arg.(
+          value
+          & opt (some int) None
+          & info [ name ] ~docv:"N"
+              ~doc:
+                (Printf.sprintf
+                   "Refused: native code has no allocation or registry accounting, so --%s cannot \
+                    bound it (E1103). Bound execution with the interpreter (jacquard run)."
+                   name)))
+  in
+  Term.(
+    const (fun a b c d -> List.filter_map Fun.id [ a; b; c; d ])
+    $ given "alloc" $ given "max-tasks" $ given "max-channels" $ given "max-frontier")
+
+let refuse_native_limits command = function
+  | [] -> None
+  | flags ->
+      Some
+        (print_diags
+           [
+             cli_diagnostic ~code:"E1103"
+               ~hint:"run it with jacquard run to bound it, or omit the limits"
+               (Printf.sprintf
+                  "%s does not support %s: native code has no allocation or registry accounting to \
+                   enforce %s"
+                  command (String.concat ", " flags)
+                  (if List.length flags = 1 then "it" else "them"));
+           ])
+
+let build_cmd file out prelude dry_run syntax limits =
+  match refuse_native_limits "jacquard build" limits with
+  | Some status -> status
+  | None -> (
+      if dry_run then begin
+        (* the consent sheet is an interpreter run: the dry handlers wrap live
        evaluation, and a compiled binary has nothing to wrap after the fact *)
-    print_diags
-      [
-        cli_diagnostic ~code:"E1103"
-          "jacquard build does not support --dry-run; the consent sheet is an interpreter run.";
-      ]
-  end
-  else
-    match open_ctx ~prelude ~store_dir:None with
-    | Error ds -> print_diags ds
-    | Ok (store, _ctx) -> (
-        match Frontend.make_checker store with
+        print_diags
+          [
+            cli_diagnostic ~code:"E1103"
+              "jacquard build does not support --dry-run; the consent sheet is an interpreter run.";
+          ]
+      end
+      else
+        match open_ctx ~prelude ~store_dir:None with
         | Error ds -> print_diags ds
-        | Ok cctx -> (
-            let tops = ref [] in
-            let rec check_forms = function
-              | [] -> Ok ()
-              | top :: rest -> (
-                  match top with
-                  | Kernel.Decl d -> (
-                      match Check.check_top cctx (Kernel.Decl d) with
-                      | Error ds -> Error ds
-                      | Ok _ -> check_forms rest)
-                  | Kernel.Expr e -> (
-                      match Check.check_top cctx (Kernel.Expr e) with
-                      | Error ds -> Error ds
-                      | Ok _ ->
-                          tops := e :: !tops;
-                          check_forms rest))
-            in
-            match Frontend.resolve_source_tops ~syntax store ~file (read_file file) with
+        | Ok (store, _ctx) -> (
+            match Frontend.make_checker store with
             | Error ds -> print_diags ds
-            | Ok (resolved_tops, warnings) -> (
-                print_warnings warnings;
-                match check_forms resolved_tops with
+            | Ok cctx -> (
+                let tops = ref [] in
+                let rec check_forms = function
+                  | [] -> Ok ()
+                  | top :: rest -> (
+                      match top with
+                      | Kernel.Decl d -> (
+                          match Check.check_top cctx (Kernel.Decl d) with
+                          | Error ds -> Error ds
+                          | Ok _ -> check_forms rest)
+                      | Kernel.Expr e -> (
+                          match Check.check_top cctx (Kernel.Expr e) with
+                          | Error ds -> Error ds
+                          | Ok _ ->
+                              tops := e :: !tops;
+                              check_forms rest))
+                in
+                match Frontend.resolve_source_tops ~syntax store ~file (read_file file) with
                 | Error ds -> print_diags ds
-                | Ok () ->
-                    (* warnings and manifests are harvested from a SECOND, run-alike
+                | Ok (resolved_tops, warnings) -> (
+                    print_warnings warnings;
+                    match check_forms resolved_tops with
+                    | Error ds -> print_diags ds
+                    | Ok () ->
+                        (* warnings and manifests are harvested from a SECOND, run-alike
                          checker context that checks only the top expressions: the loader's
                          eager decl checking seeds Check's origin map in a different order
                          than run_cmd's lazy checking, and the E0814 origins
                          (`performed via ...`) must match run byte-for-byte *)
-                    native_build ~store ~prelude ~cache_root:".jacquard-native" ~out
-                      (List.rev !tops))))
+                        native_build ~store ~prelude ~cache_root:".jacquard-native" ~out
+                          (List.rev !tops)))))
 
 (* --- host worker (HB.2c) --- *)
 
@@ -3500,7 +3538,8 @@ let build_t =
           standalone native executable without generating an intermediate twin.")
     Term.(
       const (configure_diagnostics build_cmd)
-      $ diagnostic_format_arg $ file_arg $ out_arg $ prelude_arg $ dry_run_arg $ syntax_arg)
+      $ diagnostic_format_arg $ file_arg $ out_arg $ prelude_arg $ dry_run_arg $ syntax_arg
+      $ native_limits_arg)
 
 let tiers_t =
   Cmd.v
@@ -4149,100 +4188,108 @@ let project_test_cmd project prelude bundle entry_name allows seed samples exhau
 (* project build: a native binary for a (native) run entry. Each build compiles in a fresh
    directory under the project's .jacquard/build/, renamed over the entry's previous build only on
    success, so concurrent builds never share object or prog_main paths. *)
-let project_build_cmd project prelude entry_name out =
-  with_loaded_project project (fun loaded ->
-      match Project_frontend.find_entry_of_kind loaded entry_name Project_manifest.Run with
-      | Error ds -> print_diags ds
-      | Ok { Project_manifest.native = false; _ } ->
-          print_diags
-            [
-              cli_diagnostic ~code:"E1718" ~hint:"add (native) to the entry in project.jqd"
-                (Printf.sprintf "run entry `%s` is not declared (native)" entry_name);
-            ]
-      | Ok entry -> (
-          match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
+let project_build_cmd project prelude entry_name out limits =
+  match refuse_native_limits "jacquard project build" limits with
+  | Some status -> status
+  | None ->
+      with_loaded_project project (fun loaded ->
+          match Project_frontend.find_entry_of_kind loaded entry_name Project_manifest.Run with
           | Error ds -> print_diags ds
-          | Ok session -> (
-              match Project_bundle.check_output session ~what:"native output" out with
+          | Ok { Project_manifest.native = false; _ } ->
+              print_diags
+                [
+                  cli_diagnostic ~code:"E1718" ~hint:"add (native) to the entry in project.jqd"
+                    (Printf.sprintf "run entry `%s` is not declared (native)" entry_name);
+                ]
+          | Ok entry -> (
+              match open_project_library ~on_lint:print_diagnostic ~prelude loaded with
               | Error ds -> print_diags ds
-              | Ok _ -> (
-                  let store = Project_frontend.store session
-                  and checker = Project_frontend.checker session in
-                  let expressions = ref [] in
-                  let walked =
-                    Result.bind
-                      (Project_frontend.entry_tops ~on_lint:print_diagnostic session entry)
-                      (fun tops ->
-                        Project_frontend.walk_entry session tops ~on_resolved:(fun top _ ->
-                            Result.map
-                              (fun _ ->
-                                match top with
-                                | Kernel.Expr e -> expressions := e :: !expressions
-                                | Kernel.Decl _ -> ())
-                              (Check.check_top checker top)))
-                  in
-                  match walked with
+              | Ok session -> (
+                  match Project_bundle.check_output session ~what:"native output" out with
                   | Error ds -> print_diags ds
-                  | Ok () ->
-                      let builds =
-                        Filename.concat (Filename.concat loaded.dir ".jacquard") "build"
+                  | Ok _ -> (
+                      let store = Project_frontend.store session
+                      and checker = Project_frontend.checker session in
+                      let expressions = ref [] in
+                      let walked =
+                        Result.bind
+                          (Project_frontend.entry_tops ~on_lint:print_diagnostic session entry)
+                          (fun tops ->
+                            Project_frontend.walk_entry session tops ~on_resolved:(fun top _ ->
+                                Result.map
+                                  (fun _ ->
+                                    match top with
+                                    | Kernel.Expr e -> expressions := e :: !expressions
+                                    | Kernel.Decl _ -> ())
+                                  (Check.check_top checker top)))
                       in
-                      let final = Filename.concat builds entry.ename in
-                      let fresh =
-                        Filename.concat builds
-                          (Printf.sprintf ".%s.%d.tmp" entry.ename (Unix.getpid ()))
-                      in
-                      let rec mkdir_p dir =
-                        if not (Sys.file_exists dir) then begin
-                          mkdir_p (Filename.dirname dir);
-                          try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-                        end
-                      in
-                      mkdir_p fresh;
-                      let status =
-                        native_build ~store ~prelude ~cache_root:fresh ~out (List.rev !expressions)
-                      in
-                      (if status = ok then begin
-                         (* the recipe, for diagnosis only (semantic reproducibility is what is promised):
+                      match walked with
+                      | Error ds -> print_diags ds
+                      | Ok () ->
+                          let builds =
+                            Filename.concat (Filename.concat loaded.dir ".jacquard") "build"
+                          in
+                          let final = Filename.concat builds entry.ename in
+                          let fresh =
+                            Filename.concat builds
+                              (Printf.sprintf ".%s.%d.tmp" entry.ename (Unix.getpid ()))
+                          in
+                          let rec mkdir_p dir =
+                            if not (Sys.file_exists dir) then begin
+                              mkdir_p (Filename.dirname dir);
+                              try Unix.mkdir dir 0o755
+                              with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
+                            end
+                          in
+                          mkdir_p fresh;
+                          let status =
+                            native_build ~store ~prelude ~cache_root:fresh ~out
+                              (List.rev !expressions)
+                          in
+                          (if status = ok then begin
+                             (* the recipe, for diagnosis only (semantic reproducibility is what is promised):
                         Core, the emitter's cache tag (emitter version, runtime header, toolchain,
                         flags), the runtime sources' digest, the compiler, and the target *)
-                         let emitter =
-                           Array.to_list (Sys.readdir fresh)
-                           |> List.filter (fun d -> Sys.is_directory (Filename.concat fresh d))
-                           |> String.concat " "
-                         in
-                         let runtime_dir =
-                           Jacquard_native.Build.runtime_dir_of
-                             ~prelude_dir:(prelude_dir_of prelude)
-                         in
-                         let runtime =
-                           Array.to_list (Sys.readdir runtime_dir)
-                           |> List.filter (fun f ->
-                               Filename.check_suffix f ".c" || Filename.check_suffix f ".h")
-                           |> List.sort compare
-                           |> List.map (fun f ->
-                               f ^ "\000" ^ read_file (Filename.concat runtime_dir f))
-                           |> String.concat "\000" |> Hash.of_string |> Hash.to_hex
-                         in
-                         let target =
-                           let ic = Unix.open_process_in "uname -sm 2>/dev/null" in
-                           let line = try input_line ic with End_of_file -> "" in
-                           ignore (Unix.close_process_in ic);
-                           line
-                         in
-                         Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd") (fun oc ->
-                             Printf.fprintf oc
-                               "(build-recipe (entry %s) (core %S) (emitter %S) (runtime #%s) (cc \
-                                %S) (cflags %S) (target %S))\n"
-                               entry.ename Version.version emitter runtime
-                               (Option.value (Sys.getenv_opt "CC") ~default:"cc")
-                               (Option.value (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS") ~default:"")
-                               target);
-                         (try rm_rf final with Sys_error _ -> ());
-                         Unix.rename fresh final
-                       end
-                       else try rm_rf fresh with Sys_error _ -> ());
-                      status))))
+                             let emitter =
+                               Array.to_list (Sys.readdir fresh)
+                               |> List.filter (fun d -> Sys.is_directory (Filename.concat fresh d))
+                               |> String.concat " "
+                             in
+                             let runtime_dir =
+                               Jacquard_native.Build.runtime_dir_of
+                                 ~prelude_dir:(prelude_dir_of prelude)
+                             in
+                             let runtime =
+                               Array.to_list (Sys.readdir runtime_dir)
+                               |> List.filter (fun f ->
+                                   Filename.check_suffix f ".c" || Filename.check_suffix f ".h")
+                               |> List.sort compare
+                               |> List.map (fun f ->
+                                   f ^ "\000" ^ read_file (Filename.concat runtime_dir f))
+                               |> String.concat "\000" |> Hash.of_string |> Hash.to_hex
+                             in
+                             let target =
+                               let ic = Unix.open_process_in "uname -sm 2>/dev/null" in
+                               let line = try input_line ic with End_of_file -> "" in
+                               ignore (Unix.close_process_in ic);
+                               line
+                             in
+                             Out_channel.with_open_bin (Filename.concat fresh "recipe.jqd")
+                               (fun oc ->
+                                 Printf.fprintf oc
+                                   "(build-recipe (entry %s) (core %S) (emitter %S) (runtime #%s) \
+                                    (cc %S) (cflags %S) (target %S))\n"
+                                   entry.ename Version.version emitter runtime
+                                   (Option.value (Sys.getenv_opt "CC") ~default:"cc")
+                                   (Option.value
+                                      (Sys.getenv_opt "JACQUARD_NATIVE_CFLAGS")
+                                      ~default:"")
+                                   target);
+                             (try rm_rf final with Sys_error _ -> ());
+                             Unix.rename fresh final
+                           end
+                           else try rm_rf fresh with Sys_error _ -> ());
+                          status))))
 
 (* project hash: the identity of every binding the library (and, with ENTRY, that entry)
    introduces, one "KIND NAME HASH" line each, sorted *)
@@ -4432,7 +4479,8 @@ let project_t =
       Term.(
         const (configure_diagnostics project_build_cmd)
         $ diagnostic_format_arg $ project_arg $ prelude_arg $ entry_pos
-        $ Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT"))
+        $ Arg.(required & opt (some string) None & info [ "o"; "output" ] ~docv:"OUT")
+        $ native_limits_arg)
   in
   let hash =
     Cmd.v

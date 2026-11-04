@@ -276,3 +276,25 @@ The same ceiling hits the cache; another ceiling or none misses it:
   cache: 0 hit, 2 ran
   $ timeout 60 jacquard test spawning.jac --cache-dir ceilings > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 2 ran
+
+Native code has no allocation or registry accounting (§7), so a native build
+refuses `--alloc` and every ceiling with E1103 before compiling anything,
+rather than ignoring them:
+
+  $ jacquard build chain.jac -o chain.bin --alloc 1000
+  error[E1103]: Native build could not complete
+    Cause: jacquard build does not support --alloc: native code has no allocation or registry accounting to enforce it
+    Next step: run it with jacquard run to bound it, or omit the limits
+  [1]
+  $ jacquard build chain.jac -o chain.bin --max-tasks 4 --max-channels 1 --max-frontier 2
+  error[E1103]: Native build could not complete
+    Cause: jacquard build does not support --max-tasks, --max-channels, --max-frontier: native code has no allocation or registry accounting to enforce them
+    Next step: run it with jacquard run to bound it, or omit the limits
+  [1]
+  $ jacquard project build demo -o demo.bin --max-tasks 4
+  error[E1103]: Native build could not complete
+    Cause: jacquard project build does not support --max-tasks: native code has no allocation or registry accounting to enforce it
+    Next step: run it with jacquard run to bound it, or omit the limits
+  [1]
+  $ test -e chain.bin || test -e demo.bin || echo "nothing built"
+  nothing built
