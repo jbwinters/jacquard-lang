@@ -232,7 +232,7 @@ also emits E0817; consuming the captured resumption twice emits E0816.
 |------|---------|---------|
 | E1101 | program construct is outside the native v1 compilation subset | compiling a call with more than eight arguments |
 | E1102 | program requires the interpreter tier | compiling a program that uses `eval` |
-| E1103 | native toolchain, grant, or build configuration cannot produce the executable | building with an unsupported `net` grant or unavailable compiler |
+| E1103 | native toolchain, grant, or build configuration cannot produce the executable | building with an unsupported `net` grant or unavailable compiler; `jacquard build --alloc` or a registry ceiling, which native code cannot enforce |
 
 ## Surface syntax (E12xx)
 

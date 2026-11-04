@@ -1039,3 +1039,13 @@ budgets (§5). `host worker` passes them to the invocation; a v0 target cannot
 spawn, open a channel or enumerate, so none can be reached there yet.
 `test/cli/alloc.t` shows the per-test ceiling and the cache keys and
 `test/cli/host-worker.t` the worker flags. The source inventory is unchanged.
+
+Slice 3d finishes RT.2's slice 3. `jacquard build` and `jacquard project build`
+accept `--alloc`, `--max-tasks`, `--max-channels` and `--max-frontier` only to
+refuse them with E1103, naming each one given, before compiling anything:
+native code has no allocation or registry accounting (§7). `Eval.register_builtin`
+now documents that a registered native ticks fuel and charges its own
+allocation. The overhead (§8), measured against the parent of slice 1 on the
+same suites and inference demos at both commits, is 0.1 % of median
+wall-clock, within the 10 % threshold. `test/cli/alloc.t` shows the refusals.
+The source inventory is unchanged.

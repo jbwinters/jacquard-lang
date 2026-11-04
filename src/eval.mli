@@ -56,7 +56,9 @@ val reject_task_escape : ctx -> scope_path:int list -> Value.t -> (unit, Diag.t 
 val register_builtin : ctx -> Hash.t -> Value.t -> unit
 (** [register_builtin ctx hash value] installs a native implementation for a term. Recovery-marked
     values are rejected with the evaluator's runtime exception; custom callbacks are guarded before
-    and after every invocation. *)
+    and after every invocation. A registered native must tick {!Fuel_meter} for the work it does and
+    charge its own allocation through {!Alloc_meter} (alloc-v1, docs/designs/allocation-limits.md
+    §7): the evaluator charges only what it builds itself. *)
 
 val charge_driver_alloc : ctx -> int -> unit
 (** [charge_driver_alloc ctx cells] charges [cells] of alloc-v1 allocation that a driver makes
