@@ -85,10 +85,11 @@ val reserve_alloc : ctx -> int -> (unit, Runtime_err.t) result
 (** [reserve_alloc ctx cells] charges [cells] a root handler is about to build; running out exhausts
     the invocation and returns E0921, which the handler returns. *)
 
-val retain : ctx -> Retain_meter.registry -> (unit, Runtime_err.t) result
-(** [retain ctx registry] retains one registry entry (a task or a channel) for a driver. Past the
-    ceiling it is refused with E0921 and the ceiling stays reached; a driver releases what it
-    retained with {!release_retained} when the entries' scope is torn down. *)
+val retain : ?count:int -> ctx -> Retain_meter.registry -> (unit, Runtime_err.t) result
+(** [retain ?count ctx registry] retains [count] registry entries (default 1: a task, a channel, or
+    an enumeration's pending entries) for a driver. Past the ceiling none is retained, the request
+    is refused with E0921 and the ceiling stays reached; a driver releases what it retained with
+    {!release_retained} when the entries' scope is torn down. *)
 
 val release_retained : Retain_meter.registry -> int -> unit
 (** [release_retained registry n] releases [n] entries retained with {!retain}. *)
@@ -187,6 +188,7 @@ val with_invocation :
   ?alloc:int ->
   ?max_tasks:int ->
   ?max_channels:int ->
+  ?max_frontier:int ->
   ctx ->
   (invocation -> 'a) ->
   'a
@@ -209,10 +211,12 @@ val with_invocation :
     [max_tasks] and [max_channels] are registry ceilings (RT.2 §4,
     docs/designs/allocation-limits.md): at most that many tasks retained (spawned, or a nested
     scope's body, until its scope is torn down) and channels open at once, across every scheduler
-    and scope of the invocation, within any ceiling of an enclosing invocation. The entry that would
-    pass one is refused with [Runtime_err.Ceiling_reached] (E0921), sticky like an exhausted
-    allocation budget. Every entry is released when the invocation ends, however it ends. A negative
-    ceiling is [Invalid_argument]. *)
+    and scope of the invocation, within any ceiling of an enclosing invocation. [max_frontier]
+    bounds an exact enumeration's pending entries: the support entries not yet explored at every
+    level of its depth-first search. The entry that would pass one is refused with
+    [Runtime_err.Ceiling_reached] (E0921), sticky like an exhausted allocation budget. Every entry
+    is released when the invocation ends, however it ends. A negative ceiling is [Invalid_argument].
+*)
 
 val fuel_model : string
 (** ["fuel-v1"]: the identity of the cost model below. Any change to what a unit pays for is a new
@@ -254,10 +258,11 @@ val with_scope :
   ?alloc:int ->
   ?max_tasks:int ->
   ?max_channels:int ->
+  ?max_frontier:int ->
   (unit -> 'a) ->
   'a * scope_report
-(** [with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels body] runs [body] inside the active
-    invocation under per-branch caps of [fuel] units, [alloc] cells and the registry ceilings
+(** [with_scope ctx ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier body] runs [body] inside the
+    active invocation under per-branch caps of [fuel] units, [alloc] cells and the registry ceilings
     (docs/computation-fuel.md §4, docs/designs/allocation-limits.md §4, §6). Each cap draws on the
     invocation's aggregate, so it only lowers what [body] may spend; running out of a cap is
     [body]'s outcome, reported in the [scope_report], and the enclosing invocation keeps its

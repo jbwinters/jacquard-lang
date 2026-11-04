@@ -141,6 +141,91 @@ let test_impossible_observation () =
   | Error [ d ] -> Alcotest.(check string) "empty posterior code" "E0901" (Diag.code_or_uncoded d)
   | Error _ -> Alcotest.fail "expected one diagnostic"
 
+(* RT.2 §4: the frontier ceiling bounds an exact enumeration's pending entries, the support entries
+   not yet explored at every level. Two nested Bernoulli points pend 2, then 1 + 2 = 3 entries *)
+let frontier_model_src =
+  "(let nonrec (pvar first) (app (var sample) (app (var bernoulli) (lit 0.5)))\n\
+  \  (let nonrec (pvar second) (app (var sample) (app (var bernoulli) (lit 0.5)))\n\
+  \    (var low)))"
+
+let test_frontier_ceiling () =
+  let harness = Eval_support.make_prelude_ctx () in
+  let _, ctx = harness in
+  let state () = model_state harness frontier_model_src in
+  let codes = function
+    | Ok _ -> "ok"
+    | Error ds -> String.concat "," (List.map Diag.code_or_uncoded ds)
+  in
+  let names_frontier = function
+    | Ok _ -> false
+    | Error ds ->
+        List.exists
+          (fun d ->
+            let text = Diag.to_string d in
+            let flag = "--max-frontier" in
+            let rec has i =
+              i + String.length flag <= String.length text
+              && (String.sub text i (String.length flag) = flag || has (i + 1))
+            in
+            has 0)
+          ds
+  in
+  let exact ?max_branches ?max_frontier ?alloc () =
+    Eval.with_invocation ?max_frontier ?alloc ctx (fun _ ->
+        let result = Infer_dist.enumerate_v1 ?max_branches ctx (state ()) in
+        let complete =
+          match result with Ok c -> c.Infer_dist.metadata.complete | Error _ -> false
+        in
+        ((codes result, names_frontier result, complete), Retain_meter.frontier.count))
+  in
+  let risk ?max_frontier () =
+    Eval.with_invocation ?max_frontier ctx (fun _ ->
+        let result = Infer_dist.enumerate_risk_exact ctx ~max_branches:4 (state ()) in
+        ((codes result, names_frontier result), Retain_meter.frontier.count))
+  in
+  let outcome = Alcotest.(pair (triple string bool bool) int) in
+  Alcotest.check outcome "the peak fits" (("ok", false, true), 0) (exact ~max_frontier:3 ());
+  Alcotest.check outcome "one less is refused, naming the frontier"
+    (("E0921", true, false), 0)
+    (exact ~max_frontier:2 ());
+  Alcotest.(check (pair (pair string bool) int))
+    "risk enumeration: the peak fits"
+    (("ok", false), 0)
+    (risk ~max_frontier:3 ());
+  Alcotest.(check (pair (pair string bool) int))
+    "risk enumeration: one less is refused"
+    (("E0921", true), 0)
+    (risk ~max_frontier:2 ());
+  Alcotest.(check bool) "nothing is held after the invocation" false (Retain_meter.exhausted ());
+  (* the first checked is reported: allocation before the frontier, the frontier before branches *)
+  Alcotest.check outcome "allocation is reported first"
+    (("E0921", false, false), 0)
+    (exact ~alloc:0 ~max_frontier:0 ());
+  Alcotest.check outcome "the frontier before the branch budget"
+    (("E0921", true, false), 0)
+    (exact ~max_branches:1 ~max_frontier:2 ());
+  Alcotest.check outcome "a branch budget alone stays E0918's outcome"
+    (("ok", false, false), 0)
+    (exact ~max_branches:1 ~max_frontier:3 ());
+  (* a scope's own ceiling binds its search, cannot raise the enclosing one, and a refused search
+     leaves none of its entries counted *)
+  let scoped ?outer limit =
+    Eval.with_invocation ?max_frontier:outer ctx (fun _ ->
+        let result, report =
+          Eval.with_scope ctx ~max_frontier:limit (fun () ->
+              codes (Infer_dist.enumerate_v1 ctx (state ())))
+        in
+        ( result,
+          Option.map (fun e -> Diag.code_or_uncoded (Runtime_err.to_diag e)) report.Eval.exhaustion,
+          Retain_meter.frontier.count ))
+  in
+  Alcotest.(check (triple string (option string) int))
+    "a scope's own ceiling" ("E0921", Some "E0921", 0) (scoped 2);
+  Alcotest.(check (triple string (option string) int))
+    "cannot raise the enclosing one" ("E0921", Some "E0921", 0) (scoped ~outer:2 10);
+  Alcotest.(check (triple string (option string) int))
+    "and a fitting scope completes" ("ok", None, 0) (scoped 3)
+
 (* --- GM.21 bounded exact risk-enumeration core --- *)
 
 let expect_exact_risk_error code ctx ~max_branches state =
@@ -621,6 +706,8 @@ let suite =
       test_exact_risk_duplicate_leaves_and_observation;
     Alcotest.test_case "exact risk enforces a positive terminal branch budget" `Quick
       test_exact_risk_branch_budget;
+    Alcotest.test_case "a frontier ceiling bounds an enumeration's pending entries" `Quick
+      test_frontier_ceiling;
     Alcotest.test_case "exact risk rejects malformed categorical weights" `Quick
       test_exact_risk_rejects_malformed_categorical_weights;
     Alcotest.test_case "exact risk rejects opaque observation values" `Quick

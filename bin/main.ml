@@ -308,8 +308,8 @@ let run_program ~ceilings ~alloc ~fuel ~store ~ctx ~allows ~seed ~infer_cache ~d
     ~schedule_record ~requested_mode ~walk =
   (* one invocation owns this run's grants and Once resumptions; run never reads
                  coverage, so it skips the per-reference bookkeeping (PF.2 phase 2) *)
-  let max_tasks, max_channels = ceilings in
-  Eval.with_invocation ~coverage:false ?fuel ?alloc ?max_tasks ?max_channels ctx
+  let max_tasks, max_channels, max_frontier = ceilings in
+  Eval.with_invocation ~coverage:false ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier ctx
   @@ fun invocation ->
   report_fuel invocation;
   report_alloc invocation;
@@ -1113,11 +1113,13 @@ let print_classified ~sampled ~metadata (c : Infer_dist.classified) =
       if metadata then print_endline ("# " ^ Infer_dist.show_metadata c.metadata);
       ok
 
-let infer_enumerate_cmd file prelude max_branches metadata fuel alloc syntax =
+let infer_enumerate_cmd file prelude max_branches metadata fuel alloc
+    (max_tasks, max_channels, max_frontier) syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      Eval.with_invocation ?fuel ?alloc ctx @@ fun invocation ->
+      Eval.with_invocation ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier ctx
+      @@ fun invocation ->
       report_fuel invocation;
       report_alloc invocation;
       fuel_guard ctx @@ fun () ->
@@ -1131,11 +1133,13 @@ let infer_enumerate_cmd file prelude max_branches metadata fuel alloc syntax =
               | Error ds -> print_incomplete_or_diags ds
               | Ok classified -> print_classified ~sampled:false ~metadata classified)))
 
-let infer_lw_cmd file prelude seed samples metadata fuel alloc syntax =
+let infer_lw_cmd file prelude seed samples metadata fuel alloc
+    (max_tasks, max_channels, max_frontier) syntax =
   match open_ctx ~prelude ~store_dir:None with
   | Error ds -> print_diags ds
   | Ok (store, ctx) -> (
-      Eval.with_invocation ?fuel ?alloc ctx @@ fun invocation ->
+      Eval.with_invocation ?fuel ?alloc ?max_tasks ?max_channels ?max_frontier ctx
+      @@ fun invocation ->
       report_fuel invocation;
       report_alloc invocation;
       fuel_guard ctx @@ fun () ->
@@ -2418,7 +2422,7 @@ let ceilings_arg =
   in
   let ceiling name ~docv ~doc = Arg.(value & opt (some count) None & info [ name ] ~docv ~doc) in
   Term.(
-    const (fun tasks channels -> (tasks, channels))
+    const (fun tasks channels frontier -> (tasks, channels, frontier))
     $ ceiling "max-tasks" ~docv:"N"
         ~doc:
           "Retain at most N tasks at once across the whole run: spawned tasks and nested \
@@ -2428,7 +2432,13 @@ let ceilings_arg =
         ~doc:
           "Keep at most N channels open at once across the whole run, each released when its scope \
            is torn down. Reaching it stops with E0921: the run is incomplete. Without it the count \
-           is unbounded.")
+           is unbounded."
+    $ ceiling "max-frontier" ~docv:"N"
+        ~doc:
+          "Keep at most N exact-enumeration entries pending at once across the whole run: the \
+           support entries not yet explored at every level of the search, each released as its \
+           branch starts. Reaching it stops with E0921: the run is incomplete. Without it the \
+           count is unbounded; --max-branches still bounds the total.")
 
 let required_seed_arg =
   Arg.(
@@ -2696,7 +2706,7 @@ let infer_t =
                 ~doc:
                   "Stop with E0918 instead of exploring more than $(docv) terminal paths (default: \
                    unbounded).")
-        $ infer_metadata_arg $ fuel_arg $ alloc_arg $ syntax_arg)
+        $ infer_metadata_arg $ fuel_arg $ alloc_arg $ ceilings_arg $ syntax_arg)
   in
   let lw =
     Cmd.v
@@ -2709,7 +2719,7 @@ let infer_t =
             & opt (some int) None
             & info [ "seed" ] ~docv:"N" ~doc:"PRNG seed (required, D4).")
         $ Arg.(value & opt positive_int 10000 & info [ "samples" ] ~docv:"K" ~doc:"Number of runs.")
-        $ infer_metadata_arg $ fuel_arg $ alloc_arg $ syntax_arg)
+        $ infer_metadata_arg $ fuel_arg $ alloc_arg $ ceilings_arg $ syntax_arg)
   in
   Cmd.group
     (Cmd.info "infer" ~doc:"Probabilistic inference: handlers over an unchanged model.")
@@ -3912,7 +3922,7 @@ let project_run_source project prelude entry_name allows seed =
               | Error ds -> print_diags ds
               | Ok tops ->
                   let store = Project_frontend.store session in
-                  run_program ~ceilings:(None, None) ~alloc:None ~fuel:None ~store
+                  run_program ~ceilings:(None, None, None) ~alloc:None ~fuel:None ~store
                     ~ctx:(Project_frontend.eval_ctx session)
                     ~allows ~seed ~infer_cache:None ~dry_run:false ~schedule_record:None
                     ~requested_mode:None ~walk:(fun ~on_expr ->
@@ -4021,7 +4031,7 @@ let project_run_bundle path prelude entry_name allows seed =
       | None -> bundle_entry_error path entry_name "run"
       | Some steps ->
           (* each step is a checked thunk; running it prints its value, as jacquard run does *)
-          run_program ~ceilings:(None, None) ~alloc:None ~fuel:None
+          run_program ~ceilings:(None, None, None) ~alloc:None ~fuel:None
             ~store:bundle.Project_bundle_reader.store ~ctx:bundle.ctx ~allows ~seed
             ~infer_cache:None ~dry_run:false ~schedule_record:None ~requested_mode:None
             ~walk:(fun ~on_expr ->
