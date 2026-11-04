@@ -197,6 +197,18 @@ let test_frontier_ceiling () =
     (("E0921", true), 0)
     (risk ~max_frontier:2 ());
   Alcotest.(check bool) "nothing is held after the invocation" false (Retain_meter.exhausted ());
+  (* a range as wide as the largest Int counts as that many entries, never wrapping negative *)
+  Alcotest.(check (pair (pair string bool) int))
+    "a range of max_int entries is refused"
+    (("E0921", true), 0)
+    (Eval.with_invocation ~max_frontier:3 ctx (fun _ ->
+         let result =
+           Infer_dist.enumerate_risk_exact ctx ~max_branches:4
+             (model_state harness
+                "(let nonrec (pvar first) (app (var sample) (app (var uniform-int) (lit 0) (lit \
+                 4611686018427387903))) (var low))")
+         in
+         ((codes result, names_frontier result), Retain_meter.frontier.count)));
   (* the first checked is reported: allocation before the frontier, the frontier before branches *)
   Alcotest.check outcome "allocation is reported first"
     (("E0921", false, false), 0)

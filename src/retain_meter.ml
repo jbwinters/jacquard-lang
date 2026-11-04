@@ -50,8 +50,9 @@ let last_nested : reached option ref = ref None
 
 (** [acquire ?count registry] retains [count] entries (default 1, non-negative) at once. It refuses,
     and records the ceiling as reached, when they would pass the registry's ceiling or a ceiling was
-    already reached; refused, none is retained. *)
+    already reached; refused, none is retained. [Invalid_argument] for a negative [count]. *)
 let acquire ?(count = 1) registry =
+  if count < 0 then invalid_arg "Retain_meter.acquire: count must be non-negative";
   if Option.is_some !reached then false
   else
     let counter = counter registry in

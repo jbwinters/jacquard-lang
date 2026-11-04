@@ -482,7 +482,9 @@ let enumerate_risk_exact (ctx : Eval.ctx) ~max_branches (model : Eval.state) :
               match distribution with
               | UniformInt (lo, hi) ->
                   let* probability = uniform_probability lo hi in
-                  let* () = pending (if hi - lo < 0 then max_int else hi - lo + 1) in
+                  let* () =
+                    pending (if hi - lo < 0 || hi - lo = max_int then max_int else hi - lo + 1)
+                  in
                   let rec visit_range value =
                     Eval.release_retained Frontier 1;
                     let* () = visit (Value.VInt value) probability in
