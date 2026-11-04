@@ -1049,3 +1049,8 @@ allocation. The overhead (§8), measured against the parent of slice 1 on the
 same suites and inference demos at both commits, is 0.1 % of median
 wall-clock, within the 10 % threshold. `test/cli/alloc.t` shows the refusals.
 The source inventory is unchanged.
+
+`test_invocation.ml`'s registry case now also covers cancellation followed by
+teardown (§8): a cancelled task stays retained until its scope is torn down,
+so three cancelled tasks still need four slots, and the count returns to what
+it was when a scope began, including a non-zero count.
