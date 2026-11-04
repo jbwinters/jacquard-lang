@@ -258,9 +258,21 @@ and never cached, and results are cached under each ceiling given:
   0 passed, 0 failed, 0 skipped, 0 refused, 2 incomplete
   cache: 0 hit, 0 ran
   [2]
-  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --cache-dir ceilings | tail -1
+A refusal stays in its own test: a later test that spawns nothing passes:
+
+  $ { cat spawning.jac; echo 'zz-quick-case = Case("quick", fn () -> check.true(True, "yes"))'; } > mixed.jac
+  $ timeout 60 jacquard test mixed.jac --max-tasks 3 --no-cache
+  INCOMPLETE again-case: registry ceiling reached (--max-tasks, 3 retained task(s))
+  INCOMPLETE spawn-case: registry ceiling reached (--max-tasks, 3 retained task(s))
+  PASS zz-quick-case/quick (1 check)
+  1 passed, 0 failed, 0 skipped, 0 refused, 2 incomplete
+  [2]
+
+The same ceiling hits the cache; another ceiling or none misses it:
+
+  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --cache-dir ceilings > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 2 hit, 0 ran
-  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --max-frontier 9 --cache-dir ceilings | tail -1
+  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --max-frontier 9 --cache-dir ceilings > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 2 ran
-  $ timeout 60 jacquard test spawning.jac --cache-dir ceilings | tail -1
+  $ timeout 60 jacquard test spawning.jac --cache-dir ceilings > pipe.out || echo "exit=$?"; tail -1 < pipe.out
   cache: 0 hit, 2 ran

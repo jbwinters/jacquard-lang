@@ -961,7 +961,7 @@ let fuel_budget : int option ref = ref None
 let alloc_budget : int option ref = ref None
 
 (** RT.2 §4: the per-test registry ceilings given, as [(flag, limit)] with the flag's name without
-    its dashes, in a fixed order. A bounded result is keyed by each, as by the budgets. *)
+    its leading dashes, in a fixed order. A bounded result is keyed by each, as by the budgets. *)
 let ceiling_budgets : (string * int) list ref = ref []
 
 (** Outcomes a test's groups completed before its fuel ran out, in order; the runner reports them
