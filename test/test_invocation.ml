@@ -1395,7 +1395,16 @@ let test_registry_ceilings () =
     "a huge capacity is refused" ("E0921", true)
     (Eval.with_invocation ~alloc:1_000 ctx (fun invocation ->
          let result = outcome (Round_robin.run_expr ctx huge) in
-         (result, Eval.alloc_used invocation >= 0)))
+         (result, Eval.alloc_used invocation >= 0)));
+  (* unbounded, the huge charge is skipped, so a later bounded invocation still has its room *)
+  let unbounded = Eval.with_invocation ctx (fun _ -> outcome (Round_robin.run_expr ctx huge)) in
+  Alcotest.(check (pair string (pair string bool)))
+    "an unbounded huge capacity leaves later bounds intact"
+    ("done(2)", ("E0921", true))
+    ( unbounded,
+      Eval.with_invocation ~alloc:1_000 ctx (fun invocation ->
+          let result = outcome (Round_robin.run_expr ctx huge) in
+          (result, Eval.alloc_used invocation <= 1_000)) )
 
 let heap_bytes f =
   let before = Gc.allocated_bytes () in

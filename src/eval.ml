@@ -939,10 +939,12 @@ let with_fuel_scope ctx ~fuel body =
     starts. *)
 let charge_cells_now ctx cells =
   (* compared without adding, so a charge the program sizes (a channel's capacity) cannot wrap
-     the count past the ceiling; unbounded, the count saturates *)
+     the count past the ceiling. Unbounded, a charge too large to add is skipped (owner decision
+     2026-11-03): no limit depends on the count then, and pinning it at [max_int] would leave a
+     later bounded invocation in the process no room for its own *)
   if cells <= !Alloc_meter.ceiling - !Alloc_meter.used then
     Alloc_meter.used := !Alloc_meter.used + cells
-  else if !Alloc_meter.ceiling = max_int then Alloc_meter.used := max_int
+  else if !Alloc_meter.ceiling = max_int then ()
   else (
     Alloc_meter.trip ();
     if not ctx.deferring then rt (alloc_error ctx))
