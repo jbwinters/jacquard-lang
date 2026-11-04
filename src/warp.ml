@@ -960,6 +960,10 @@ let fuel_budget : int option ref = ref None
 (** RT.2: the per-test allocation budget, keyed the same way. *)
 let alloc_budget : int option ref = ref None
 
+(** RT.2 §4: the per-test registry ceilings given, as [(flag, limit)] with the flag's name without
+    its dashes, in a fixed order. A bounded result is keyed by each, as by the budgets. *)
+let ceiling_budgets : (string * int) list ref = ref []
+
 (** Outcomes a test's groups completed before its fuel ran out, in order; the runner reports them
     alongside the incomplete test and resets this before each test. They are never cached. *)
 let partial_outcomes : outcome list ref = ref []
@@ -970,9 +974,14 @@ let bounded_key key =
     | None -> key
     | Some budget -> Printf.sprintf "%s|fuel=%s:%d" key Eval.fuel_model budget
   in
-  match !alloc_budget with
-  | None -> key
-  | Some budget -> Printf.sprintf "%s|alloc=%s:%d" key Eval.alloc_model budget
+  let key =
+    match !alloc_budget with
+    | None -> key
+    | Some budget -> Printf.sprintf "%s|alloc=%s:%d" key Eval.alloc_model budget
+  in
+  List.fold_left
+    (fun key (flag, limit) -> Printf.sprintf "%s|%s=%d" key flag limit)
+    key !ceiling_budgets
 
 let cache_lookup ~cache_dir key : (string * verdict * string option * Hash.t list) list option =
   let key = bounded_key key in

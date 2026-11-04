@@ -74,6 +74,14 @@ With `--alloc` it is bounded the same way (RT.2): running out aborts with E0921.
   $ jacquard host worker --store store --alloc 100000 < pure.in > alloc-ok.out
   $ cmp pure.out alloc-ok.out
 
+It takes the registry ceilings too (`--max-tasks`, `--max-channels`,
+`--max-frontier`), which bound the invocation as they bound `run`. A v0 target
+cannot spawn, open a channel or enumerate, so none can be reached yet; a
+bounded pure invocation is unchanged:
+
+  $ jacquard host worker --store store --max-tasks 0 --max-channels 0 --max-frontier 0 < pure.in > ceilings.out
+  $ cmp pure.out ceilings.out
+
 One configured once operation: Core emits the request, the host answers, and
 the outcome records the request order and the accepted observation.
 

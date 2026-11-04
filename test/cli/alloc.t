@@ -232,3 +232,35 @@ wrapping the count:
     Next step: Raise the --alloc budget, or omit it to run unbounded. An exhausted run is incomplete; it neither passes nor fails.
   alloc: 1500 of 1500 cell(s) used (alloc-v1)
   [2]
+
+`jacquard test` takes the ceilings per test, through the same scope as its
+budgets: each test counts from zero, one that reaches a ceiling is INCOMPLETE
+and never cached, and results are cached under each ceiling given:
+
+  $ cat > spawning.jac <<'JAC'
+  > count(n) = if eq(n, 0) then 0 else {
+  >   let t = async.spawn(fn () -> n)
+  >   let v = match async.await(t) { | Done(v) -> v | _ -> 100 }
+  >   add(v, count(sub(n, 1)))
+  > }
+  > summed() = match async.scope(fn () -> count(3)) { | Done(v) -> v | _ -> 100 }
+  > again-case = Case("again", fn () -> check.eq(summed(), 6, int.eq, int.show, "sum"))
+  > spawn-case = Case("spawns", fn () -> check.eq(summed(), 6, int.eq, int.show, "sum"))
+  > JAC
+  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --cache-dir ceilings
+  PASS again-case/again (1 check)
+  PASS spawn-case/spawns (1 check)
+  2 passed, 0 failed, 0 skipped, 0 refused, 0 incomplete
+  cache: 0 hit, 2 ran
+  $ timeout 60 jacquard test spawning.jac --max-tasks 3 --cache-dir ceilings
+  INCOMPLETE again-case: registry ceiling reached (--max-tasks, 3 retained task(s))
+  INCOMPLETE spawn-case: registry ceiling reached (--max-tasks, 3 retained task(s))
+  0 passed, 0 failed, 0 skipped, 0 refused, 2 incomplete
+  cache: 0 hit, 0 ran
+  [2]
+  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --cache-dir ceilings | tail -1
+  cache: 2 hit, 0 ran
+  $ timeout 60 jacquard test spawning.jac --max-tasks 4 --max-frontier 9 --cache-dir ceilings | tail -1
+  cache: 0 hit, 2 ran
+  $ timeout 60 jacquard test spawning.jac --cache-dir ceilings | tail -1
+  cache: 0 hit, 2 ran

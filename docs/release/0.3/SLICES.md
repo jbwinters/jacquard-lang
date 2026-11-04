@@ -1028,3 +1028,14 @@ and `infer lw` gain all three ceilings. `test_infer.ml` adds a case (the peak
 in both enumerators, check order, a scope's own ceiling) and
 `test/cli/alloc.t` the command line. The source inventory is now
 `1229 / 82 / 57`.
+
+Slice 3c adds the ceilings to `jacquard test` and `jacquard host worker`
+(§6). `test --max-tasks`, `--max-channels` and `--max-frontier` bound each
+discovered test through the same `Eval.with_scope` as its budgets: each test
+counts from zero, one that reaches a ceiling is reported `INCOMPLETE` (naming
+the ceiling) and never cached, and Warp keys bounded results on each ceiling
+given (`max-tasks=N`, `max-channels=N`, `max-frontier=N`), as it keys on the
+budgets (§5). `host worker` passes them to the invocation; a v0 target cannot
+spawn, open a channel or enumerate, so none can be reached there yet.
+`test/cli/alloc.t` shows the per-test ceiling and the cache keys and
+`test/cli/host-worker.t` the worker flags. The source inventory is unchanged.

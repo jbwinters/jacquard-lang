@@ -147,7 +147,8 @@ When adding valid corpus files, regenerate the golden hashes with
   `test/test_invocation.ml`.
 - Allocation limits (RT.2): `src/alloc_meter.ml`, `Eval.with_invocation ~alloc`, registry
   ceilings `src/retain_meter.ml` (`--max-tasks`, `--max-channels`, `--max-frontier`), the alloc-v1
-  charging points in `src/eval.ml` (`charge_alloc`), `jacquard run --alloc`, E0921;
+  charging points in `src/eval.ml` (`charge_alloc`), `jacquard run --alloc`, E0921, Warp's bounded
+  cache key (`Warp.bounded_key`);
   `docs/designs/allocation-limits.md`, `test/test_invocation.ml`, `test/cli/alloc.t`.
 - Result propagation (SX.29, D77): `try` block items in `src/surface_parse.ml`,
   `src/surface_lower.ml` (`lower_block`), and `src/surface_print.ml`

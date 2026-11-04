@@ -59,8 +59,13 @@
   entries as it materializes them and releases each as its branch starts, so
   the count is the entries not yet explored at every level; a search leaves
   none counted however it ends. `jacquard run` gains `--max-frontier`, and
-  `jacquard infer` gains all three ceilings. The `test` and `host worker`
-  flags, cache keys, the native refusal and the overhead measurement follow.
+  `jacquard infer` gains all three ceilings. Slice 3c gives `jacquard test`
+  the ceilings per test, through the scope that holds its budgets: a test that
+  reaches one is `INCOMPLETE` and never cached, and Warp keys bounded results on
+  each ceiling given (`max-tasks=N` and the others). `jacquard host worker`
+  takes them for its invocation; a v0 target cannot spawn, open a channel or
+  enumerate, so none can be reached there yet. The native refusal and the
+  overhead measurement follow.
 - Owner decision (2026-10-29), from slice 1's review: every charge is enforced
   when made, including inside a memoized term's first evaluation. A warm hit
   replays that term's recorded cells per segment, after the segment's fuel. When
