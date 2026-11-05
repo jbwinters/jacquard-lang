@@ -2,7 +2,7 @@ Local projects without dependencies (PKG.1, docs/designs/project-structure.md
 §4-§7, §10). The library units compose as one program and are checked once;
 each entry composes separately over the frozen library.
 
-  $ export JACQUARD_PRELUDE=$PWD/../../prelude
+  $ top=$PWD && export JACQUARD_PRELUDE=$PWD/../../prelude
   $ mkdir -p shop/src && cd shop && mkdir .git && root=$PWD
   $ cat > project.jqd <<'M'
   > (project-v1
@@ -78,22 +78,22 @@ directory, and nothing is written outside the chosen roots:
 
 Entries are named, and a run entry is not a test entry:
 
-  $ jacquard project run nope > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  $ jacquard project run nope > "$top/pipe.out" 2>&1 || echo "exit=$?"; head -2 < "$top/pipe.out"
   exit=1
   error[E1718]: The project declares no entry of that name and kind.
     Cause: $TESTCASE_ROOT/shop/project.jqd has no entry `nope`; it declares `demo`, `greet`, `suite`
-  $ jacquard project test demo > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  $ jacquard project test demo > "$top/pipe.out" 2>&1 || echo "exit=$?"; head -2 < "$top/pipe.out"
   exit=1
   error[E1718]: The project declares no entry of that name and kind.
     Cause: `demo` is a run entry, not a test entry; use jacquard project run demo
 
 Declared grants are compared with checked authority; a manifest never grants:
 
-  $ jacquard project run greet > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E0814\]' < pipe.out
+  $ jacquard project run greet > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E0814\]' < "$top/pipe.out"
   exit=3
   error[E0814]
   $ sed -i 's/(grants console)/(grants console net)/; s/(run demo (units "demo.jac"))/(run demo (units "demo.jac") (grants fs))/' project.jqd
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'W1700' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'W1700' < "$top/pipe.out"
   warning[W1700]: An entry's declared grants differ from its checked authority.
     Cause: entry `demo` declares `fs` but its checked code never requires it
   --
@@ -101,12 +101,12 @@ Declared grants are compared with checked authority; a manifest never grants:
     Cause: entry `greet` declares `net` but its checked code never requires it
   $ jacquard project check --strict-grants > /dev/null 2>&1; echo "exit $?"
   exit 1
-  $ jacquard project check --strict-grants > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'error\[E1730' < pipe.out | head -2
+  $ jacquard project check --strict-grants > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'error\[E1730' < "$top/pipe.out" | head -2
   exit=1
   error[E1730]: An entry's declared grants differ from its checked authority.
     Cause: entry `demo` declares `fs` but its checked code never requires it
   $ sed -i 's/ (grants fs)//; s/(grants console net)//' project.jqd
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'W1700' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'W1700' < "$top/pipe.out"
   warning[W1700]: An entry's declared grants differ from its checked authority.
     Cause: entry `greet` requires `console` but its (grants ...) does not declare it
   $ sed -i 's/(units "greet.jac")/(units "greet.jac") (grants console)/' project.jqd
@@ -117,22 +117,22 @@ types and exempt:
 
   $ cp src/price.jac price.bak
   $ echo 'shop.total([])' >> src/price.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1715' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1715' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/src/price.jac:3:1-15: error[E1715]: A declarations-only unit contains a top-level expression.
     Cause: a library unit holds declarations only; found a top-level expression
   $ cp price.bak src/price.jac && echo 'shop.even(n) = True' >> src/price.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1716' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1716' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/src/price.jac:3:1-20: error[E1716]: A name is defined in two units.
     Cause: `shop.even` is defined in $TESTCASE_ROOT/shop/src/types.jac and again in $TESTCASE_ROOT/shop/src/price.jac
   $ cp price.bak src/price.jac && echo 'type ShopItem = | Other' >> src/price.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1716' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1716' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/src/price.jac:3:1-24: error[E1716]: A name is defined in two units.
     Cause: type `shop-item` is defined in $TESTCASE_ROOT/shop/src/types.jac and again in $TESTCASE_ROOT/shop/src/price.jac
   $ cp price.bak src/price.jac && printf 'helper(x) = x\ntype Basket = | Basket(size: Int)\n' >> src/price.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1706' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1706' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/src/price.jac:3:1-14: error[E1706]: A library name does not carry the project's namespace.
     Cause: term `helper` ($TESTCASE_ROOT/shop/src/price.jac) does not begin with `shop.`, as namespace `shop` requires
@@ -146,7 +146,7 @@ types and exempt:
   $TESTCASE_ROOT/shop/src/price.jac:4:24-33: error[E1706]: A library name does not carry the project's namespace.
     Cause: term `basket.with-size` ($TESTCASE_ROOT/shop/src/price.jac) does not begin with `shop.`, as namespace `shop` requires
   $ cp price.bak src/price.jac && echo 'type ShopMaybe = | Some(value: Int) | Nothing' >> src/price.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1731' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1731' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/src/price.jac:3:20-36: error[E1731]: Two visible constructors share a name.
     Cause: constructor `some` of type `shop-maybe` is also a constructor of type `option` of the prelude
@@ -155,7 +155,7 @@ The library is checked before, and without, any entry:
 
   $ cp price.bak src/price.jac && echo 'shop.greeting() = shop.banner()' >> src/price.jac
   $ echo 'shop.banner() = "hi"' >> demo.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1732' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1732' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/src/price.jac:3:19-30: error[E1732]: The library refers to a name that only an entry defines.
     Cause: the library refers to `shop.banner`, which only entry `demo` defines; entries are composed after the library and cannot be referenced by it
@@ -166,7 +166,7 @@ Unit paths stay inside the project, name regular files, and are listed once:
   $ mkdir ../outside && echo 'shop.far = 1' > ../outside/far.jac && ln -s ../outside/far.jac far.jac
   $ sed -i 's|"src/price.jac")|"src/price.jac" "far.jac" "../outside/far.jac" "missing.jac" "src/Types.jac" "./src/types.jac")|' project.jqd
   $ mkdir missing.jac && cp src/types.jac src/Types.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 '^error' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 '^error' < "$top/pipe.out"
   exit=1
   error[E1722]: A unit path leaves the project directory.
     Cause: unit "far.jac" resolves to $TESTCASE_ROOT/outside/far.jac, outside the project directory $TESTCASE_ROOT/shop
@@ -187,7 +187,7 @@ A unit's bytes are bounded before parsing:
 
   $ cp project.jqd broken.jqd && sed -i 's|"src/price.jac" .*"./src/types.jac")|"src/price.jac" "big.jac")|' project.jqd
   $ head -c 4194305 /dev/zero | tr '\0' ' ' > big.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 '^error' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 '^error' < "$top/pipe.out"
   exit=1
   error[E1703]: A project input exceeds a size budget.
     Cause: unit "big.jac" exceeds the unit limit of 4194304 bytes
@@ -197,17 +197,17 @@ obey the same collision rule:
 
   $ cp broken.jqd project.jqd && sed -i 's|"src/price.jac" .*"./src/types.jac")|"src/price.jac")|' project.jqd
   $ cp demo.jac demo.bak && echo 'shop.total(items) = 0' >> demo.jac
-  $ jacquard project run demo > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1716' < pipe.out
+  $ jacquard project run demo > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1716' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/demo.jac:3:1-22: error[E1716]: A name is defined in two units.
     Cause: term `shop.total` is defined in $TESTCASE_ROOT/shop/src/price.jac and again in entry unit $TESTCASE_ROOT/shop/demo.jac
   $ cp demo.bak demo.jac && echo 'type Wrapper = | Some(value: Int)' >> demo.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1731' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1731' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/demo.jac:3:18-34: error[E1731]: Two visible constructors share a name.
     Cause: constructor `some` of type `wrapper` is also a constructor of type `option` of the prelude
   $ cp demo.bak demo.jac && echo 'type Wrapper = | ShopItem(value: Int)' >> demo.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'E1731' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1731' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/demo.jac:3:18-38: error[E1731]: Two visible constructors share a name.
     Cause: constructor `shop-item` of type `wrapper` is also a constructor of type `shop-item` of the library

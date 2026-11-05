@@ -387,6 +387,27 @@ to protection only after their independent contexts have reported. Keeping
 that interval to one merge cycle prevents a missing context from deadlocking
 the migration while making the final evidence policy explicit.
 
+## Cram Exit-Status Mutation Check
+
+A cram transcript records only a command line's final status, so the
+`cram-status` law (`test/test_cram_status.ml`, part of `dune runtest`) rejects
+any pipeline whose non-final stage runs a tool or script; such commands write
+the output to a file, pin the status (`|| echo "exit=$?"` or `status=$?`) and
+then excerpt the file. `scripts/dev/cram-status-mutation.py` proves the pins
+work: it runs each cram's commands in a scratch copy of the cram's directory
+twice, with the real `jacquard`/`jac` and with wrappers that add 50 to every
+exit status, and fails on any pinned block (one that writes `pipe.out` or
+saves `status=$?`) whose output is the same in both runs. It runs the crams,
+so it is a manual check, not a CI job. Use it after rewriting cram commands:
+
+```sh
+opam exec -- dune build bin/main.exe bin/jac
+scripts/dev/cram-status-mutation.py --base main   # pinned blocks changed since main
+scripts/dev/cram-status-mutation.py               # every pinned block
+```
+
+Its scratch tree defaults to `.scratch/tmp/cram-status-mutation`.
+
 ## Local Equivalents
 
 Before opening an ordinary PR:
