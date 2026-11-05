@@ -798,7 +798,7 @@ let run_cases options (p : prepared) ~domains ~total ~case_at ~runnable =
   let stopped = ref false in
   List.iter
     (fun i ->
-      if not !stopped then
+      if not !stopped then (
         let args = case_args domains (case_at i) in
         let recorder = Observation_transcript.create options.policy in
         ignore
@@ -812,7 +812,7 @@ let run_cases options (p : prepared) ~domains ~total ~case_at ~runnable =
               stopped := true;
               Incomplete_run
         in
-        runs.(i) <- { state; transcript = Some transcript })
+        runs.(i) <- { state; transcript = Some transcript }))
     runnable;
   runs
 
@@ -852,10 +852,10 @@ let pair_verdict old_run new_run =
   | (Incomplete_run | Not_started), _ | _, (Incomplete_run | Not_started) -> Unrun
   | Failed_run _, Failed_run _ -> Both_failed
   | Failed_run _, _ | _, Failed_run _ -> Differ Failure_kind
-  | Complete_run, Complete_run -> (
+  | Complete_run, Complete_run ->
       comparison_verdict
         (Observation_transcript.compare (Option.get old_run.transcript)
-           (Option.get new_run.transcript)))
+           (Option.get new_run.transcript))
 
 (* --- grouping (exact conjunctions) --- *)
 
@@ -1053,8 +1053,7 @@ let serialize review =
           List.iter (fun m -> line "member case=%d" m) g.members);
       line "witness case=%d" first;
       List.iteri
-        (fun k i ->
-          framed buf (Printf.sprintf "arg index=%d" k) review.domains.(k).(i).data)
+        (fun k i -> framed buf (Printf.sprintf "arg index=%d" k) review.domains.(k).(i).data)
         (review.cases first);
       let transcript runs =
         match runs.(first).transcript with
@@ -1320,11 +1319,11 @@ let display data =
       if c = '"' then (
         Buffer.add_char buf c;
         go (text (i + 1)))
-      else if c = '(' && i + String.length quote <= n && String.sub data i (String.length quote) = quote
+      else if
+        c = '(' && i + String.length quote <= n && String.sub data i (String.length quote) = quote
       then go (code i 0)
       else if
-        c = '#'
-        && i > 0
+        c = '#' && i > 0
         && name_char data.[i - 1]
         && i + 65 <= n
         && String.for_all is_hex (String.sub data (i + 1) 64)
@@ -1406,9 +1405,7 @@ let render review =
       let first = List.hd g.members in
       line "  witness %s: %s" (case_word first)
         (String.concat ", "
-           (List.mapi
-              (fun k i -> display review.domains.(k).(i).data)
-              (review.cases first)));
+           (List.mapi (fun k i -> display review.domains.(k).(i).data) (review.cases first)));
       line "    old: %s" (describe_run review.old_runs.(first));
       line "    new: %s" (describe_run review.new_runs.(first)))
     review.groups;

@@ -76,13 +76,13 @@ exception Bug_review_comparison of string
 val comparison_verdict : (Observation_transcript.verdict, Diag.t list) result -> verdict
 (** [comparison_verdict result] is the pair verdict of two complete runs: [Equal] agrees, a
     divergence at the run's status or value is a [Decision] difference and one at an event an
-    [Effect] difference, [Inconclusive] is inconclusive; an [Error] raises
-    {!Bug_review_comparison} rather than counting as inconclusive. *)
+    [Effect] difference, [Inconclusive] is inconclusive; an [Error] raises {!Bug_review_comparison}
+    rather than counting as inconclusive. *)
 
 val display : string -> string
 (** [display data] is the readable-report spelling of a data-v1 rendering: every constructor's
-    identity qualifier ([#] and 64 hex digits directly after its name) is dropped; Hash values,
-    text literals and quoted code keep every byte. *)
+    identity qualifier ([#] and 64 hex digits directly after its name) is dropped; Hash values, text
+    literals and quoted code keep every byte. *)
 
 (** {1 Reviews} *)
 

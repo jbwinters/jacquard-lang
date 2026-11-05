@@ -97,8 +97,7 @@ let test_display_strips_only_qualifiers () =
     ("some(" ^ code ^ ")")
     (R.display ("some#" ^ hex '4' ^ "(" ^ code ^ ")"));
   Alcotest.(check string)
-    "nested constructors"
-    "cons(low, nil)"
+    "nested constructors" "cons(low, nil)"
     (R.display ("cons#" ^ hex '5' ^ "(low#" ^ hex '6' ^ ", nil#" ^ hex '7' ^ ")"))
 
 let test_comparison_error_is_internal () =

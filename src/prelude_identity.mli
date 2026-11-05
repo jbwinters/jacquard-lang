@@ -15,5 +15,5 @@ val lookup_kind : Store.t -> string -> Resolve.nkind -> Resolve.entry option
 
 val pinned : Store.t -> string -> Resolve.nkind -> Hash.t option
 (** [pinned store name kind] is the pinned prelude identity of [name] and [kind] when [store] holds
-    it, and [None] otherwise: unlike {!lookup_kind} it never falls back to the name, so a caller that
-    needs the standard prelude declaration can refuse a store that lacks it. *)
+    it, and [None] otherwise: unlike {!lookup_kind} it never falls back to the name, so a caller
+    that needs the standard prelude declaration can refuse a store that lacks it. *)
