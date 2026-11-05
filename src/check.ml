@@ -2004,28 +2004,34 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
          rows with exactly the handled labels; after solving, subtraction joins only the body's
          unhandled remainder into the surrounding ambient. *)
       let handled_payloads = fresh_payloads ctx handled in
-      (* Rows identify effects, not individual operations. Subtracting a partial payload handler
-         would hide the relationship between omitted operations and their outer region. *)
+      (* Rows identify effects, not individual operations, so a handler discharges an effect only
+         when it has a clause for every declared operation. A partial handler forwards its omitted
+         operations outward at run time; its effect therefore stays in the continuation row. *)
+      let complete effect_hash =
+        let covered =
+          List.filter_map
+            (fun (owner, operation) ->
+              if Hash.equal owner effect_hash then Some operation else None)
+            handled_operations
+          |> List.sort_uniq Hash.compare
+        in
+        match locate ctx effect_hash with
+        | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops = declared; _ }; _ }; _ } ->
+            List.length covered = List.length declared
+        | _ -> false
+      in
+      let discharged = List.filter complete (List.sort_uniq Hash.compare handled) in
+      (* Subtracting a partial payload handler would also hide the relationship between omitted
+         operations and their outer region's payload, so payload effects must be complete. *)
       List.iter
         (fun (effect_hash, _) ->
-          let covered =
-            List.filter_map
-              (fun (owner, operation) ->
-                if Hash.equal owner effect_hash then Some operation else None)
-              handled_operations
-            |> List.sort_uniq Hash.compare
-          in
-          match locate ctx effect_hash with
-          | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops = declared; _ }; _ }; _ }
-            when List.length covered = List.length declared ->
-              ()
-          | _ ->
-              err ~meta ~code:"E0801"
-                ~next_step:
-                  "Add a clause for every operation of this effect, or use its complete handler."
-                "partial handler for %s cannot retain the payload type of operations forwarded to \
-                 an outer handler"
-                (name_of ctx effect_hash))
+          if not (List.exists (Hash.equal effect_hash) discharged) then
+            err ~meta ~code:"E0801"
+              ~next_step:
+                "Add a clause for every operation of this effect, or use its complete handler."
+              "partial handler for %s cannot retain the payload type of operations forwarded to an \
+               outer handler"
+              (name_of ctx effect_hash))
         handled_payloads;
       let body_ambient = ref (open_row ~payloads:handled_payloads ctx.level handled) in
       let body_required =
@@ -2040,8 +2046,12 @@ and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(r
       let continuation_row =
         {
           effects =
-            List.filter (fun eff -> not (List.exists (Hash.equal eff) handled)) solved_body.effects;
-          payloads = List.filter (fun (hash, _) -> not (List.mem hash handled)) solved_body.payloads;
+            List.filter
+              (fun eff -> not (List.exists (Hash.equal eff) discharged))
+              solved_body.effects;
+          (* every payload effect handled here is complete (checked above), hence discharged *)
+          payloads =
+            List.filter (fun (hash, _) -> not (List.mem hash discharged)) solved_body.payloads;
           (* a language handler never handles an instance entry (A1.2): it continues outward *)
           instances = solved_body.instances;
           tail = solved_body.tail;

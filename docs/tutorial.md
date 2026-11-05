@@ -92,7 +92,9 @@ safe-div(n, d) = if eq(d, 0) then abort() else div(n, d)
 `dune exec jacquard -- check FILE --print-sigs` shows
 `safe-div : (Int, Int) ->{Abort} Int` — the signature
 announces the possible abort — and `to-option : forall a | e. (() ->{Abort | e} a) ->{| e} Option a`
-shows row polymorphism removing it.
+shows row polymorphism removing it. A handler removes an effect only when it has
+a clause for every one of the effect's operations; a handler for some of them
+forwards the rest outward, so the effect stays in its row.
 
 ## 7. Multi-shot handlers
 

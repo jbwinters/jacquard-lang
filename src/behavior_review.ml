@@ -409,9 +409,8 @@ let prepare_version options side =
                   (side_name side))
             :: diagnostics)
     in
-    (* every operation of every effect left in the case's own row must be modeled: handling some of
-     an effect's operations can remove the whole effect from a handler's row, so the typing row
-     alone does not prove coverage *)
+    (* every operation of every effect left in the case's own row must be modeled: rows name
+     effects, not operations, so the typing row alone does not prove coverage *)
     let* case_h = term_hash side final (driver_prefix ^ "case") in
     let* () =
       let row_effects =
