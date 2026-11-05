@@ -1784,6 +1784,46 @@ let test_alloc_natives () =
            (fun () ->
              ignore (Diff.form_divergences ~path:"log" (op []) (op [ Form.Sym "once" ]));
              false)));
+  (* an authority-row divergence charges its path and the two rendered rows, nothing more: the
+     readable report's per-effect detail is not counted *)
+  let row hashes =
+    Form.form "tarrow"
+      [
+        Form.F (Form.form "group" []);
+        Form.F
+          (Form.form "row" (List.map (fun h -> Form.F (Form.form "eref" [ Form.Hash h ])) hashes));
+        Form.F (Form.form "tref" [ Form.Hash (Hash.of_string "authority charge result") ]);
+      ]
+  in
+  let fs = Hash.of_string "authority charge fs" and net = Hash.of_string "authority charge net" in
+  let smallest_budget f =
+    let fits budget =
+      Eval.with_invocation ~alloc:budget ctx (fun _ ->
+          Eval.with_rendered ctx
+            ~exceeded:(fun _ -> false)
+            (fun () ->
+              f ();
+              true))
+    in
+    let rec search budget = if fits budget then budget else search (budget + 1) in
+    search 1
+  in
+  let name_of _ = "custom" in
+  Alcotest.(check int)
+    "authority divergences charge only path and rows"
+    (smallest_budget (fun () ->
+         ignore (Alloc_meter.rendered_piece "policy/p[0]/tarrow[1]");
+         List.iter
+           (fun effects ->
+             ignore
+               (Alloc_meter.rendered_piece
+                  (Diff.render_authority_row ~effect_name_of:name_of (effects, None))))
+           [ [ fs ]; [ fs; net ] ]))
+    (smallest_budget (fun () ->
+         ignore
+           (Diff.form_divergences ~effect_name_of:name_of ~path:"policy"
+              (Form.form "p" [ Form.F (row [ fs ]) ])
+              (Form.form "p" [ Form.F (row [ fs; net ]) ]))));
   (* a nested rendering counts what the enclosing one has pending *)
   Alcotest.(check bool)
     "nested renderings share the allowance" true

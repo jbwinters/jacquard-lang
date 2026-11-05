@@ -993,8 +993,9 @@ expression (E0301); keep terms that use each other in one run. Use stores and
 `jac diff` when you need rename classification, changed canonical subtrees, or
 affected dependents. `jac diff` accepts two stores or two declaration-only
 source files; a source file with a bare top-level expression is refused (E0610),
-so diff a program without its entry call. Its output names callees by content
-hash. Hash or diff equality establishes canonical structural identity, not
+so diff a program without its entry call. Its output names the changed region
+(authority, signature, body, clause N) and callees by name; `--paths` prints
+kernel paths and content hashes for tools. Hash or diff equality establishes canonical structural identity, not
 general behavioral equivalence.
 
 Record/replay logs contain operation, argument, and result triples. Strict

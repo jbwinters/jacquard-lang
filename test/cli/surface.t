@@ -428,7 +428,10 @@ are quiet; semantic edits localize in surface notation. Explicit syntax handles 
   > EOF
   $ jac diff old.jac same.jac
   no semantic changes
-  $ jac diff old.jac changed.jac > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
+  $ jac diff old.jac changed.jac
+  changed  answer
+    body       1  ->  2
+  $ jac diff old.jac changed.jac --paths > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
     at answer/defterm[0]/group[0]/binding[2]/lit[0]:
       - 1
       + 2
@@ -489,7 +492,8 @@ Malformed source and file/store operand mistakes produce diagnostics with exit 1
     Next step: Pass the path to an existing Jacquard store.
   exit:1
 
-Store diff keeps its established bootstrap default and offers explicit surface rendering.
+With `--paths`, store diff keeps its established bootstrap notation and offers explicit surface
+rendering.
 
   $ printf '(defterm ((binding answer () (lit 1))))\n' > old.jqd
   $ printf '(defterm ((binding answer () (lit 2))))\n' > new.jqd
@@ -497,14 +501,14 @@ Store diff keeps its established bootstrap default and offers explicit surface r
   ok
   $ jac store add new-store new.jqd
   ok
-  $ jac diff old-store new-store --syntax surface > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
+  $ jac diff old-store new-store --paths --syntax surface > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
     at answer/defterm[0]/group[0]/binding[2]/lit[0]:
       - 1
       + 2
 
 Bootstrap formatting and execution remain byte-for-byte on the old route.
 
-  $ jac diff old.jqd new.jqd > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
+  $ jac diff old.jqd new.jqd --paths > pipe.out || echo "exit=$?"; grep -A2 'at answer' < pipe.out
     at answer/defterm[0]/group[0]/binding[2]/lit[0]:
       - 1
       + 2
