@@ -74,8 +74,46 @@ let test_sampling_is_seeded () =
     "draws stay inside the support" true
     (List.for_all (List.for_all (fun i -> i = 0 || i = 1)) (draw 7))
 
+let hex c = String.make 64 c
+
+let test_display_strips_only_qualifiers () =
+  let a = Hash.of_string "a" in
+  let rendered =
+    Observation_transcript.render_data
+      (Observation.Constructor
+         {
+           identity = a;
+           name = "pair";
+           arguments = [ Observation.Hash a; Observation.Text ("x#" ^ hex '1') ];
+         })
+  in
+  Alcotest.(check string)
+    "constructor qualifier dropped, Hash value and text kept"
+    ("pair(#" ^ Hash.to_hex a ^ ", \"x#" ^ hex '1' ^ "\")")
+    (R.display rendered);
+  let code = "(quote (low#" ^ hex '2' ^ " \"t#" ^ hex '3' ^ "\"))" in
+  Alcotest.(check string)
+    "quoted code kept whole"
+    ("some(" ^ code ^ ")")
+    (R.display ("some#" ^ hex '4' ^ "(" ^ code ^ ")"));
+  Alcotest.(check string)
+    "nested constructors"
+    "cons(low, nil)"
+    (R.display ("cons#" ^ hex '5' ^ "(low#" ^ hex '6' ^ ", nil#" ^ hex '7' ^ ")"))
+
+let test_comparison_error_is_internal () =
+  Alcotest.(check bool)
+    "equal agrees" true
+    (R.comparison_verdict (Ok Observation_transcript.Equal) = R.Agree);
+  match R.comparison_verdict (Error [ R.diagnostic ~code:"E1010" "unreachable" ]) with
+  | _ -> Alcotest.fail "a comparison error must not become a verdict"
+  | exception R.Bug_review_comparison _ -> ()
+
 let suite =
   [
+    Alcotest.test_case "readable view: only constructor qualifiers" `Quick
+      test_display_strips_only_qualifiers;
+    Alcotest.test_case "comparison errors are internal" `Quick test_comparison_error_is_internal;
     Alcotest.test_case "cases: first parameter outermost" `Quick
       test_decode_first_parameter_outermost;
     Alcotest.test_case "grouping: exact conjunctions" `Quick test_grouping_exact_conjunctions;

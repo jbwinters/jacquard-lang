@@ -191,7 +191,7 @@ effect difference; an unmodeled operation is a missing world.
   2
   $ jacquard review run --old notify-old.jac --new notify-new.jac --cases notify-cases.jac --entry route --domain sizes; echo "exit=$?"
   error[E1012]: A behavior review's domain, field or world is invalid
-    Cause: missing world configuration: the old case performs effect `notify`, and not every one of its operations is --handle'd
+    Cause: missing world configuration: the old case performs effect `Notify`, and not every one of its operations is --handle'd
     Next step: Declare each domain as a finite List or Distribution of the parameter's type, keep fields and handlers pure, and --handle every operation the entry performs.
   exit=3
 
@@ -361,7 +361,34 @@ request records only the new version's own entry.
   exit=3
   $ head -2 two.out
   error[E1012]: A behavior review's domain, field or world is invalid
-    Cause: missing world configuration: the old case performs effect `two`, and not every one of its operations is --handle'd
+    Cause: missing world configuration: the old case performs effect `Two`, and not every one of its operations is --handle'd
+
+A wrap that handles only some of an effect's operations forwards the rest to
+the root, so the effect stays in the case's row and is refused statically
+until every one of its operations is modeled.
+
+  $ printf 'once effect Two where {\n  first : (Int) -> Int\n  second : (Int) -> Int\n}\n\nboth : (Int) ->{Two} Int\nboth(n) = add(first(n), second(n))\n' > wrap-two.jac
+  $ printf 'ints = [1]\nmodel(n) = n\nonly-first(thunk) = handle thunk() {\n| return v -> v\n| first(n) resume k -> k(n)\n}\n' > wrap-two-cases.jac
+  $ jacquard review run --old wrap-two.jac --new wrap-two.jac --cases wrap-two-cases.jac --entry both --domain ints --wrap only-first > wrap-two.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 wrap-two.out
+  error[E1012]: A behavior review's domain, field or world is invalid
+    Cause: missing world configuration: the old case performs effect `Two`, and not every one of its operations is --handle'd
+  $ jacquard review run --old wrap-two.jac --new wrap-two.jac --cases wrap-two-cases.jac --entry both --domain ints --wrap only-first --handle second=model > wrap-two.out 2>&1; echo "exit=$?"
+  exit=3
+  $ jacquard review run --old wrap-two.jac --new wrap-two.jac --cases wrap-two-cases.jac --entry both --domain ints --wrap only-first --handle first=model --handle second=model > wrap-two.out 2>&1; echo "exit=$?"
+  exit=0
+
+The driver uses the standard prelude's pinned identities; a modified prelude
+that does not hold them is refused rather than matched by name.
+
+  $ cp -r "$JACQUARD_PRELUDE" alt-prelude
+  $ sed -i 's/(field fst (tvar a)) (field snd (tvar b))/(field left (tvar a)) (field right (tvar b))/' alt-prelude/06-dist.jqd
+  $ jacquard review run --prelude alt-prelude --old marker-old.jac --new marker-old.jac --cases ints-cases.jac --entry marker --domain ints > alt.out 2>&1; echo "exit=$?"
+  exit=3
+  $ head -2 alt.out
+  error[E1010]: A behavior review's program or cases file is invalid
+    Cause: the prelude does not hold the standard `distribution` type; a review needs the standard prelude
   $ printf 'f : (Int) ->{} Int\nf(n) = n\n' > ent-old.jac
   $ printf 'compat : (Int) ->{} Int\ncompat(n) = add(n, 1)\n' > ent-new.jac
   $ printf 'type Separator = | Separator\nf : (Int) ->{} Int\nf(n) = n\nints = [1]\n' > ent-cases.jac

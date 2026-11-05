@@ -51,11 +51,19 @@ or capture it. Nothing is installed in a user store.
 **Entry.** `--entry NAME` names a term each version itself defines (the cases
 file cannot supply it; only a new-version adapter may stand in, E1010), with n ≥ 1
 parameters (D5 uncurried). `--domain NAME` is given exactly n times, in
-parameter order: each names a cases-file term of type `List a_k` or
+parameter order: each names a term of type `List a_k` or
 `Distribution a_k` (a prelude distribution value: `Bernoulli`, `Categorical`,
 `UniformInt`), where `a_k` is the entry's k-th parameter type. DES.1's "world
 values" (§6's availabilities) are simply further parameters with their own
 domains; DES.1's input/world distinction is kept as declaration order only.
+
+**Where named terms live.** Domains, fields, models (`--handle`) and wraps are
+usually declared in the cases file, but each version resolves the name itself,
+so a term the version declares is used as well; the request records each
+version's identity. Domains must still be equal (E1013) and fields are
+evaluated in the old version only. The cases file is checked with **both**
+versions, so a new-version adapter declared there must also check together
+with the old version.
 
 **Domain values.** Each version evaluates its own domain terms in a
 **preparation invocation**, separate from the run invocation, with its own fuel
@@ -79,8 +87,9 @@ values.
 outermost, each domain in its order (DES.1 §6: priority outer, availability
 inner, so `Low × (Up, Down, Down)` is case 11). Cases are numbered from 0.
 `--max-cases N` (default 10,000) is the run budget: cases from N on are
-`unrun`. The product is enumerated in full before running, so a product above
-1,000,000 cases is refused (E1012).
+`unrun`. The product is never materialized (a case's values are decoded from
+its number), but every case keeps a verdict, so a product above 1,000,000
+cases is refused (E1012).
 
 **Sampling.** `--sample N --seed S` (both or neither; 1 ≤ N ≤ `--max-cases`;
 every domain a `Distribution`; otherwise E1015) draws N cases instead of
@@ -112,7 +121,11 @@ records root operations only). **Missing world configuration** is refused
 (E1012) statically: the effect row of the case (the entry, or adapter, through
 any wrap) may contain only effects every one of whose operations is
 `--handle`d. Coverage is checked operation by operation, because a row names
-effects, not individual operations.
+effects, not individual operations. A wrap removes an effect from the row only
+when it handles every one of the effect's operations (a partial handler keeps
+its effect, `docs/tutorial.md`); a wrap that handles only some of them leaves
+the effect in the row, so every one of its operations must then be
+`--handle`d, including those the wrap answers itself.
 
 **Adapter.** `--adapter NAME` names a new-version term (in NEW or the cases
 file) whose entry contract equals the **old** entry's; the review then compares
@@ -139,7 +152,7 @@ and entry-contract identity are reported separately.
 
 | code | refusal |
 |---|---|
-| E1010 | a version plus cases file does not check, the cases file redeclares a version name or has top-level expressions, or a named term is missing or not a term |
+| E1010 | a version plus cases file does not check, the cases file redeclares a version name or has top-level expressions, a named term is missing or not a term, or the prelude does not hold the standard pinned `List`, `Distribution`, `Cons`, `Nil`, `MkPair` or `Categorical` identities the driver uses |
 | E1011 | the entry contracts differ (with no adapter), or the adapter's contract is not the old entry's |
 | E1012 | a domain has the wrong type or count, is empty, has invalid weights or unsupported values, the product is too large, a world or wrap is missing or mistyped, an operation is `--handle`d twice, a field fails, or the case expression needs effects no installed world handles |
 | E1013 | the two versions' domains are not equal |
@@ -155,6 +168,12 @@ policy is E1005 as for `relate`. An operation whose identity changed between
 versions is two different operations: its events then differ, as they should.
 
 ## 4. Running and comparing
+
+**Fuel allowances.** `--fuel N` is not one budget for the whole review. Each
+of these invocations gets its own allowance of N: each version's preparation
+(its domain, model and driver values, §2), the old version's field evaluation
+(§7), and each version's run of all its cases (below). A host that budgets a
+review should count up to five allowances of N, not one.
 
 Each version runs all its cases in order inside one **run invocation** (the
 modeled root handlers installed) with aggregate fuel `--fuel N` (default
@@ -273,6 +292,8 @@ claims declared-support-only
   exactly.
 - The readable report (stdout) renders the same data in words, with each case's
   index and 1-based ordinal, the counts, the scope sentence, and the claim.
+  It drops only each constructor's identity qualifier (`low#<hex>` reads
+  `low`); Hash values, text literals and quoted code keep every byte.
 
 ## 7. Grouping (exact conjunctions)
 

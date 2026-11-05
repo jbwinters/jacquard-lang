@@ -39,3 +39,8 @@ let lookup_kind store name kind =
   match Hashtbl.find_opt table (name, kind) with
   | Some hash when Store.visible store hash -> Some { Resolve.hash; kind }
   | _ -> Store.lookup_kind store name kind
+
+let pinned store name kind =
+  match Hashtbl.find_opt table (name, kind) with
+  | Some hash when Store.visible store hash -> Some hash
+  | _ -> None
