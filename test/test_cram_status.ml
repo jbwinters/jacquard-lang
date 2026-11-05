@@ -13,8 +13,8 @@
    substitutions are scanned), and subshells, brace groups and for/while/until/if/case compounds
    are pipeline stages like simple commands. A substitution as the command word counts as a tool.
 
-   The rewritten commands' pinned statuses are checked by scripts/dev/cram-status-mutation.py,
-   which reruns the crams with every `jacquard`/`jac` exit status shifted by 50 (see
+   The pinned statuses are tested by scripts/dev/cram-status-mutation.py, which reruns the crams
+   with the `jacquard`/`jac` exit status shifted by 50 inside each checked block (see
    docs/ci-cd.md); it runs the crams, so it is a manual check rather than part of this suite. *)
 
 type token = Word of string | Op of string
@@ -48,6 +48,7 @@ let filter_words =
 
 (* Words that run the command they prefix; options and numbers after them are skipped too. *)
 let prefix_words = [ "!"; "command"; "env"; "exec"; "nice"; "nohup"; "time"; "timeout"; "xargs" ]
+let is_digit c = c >= '0' && c <= '9'
 
 (* Options of a prefix word whose value is the next word (`--opt=value` is one word already). *)
 let prefix_value_options = function
@@ -77,17 +78,31 @@ let prefix_value_options = function
       ]
   | _ -> []
 
-(* `env -S STRING` splits STRING into the command it runs: treated as a tool. *)
+(* `env -S STRING` splits STRING into the command it runs: treated as a tool. In a short-option
+   cluster, the text after `u` or `C` is that option's value (`-uSHELL`). *)
 let env_split_string w =
+  let n = String.length w in
+  let rec cluster i =
+    i < n && match w.[i] with 'S' -> true | 'u' | 'C' -> false | _ -> cluster (i + 1)
+  in
   w = "--split-string"
   || String.starts_with ~prefix:"--split-string=" w
-  || (String.length w >= 2 && w.[0] = '-' && w.[1] <> '-' && String.contains w 'S')
+  || (n >= 2 && w.[0] = '-' && w.[1] <> '-' && cluster 1)
+
+(* A `timeout`/`sleep`-style duration: digits with an optional fraction and unit (`60`, `1.5s`,
+   `2m`). *)
+let is_duration w =
+  let n = String.length w in
+  let body = if n > 1 && String.contains "smhd" w.[n - 1] then n - 1 else n in
+  body > 0
+  && is_digit w.[0]
+  && String.for_all (fun c -> is_digit c || c = '.') (String.sub w 0 body)
 
 (* [shell_script args] is the command string of `sh -c`: the first operand after the options when
    an option cluster contains `c`. *)
 let shell_script args =
   let rec options c = function
-    | ("-o" | "+o" | "-O" | "+O") :: _ :: rest -> options c rest
+    | ("-o" | "+o" | "-O" | "+O" | "--rcfile" | "--init-file") :: _ :: rest -> options c rest
     | "--" :: rest -> operand c rest
     | w :: rest when String.starts_with ~prefix:"--" w -> options c rest
     | w :: rest when String.length w > 1 && (w.[0] = '-' || w.[0] = '+') ->
@@ -95,8 +110,6 @@ let shell_script args =
     | rest -> operand c rest
   and operand c = function w :: _ when c -> Some w | _ -> None in
   options false args
-
-let is_digit c = c >= '0' && c <= '9'
 
 let is_tool word =
   let base = Filename.basename word in
@@ -524,9 +537,7 @@ and parse_stage toks i stops found =
       and after_prefix prefix = function
         | w :: _ when prefix = "env" && env_split_string w -> `Opaque
         | w :: _ :: rest when List.mem w (prefix_value_options prefix) -> after_prefix prefix rest
-        | w :: rest
-          when String.starts_with ~prefix:"-" w
-               || (w <> "" && String.for_all (fun c -> is_digit c || c = '.' || c = 's') w) ->
+        | w :: rest when String.starts_with ~prefix:"-" w || is_duration w ->
             after_prefix prefix rest
         | rest -> command_word rest
       in
@@ -663,6 +674,9 @@ let test_detector_cases () =
       "2>&10 jac run x | head -1";
       "2>&- jac run x | head -1";
       "jac run x > 2 2>&1 | wc -c";
+      "timeout 1m jac run x | head -1";
+      "bash --rcfile f -c 'jac run x | head -1'";
+      "case $x in a) echo ;;& esac; jac run x | head -1";
     ];
   List.iter
     (fun cmd -> Alcotest.(check bool) ("accepts: " ^ cmd) false (flagged cmd))
@@ -688,6 +702,8 @@ let test_detector_cases () =
       "echo $(( (1 + 2) * 3 )) | wc -c";
       "echo x > 2 2>&1 | wc -c";
       "echo x 2>&10 | wc -c";
+      "env -uSHELL echo x | head -1";
+      "timeout 1m cat f | head -1";
     ]
 
 let suite =

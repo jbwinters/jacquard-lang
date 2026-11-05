@@ -393,12 +393,18 @@ A cram transcript records only a command line's final status, so the
 `cram-status` law (`test/test_cram_status.ml`, part of `dune runtest`) rejects
 any pipeline whose non-final stage runs a tool or script; such commands write
 the output to a file, pin the status (`|| echo "exit=$?"` or `status=$?`) and
-then excerpt the file. `scripts/dev/cram-status-mutation.py` proves the pins
-work: it runs each cram's commands in a scratch copy of the cram's directory
-twice, with the real `jacquard`/`jac` and with wrappers that add 50 to every
-exit status, and fails on any pinned block (one that writes `pipe.out` or
-saves `status=$?`) whose output is the same in both runs. It runs the crams,
-so it is a manual check, not a CI job. Use it after rewriting cram commands:
+then excerpt the file. `scripts/dev/cram-status-mutation.py` tests those pins.
+It runs each cram's commands in a scratch copy of the cram's directory, once
+with the real `jacquard`/`jac` and then with wrappers that add 50 to the exit
+status only while a checked block runs, and fails on any pinned block (one that
+mentions `pipe.out` or `status=$?`) whose output and final status are the same
+in both runs. A checked block counts only when the working directory, shell
+variables and scratch files it starts from match the real run, so an earlier
+block's changed control flow (a skipped `cd`) cannot make it look caught; such
+blocks are retried in another pass. The check works per block, so an unpinned
+tool call is still missed when another call in the same block is pinned. It
+runs the crams, so it is a manual check, not a CI job. Use it after rewriting
+cram commands:
 
 ```sh
 opam exec -- dune build bin/main.exe bin/jac
