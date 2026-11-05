@@ -85,6 +85,10 @@
                       (ret (pvar value) (var value))
                       (opclause workspace.read-file ((pcon path-value (pvar raw))) k
                         (app (var k) (app (var ok) (var raw))))
+                      (opclause workspace.write-file ((pwild) (pwild)) k
+                        (app (var k) (app (var err) (app (var tool-blocked) (lit "gm12b leaf is read-only")))))
+                      (opclause workspace.fetch ((pwild)) k
+                        (app (var k) (app (var err) (app (var tool-blocked) (lit "gm12b leaf is offline")))))
                       (opclause governance-approval.ask ((pvar proposal-value)) k
                         (app (var k)
                           (app (var approved)
