@@ -34,7 +34,8 @@ The inferred signature names the forwarded effect.
   $ cat two.jac - > inferred.jac <<'EOF'
   > leak() = only-first(fn () -> second(1))
   > EOF
-  $ jacquard check inferred.jac --print-sigs | grep '^leak'
+  $ jacquard check inferred.jac --print-sigs > sigs
+  $ grep '^leak' sigs
   leak : () ->{Two} Int
 
 A complete handler still discharges the effect.

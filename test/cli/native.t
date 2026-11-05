@@ -399,13 +399,14 @@ spelling of --allow works like cmdliner's:
   $ diff i.out n.out && echo identical
   identical
 
-A clock handler discharging `now` in-language: deterministic, no grant
+A complete clock handler (fixed `now`, no-op `sleep`) in-language: deterministic, no grant
 needed (the row is empty), byte-identical:
 
   $ cat > clock-fixed.jqd <<'EOF_JQD'
   > (handle (app (var sub) (app (var now)) (app (var now)))
   >   (ret (pvar x) (var x))
-  >   (opclause now () k (app (var k) (lit 1000))))
+  >   (opclause now () k (app (var k) (lit 1000)))
+  >   (opclause sleep ((pvar ms)) k (app (var k) (tuple))))
   > EOF_JQD
   $ jacquard run clock-fixed.jqd > i.out 2>&1
   $ jacquard build clock-fixed.jqd -o clock-fixed > /dev/null

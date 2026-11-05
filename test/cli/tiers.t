@@ -17,12 +17,12 @@ tier land here on purpose, like the sigs goldens.
   constructor          448  28%
   op-perform            78   4%
   fn pure              771  48%
-  fn row-poly          174  11%
-  fn effectful         107   6%
+  fn row-poly          168  10%
+  fn effectful         113   7%
     abort                2
     approval             4
     audit               21
-    check               10
+    check               17
     clock                1
     console              4
     console-input        1

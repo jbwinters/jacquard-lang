@@ -19,6 +19,13 @@ capture(thunk, inputs) =
             | Nil -> k(None)
           }
         }
+        | read-line() resume k -> {
+          let (remaining, output) = get()
+          match remaining {
+            | Cons(line, more) -> { put((more, output)); k(line) }
+            | Nil -> k("")
+          }
+        }
       },
     (inputs, Nil),
   )
