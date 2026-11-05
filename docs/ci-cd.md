@@ -397,18 +397,21 @@ then excerpt the file. `scripts/dev/cram-status-mutation.py` tests those pins.
 It runs each cram's commands in a scratch copy of the cram's directory twice
 with the real `jacquard`/`jac` (the runs must agree), then once per checked
 block (one that mentions `pipe.out` or `status=$?`) with wrappers that add 50 to
-the exit status only while that block runs. Each run's whole output, with every
-nonzero command status, and its exit code are compared with the real run. The
-scripts of all runs have the same lines, and only one block is shifted, so for a
-deterministic cram any difference comes from tool statuses during that block. A
-block whose run is unchanged fails the check. Limits: it works per block, so an
-unpinned tool call is still missed when another call in the same block changes
-the output; a tool that an earlier block started in the background is shifted
-if it exits during the checked block; two agreeing real runs do not prove a
-cram deterministic; and runs are not compared with the transcript, so a cram
-that needs files dune generates into `_build` fails in the scratch copy without
-that failure being reported. It runs the crams once per checked block, so it is
-a manual check, not a CI job. Use it after rewriting cram commands:
+the exit status only while that block runs. Every run executes the same script
+text: each block records its number in a state file outside the cram's scratch
+copy, and the wrappers shift when it matches a target that the harness writes
+only for a shifted run. Each run's whole output, with each block's nonzero final
+status, and its exit code are compared with the real run. Since the script is
+the same and only one block is shifted, for a deterministic cram any difference
+comes from tool statuses during that block. A block whose run is unchanged fails
+the check. Limits: it works per block, so an unpinned tool call is still missed
+when another call in the same block changes the output; a tool that an earlier
+block started in the background is shifted if it exits during the checked block;
+two agreeing real runs do not prove a cram deterministic; and runs are not
+compared with the transcript, so a cram that needs files dune generates into
+`_build` fails in the scratch copy without that failure being reported. It runs
+the crams once per checked block, so it is a manual check, not a CI job. Use it
+after rewriting cram commands:
 
 ```sh
 opam exec -- dune build bin/main.exe bin/jac

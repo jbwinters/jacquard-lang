@@ -11,13 +11,16 @@ It runs each cram's commands as one script in a scratch copy of the cram's
 directory: twice with the real tools (the two runs must agree, or the cram is
 reported as nondeterministic), then once per checked block with `jacquard`/`jac`
 wrappers that shift the exit status by 50 (0 -> 50, n -> n + 50) only while
-that block runs. Each run's whole output, with every nonzero command status
-recorded as `[N]` as in a transcript, and its exit code are compared with the
-real run. Because only the checked block is shifted, any difference is caused by
-its tools' statuses, whether the block prints it, a later block prints a saved
-status, or a skipped command changes what later blocks do. A checked block whose
-run is identical to the real run is reported: a failing tool would pass its
-transcript.
+that block runs. Every run executes the same script text: each block records its
+number in a state file outside the scratch copy, and the wrappers shift only
+when that number equals the target that the harness writes, outside the script,
+for a shifted run. Each run's whole output, with each block's nonzero final
+status recorded as `[N]` as in a transcript, and its exit code are compared with
+the real run. Because the script is identical and only the checked block is
+shifted, any difference in a deterministic cram is caused by its tools'
+statuses, whether the block prints it, a later block prints a saved status, or
+a skipped command changes what later blocks do. A checked block whose run is
+identical to the real run is reported: a failing tool would pass its transcript.
 
 Limits: the check works per block, so an unpinned tool call is still missed when
 another call in the same block changes the output; only blocks that mention
@@ -98,49 +101,52 @@ def pinned(cmd):
     return "pipe.out" in cmd or "status=$?" in cmd
 
 
-def wrappers(directory, bindir):
-    """`jacquard`/`jac` wrappers that shift the real tool's status while the flag file exists."""
+def wrappers(directory, bindir, state):
+    """`jacquard`/`jac` wrappers that shift the real tool's status when the block recorded in
+    STATE/block equals the one in STATE/target (which exists only for a shifted run)."""
     os.makedirs(directory, exist_ok=True)
-    flag = os.path.join(directory, "shift-on")
-    for tool, target in (("jacquard", "main.exe"), ("jac", "jac")):
+    block, target = os.path.join(state, "block"), os.path.join(state, "target")
+    for tool, binary in (("jacquard", "main.exe"), ("jac", "jac")):
         path = os.path.join(directory, tool)
-        real = os.path.join(bindir, target)
+        real = os.path.join(bindir, binary)
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(
                 f'#!/bin/sh\n"{real}" "$@"\ns=$?\n'
-                f'if test -e "{flag}"; then exit $((s + {SHIFT})); fi\nexit $s\n'
+                f'if test -e "{target}" && test "$(cat "{block}" 2>/dev/null)" = "$(cat "{target}")"; then\n'
+                f"  exit $((s + {SHIFT}))\nfi\nexit $s\n"
             )
         os.chmod(path, 0o755)
-    return directory, flag
+    return directory, block, target
 
 
-def script_for(cmds, shifted, flag):
-    """The cram's commands as one script; the flag file exists only while block SHIFTED runs."""
-    # Every run's script has the same lines, so shell messages that name a script line (dash's
-    # `sh: 7: cannot open f`) agree between the real and the shifted runs.
-    out = [f"trap 'rm -f \"{flag}\"' EXIT"]
+def script_for(cmds, block):
+    """The cram's commands as one script, the same text for every run of the cram (so traces and
+    messages naming script lines agree); each block records its number in BLOCK while it runs."""
+    out = []
     for start, cmd, _ in cmds:
-        on = f"; touch '{flag}'" if start == shifted else ""
-        off = f"; rm -f '{flag}'" if start == shifted else ""
-        # a leading newline keeps the marker on its own line after output without one
-        out.append(f"printf '\\n@@BLOCK {start}\\n'{on}")
+        # a leading newline keeps the marker on its own line after output without one; `>|`
+        # writes even under `set -C`
+        out.append(f"printf '\\n@@BLOCK {start}\\n'; echo {start} >| '{block}'")
         out.append(cmd)
-        out.append(f"__s=$?{off}")
+        out.append(f"__s=$?; : >| '{block}'")
         out.append('if test "$__s" != 0; then echo "[$__s]"; fi')
     return "\n".join(out) + "\n"
 
 
-def run_cram(rel, script, wrapdir, flag, scratch):
-    """Run SCRIPT in a fresh scratch tree; return (exit code, output)."""
+def run_cram(rel, script, wrapdir, state, shifted, scratch):
+    """Run SCRIPT in a fresh scratch tree, shifting block SHIFTED (None: the real tools); return
+    (exit code, output)."""
     root = os.path.join(scratch, "root")
     tmp = os.path.join(scratch, "tmp")
     try:
-        for d in (root, tmp):
+        for d in (root, tmp, state):
             shutil.rmtree(d, ignore_errors=True)
-        if os.path.exists(flag):
-            os.remove(flag)
         os.makedirs(os.path.join(root, "test"))
         os.makedirs(tmp)
+        os.makedirs(state)
+        if shifted is not None:
+            with open(os.path.join(state, "target"), "w", encoding="utf-8") as fh:
+                fh.write(f"{shifted}\n")
         for entry in os.listdir(REPO):
             if entry not in ("test", "_build", ".git", ".scratch", "_opam"):
                 os.symlink(os.path.join(REPO, entry), os.path.join(root, entry))
@@ -170,10 +176,8 @@ def run_cram(rel, script, wrapdir, flag, scratch):
             return "timeout", output
         return proc.returncode, output
     finally:
-        for d in (root, tmp):
+        for d in (root, tmp, state):
             shutil.rmtree(d, ignore_errors=True)
-        if os.path.exists(flag):
-            os.remove(flag)
 
 
 def main():
@@ -190,7 +194,8 @@ def main():
             return 2
     scratch = os.path.abspath(args.scratch)
     os.makedirs(scratch, exist_ok=True)
-    wrapdir, flag = wrappers(os.path.join(scratch, "wrap"), bindir)
+    state = os.path.join(scratch, "state")
+    wrapdir, block, _ = wrappers(os.path.join(scratch, "wrap"), bindir, state)
 
     if args.crams:
         crams = [os.path.relpath(os.path.abspath(c), REPO) for c in args.crams]
@@ -215,15 +220,16 @@ def main():
         ]
         if not targets:
             continue
-        real = run_cram(rel, script_for(cmds, None, flag), wrapdir, flag, scratch)
-        again = run_cram(rel, script_for(cmds, None, flag), wrapdir, flag, scratch)
+        script = script_for(cmds, block)
+        real = run_cram(rel, script, wrapdir, state, None, scratch)
+        again = run_cram(rel, script, wrapdir, state, None, scratch)
         if real != again:
             failures.append(f"{rel}: the real runs differ (nondeterministic output); {len(targets)} blocks unchecked")
             print(f"{rel}: nondeterministic, skipped", flush=True)
             continue
         for start in targets:
             checked += 1
-            if run_cram(rel, script_for(cmds, start, flag), wrapdir, flag, scratch) == real:
+            if run_cram(rel, script, wrapdir, state, start, scratch) == real:
                 failures.append(f"{rel}:{start}: the run is unchanged under the status shift")
         print(f"{rel}: {len(targets)} checked blocks", flush=True)
 
