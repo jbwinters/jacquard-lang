@@ -1284,9 +1284,13 @@ let test_registry_ceilings () =
       "count(n) = if eq(n, 0) then 0 else { let t = async.spawn(fn () -> n); let v = match \
        async.await(t) { | Done(v) -> v | _ -> 100 }; add(v, count(sub(n, 1))) }\n\
        opens(n, size) = if eq(n, 0) then 0 else match channel.open(size) { | Err(_) -> 100 | Ok(_) \
-       -> add(1, opens(sub(n, 1), size)) }\n"
+       -> add(1, opens(sub(n, 1), size)) }\n\
+       cancels(n) = if eq(n, 0) then 0 else { let t = async.spawn(fn () -> { let _ = \
+       async.yield(); let _ = async.yield(); n }); let _ = async.cancel(t); let v = match \
+       async.await(t) { | Done(v) -> v | _ -> 1 }; add(v, cancels(sub(n, 1))) }\n"
   in
   let spawns = expression store "async.scope(fn () -> count(3))"
+  and cancelled = expression store "async.scope(fn () -> cancels(3))"
   and channels size = expression store (Printf.sprintf "async.scope(fn () -> opens(2, %d))" size)
   and pure = expression store "add(1, 2)" in
   let outcome = function
@@ -1359,6 +1363,33 @@ let test_registry_ceilings () =
   | () -> Alcotest.fail "expected Exit"
   | exception Exit -> ());
   Alcotest.(check (pair int int)) "released after an exception" (0, 0) (counts ());
+  (* a cancelled task stays retained until its scope is torn down, then is released (§4): each
+     child yields twice, so the cancel reaches it live; the scope body and all three cancelled
+     children are held at once, where releasing at cancellation would hold at most two *)
+  Alcotest.(check (pair string (pair int int)))
+    "cancelled tasks are held until teardown"
+    ("cancelled", (0, 0))
+    (run ~max_tasks:4 cancelled);
+  Alcotest.(check (pair string (pair int int)))
+    "cancellation does not release a task early"
+    ("E0921", (0, 0))
+    (run ~max_tasks:3 cancelled);
+  (* a scope's run restores the count it began with, not zero *)
+  let scope_code limit =
+    let result, _ =
+      Eval.with_scope ctx ~max_tasks:limit (fun () -> Round_robin.run_expr ctx cancelled)
+    in
+    outcome result
+  in
+  Alcotest.(check (pair (pair string string) (pair int int)))
+    "a scope restores a non-zero count"
+    (("cancelled", "E0921"), (1, 0))
+    (Eval.with_invocation ~max_tasks:10 ctx (fun _ ->
+         ignore (Retain_meter.acquire Retain_meter.Tasks);
+         let fits = scope_code 4 in
+         let refused = scope_code 3 in
+         ((fits, refused), counts ())));
+  Alcotest.(check (pair int int)) "and the outer one releases it" (0, 0) (counts ());
   Alcotest.(check bool) "nothing held after the invocation" false (Retain_meter.exhausted ());
   (* a native returning a nested invocation's ceiling E0921, even wrapped, leaves the enclosing
      invocation with that ceiling reached *)
