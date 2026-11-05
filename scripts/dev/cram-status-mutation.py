@@ -21,9 +21,12 @@ transcript.
 
 Limits: the check works per block, so an unpinned tool call is still missed when
 another call in the same block changes the output; only blocks that mention
-`pipe.out` or `status=$?` are checked; the scratch tree copies the cram's source
-directory and links the rest of the checkout, so a cram that needs files dune
-generates into _build fails in both runs and is reported.
+`pipe.out` or `status=$?` are checked; a tool started in the background by an
+earlier block is shifted if it exits while the checked block runs; two agreeing
+real runs do not prove a cram deterministic; the scratch tree copies the cram's
+source directory and links the rest of the checkout, so a cram that needs files
+dune generates into _build fails in the scratch copy, and nothing compares a run
+with the transcript, so such a failure is not itself reported.
 
 The check runs the crams themselves, so it is a manual tool, not part of
 `dune runtest`. Build first (`dune build bin/main.exe bin/jac`), then:
@@ -55,7 +58,10 @@ def changed_lines(base):
     """Map cram path (repo-relative) -> set of 1-based line numbers changed since BASE.
 
     A hunk that only deletes lines marks the lines on both sides of the deletion."""
-    proc = subprocess.run(["git", "-C", REPO, "diff", "-U0", base, "--", "test"], capture_output=True, text=True)
+    # explicit options keep the output parseable whatever the user's diff configuration
+    diff = ["git", "-C", REPO, "diff", "--no-ext-diff", "--no-color", "--no-renames"]
+    diff += ["--src-prefix=a/", "--dst-prefix=b/", "-U0", base, "--", "test"]
+    proc = subprocess.run(diff, capture_output=True, text=True)
     if proc.returncode != 0:
         print(f"git diff {base} failed: {proc.stderr.strip()}", file=sys.stderr)
         sys.exit(2)
@@ -110,16 +116,16 @@ def wrappers(directory, bindir):
 
 def script_for(cmds, shifted, flag):
     """The cram's commands as one script; the flag file exists only while block SHIFTED runs."""
+    # Every run's script has the same lines, so shell messages that name a script line (dash's
+    # `sh: 7: cannot open f`) agree between the real and the shifted runs.
     out = [f"trap 'rm -f \"{flag}\"' EXIT"]
     for start, cmd, _ in cmds:
+        on = f"; touch '{flag}'" if start == shifted else ""
+        off = f"; rm -f '{flag}'" if start == shifted else ""
         # a leading newline keeps the marker on its own line after output without one
-        out.append(f"printf '\\n@@BLOCK {start}\\n'")
-        if start == shifted:
-            out.append(f"touch '{flag}'")
+        out.append(f"printf '\\n@@BLOCK {start}\\n'{on}")
         out.append(cmd)
-        out.append("__s=$?")
-        if start == shifted:
-            out.append(f"rm -f '{flag}'")
+        out.append(f"__s=$?{off}")
         out.append('if test "$__s" != 0; then echo "[$__s]"; fi')
     return "\n".join(out) + "\n"
 

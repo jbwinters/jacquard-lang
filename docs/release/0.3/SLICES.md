@@ -1111,7 +1111,7 @@ backticks inside backtick substitutions, `$((cmd) | ...)` as a command
 substitution rather than arithmetic, `;&` and `;;&`, multi-digit and closing
 descriptor duplication (`2>&10`, `2>&-`), and stray `)` or `;;` inside a brace
 group, loop or if body, which no longer end the compound early. Today's crams
-stay at zero violations; 23 of the new detector cases fail on the previous scanner.
+stay at zero violations; 25 of the new detector cases fail on the previous scanner.
 The crams that work inside a pretend checkout (`opaque-types`, the
 `project-*` crams) write their captures to the cram's top directory, outside
 the project trees. `scripts/dev/cram-status-mutation.py` reruns a cram once

@@ -98,14 +98,18 @@ let is_duration w =
   String.exists is_digit number && String.for_all (fun c -> is_digit c || c = '.') number
 
 (* [shell_script args] is the command string of `sh -c`: the first operand after the options when
-   an option cluster contains `c`. *)
+   an option cluster contains `c`. Each `o`/`O` in a cluster (`-euo pipefail`) takes the next word
+   as its value. *)
 let shell_script args =
+  let rec drop k l = match l with _ :: rest when k > 0 -> drop (k - 1) rest | _ -> l in
   let rec options c = function
-    | ("-o" | "+o" | "-O" | "+O" | "--rcfile" | "--init-file") :: _ :: rest -> options c rest
+    | ("--rcfile" | "--init-file") :: _ :: rest -> options c rest
     | "--" :: rest -> operand c rest
     | w :: rest when String.starts_with ~prefix:"--" w -> options c rest
     | w :: rest when String.length w > 1 && (w.[0] = '-' || w.[0] = '+') ->
-        options (c || (w.[0] = '-' && String.contains w 'c')) rest
+        let values = ref 0 in
+        String.iteri (fun i ch -> if i > 0 && (ch = 'o' || ch = 'O') then incr values) w;
+        options (c || (w.[0] = '-' && String.contains w 'c')) (drop !values rest)
     | rest -> operand c rest
   and operand c = function w :: _ when c -> Some w | _ -> None in
   options false args
@@ -677,6 +681,8 @@ let test_detector_cases () =
       "timeout .5 jac run x | head -1";
       "bash --rcfile f -c 'jac run x | head -1'";
       "case $x in a) echo ;;& esac; jac run x | head -1";
+      "bash -euo pipefail -c 'jac run x | head -1'";
+      "bash -ceo pipefail 'jac run x | head -1'";
     ];
   List.iter
     (fun cmd -> Alcotest.(check bool) ("accepts: " ^ cmd) false (flagged cmd))
@@ -693,6 +699,7 @@ let test_detector_cases () =
       "echo $((1<<2)) | wc -c";
       "for f in a b; do echo $f; done | head -1";
       "sh -c 'echo x | head -1'";
+      "bash -euo pipefail -c 'echo x | head -1'";
       "timeout -s KILL 60 cat f | head -1";
       "xargs -n 1 echo < list | head -1";
       "H=$(jac hash x) && echo \"$H\" | wc -c";
