@@ -211,10 +211,25 @@ let term_hash side version name =
   | Some export -> Ok export.Interface.hash
   | None -> refuse ~code:"E1010" "the %s version has no term named `%s`" (side_name side) name
 
-let prelude_type store name =
-  match Prelude_identity.lookup_kind store name Resolve.KType with
-  | Some { Resolve.hash; _ } -> Some hash
-  | None -> None
+(* the driver and the domain kinds use the standard prelude's pinned identities; a store that does
+   not hold one of them (a modified --prelude) is refused rather than resolved by name *)
+let pinned_prelude =
+  [
+    ("list", Resolve.KType);
+    ("distribution", Resolve.KType);
+    ("cons", Resolve.KCon);
+    ("nil", Resolve.KCon);
+    ("mk-pair", Resolve.KCon);
+    ("categorical", Resolve.KCon);
+  ]
+
+let pinned_hash store name kind =
+  match Prelude_identity.pinned store name kind with
+  | Some hash -> Ok hash
+  | None ->
+      refuse ~code:"E1010"
+        "the prelude does not hold the standard `%s` %s; a review needs the standard prelude" name
+        (match kind with Resolve.KType -> "type" | _ -> "constructor")
 
 let scheme_head checker hash =
   match Types.repr (Check.term_scheme checker hash).Types.ty with
@@ -336,9 +351,16 @@ let prepare_version options side =
           driver_prefix
     | false, None, None -> Ok ()
   in
+  let* () =
+    List.fold_left
+      (fun acc (name, kind) ->
+        let* () = acc in
+        Result.map ignore (pinned_hash with_cases.store name kind))
+      (Ok ()) pinned_prelude
+  in
   (* domain kinds and modeled operations, from the phase 2 schemes *)
-  let list_type = prelude_type with_cases.store "list" in
-  let dist_type = prelude_type with_cases.store "distribution" in
+  let list_type = Prelude_identity.pinned with_cases.store "list" Resolve.KType in
+  let dist_type = Prelude_identity.pinned with_cases.store "distribution" Resolve.KType in
   let* kinds =
     List.fold_right
       (fun name acc ->
@@ -368,11 +390,7 @@ let prepare_version options side =
   in
   let* contract = entry_contract side with_cases (target options side) in
   let finish () =
-    let prelude_con name =
-      match Prelude_identity.lookup_kind with_cases.store name Resolve.KCon with
-      | Some { Resolve.hash; _ } -> Ok hash
-      | None -> refuse ~code:"E1010" "the prelude constructor `%s` is unavailable" name
-    in
+    let prelude_con name = pinned_hash with_cases.store name Resolve.KCon in
     let hashes names =
       List.fold_right
         (fun name acc ->
@@ -434,8 +452,8 @@ let prepare_version options side =
             in
             if List.for_all (fun i -> List.mem i covered) (List.init (List.length ops) Fun.id) then
               None
-            else Some ename
-        | _ -> Some (Hash.to_hex effect_id)
+            else Some (Surface_name.render Surface_name.Effect ename)
+        | _ -> Some ("#" ^ String.sub (Hash.to_hex effect_id) 0 12)
       in
       match List.find_map missing row_effects with
       | Some ename ->
@@ -761,7 +779,15 @@ let state_name = function
 
 type run = { state : run_state; transcript : Observation_transcript.transcript option }
 
-let run_cases options (p : prepared) (cases : int list list) ~runnable =
+let not_started = { state = Not_started; transcript = None }
+
+(* a case's arguments: element [i] of domain [k] for each parameter [k] *)
+let case_args (domains : element array array) indices =
+  List.mapi (fun k i -> domains.(k).(i).value) indices
+
+(* [runnable] lists the case numbers to run, ascending; every other case stays [Not_started] *)
+let run_cases options (p : prepared) ~domains ~total ~case_at ~runnable =
+  let runs = Array.make total not_started in
   Eval.with_invocation ~coverage:false ~fuel:options.fuel p.ctx @@ fun _ ->
   List.iter
     (fun (op, handler) ->
@@ -770,13 +796,10 @@ let run_cases options (p : prepared) (cases : int list list) ~runnable =
           Eval.call p.ctx handler args))
     p.handler_fns;
   let stopped = ref false in
-  List.mapi
-    (fun i indices ->
-      if !stopped || not (runnable i) then { state = Not_started; transcript = None }
-      else
-        let args =
-          List.map2 (fun elements i -> (List.nth elements i).value) p.domain_values indices
-        in
+  List.iter
+    (fun i ->
+      if not !stopped then (
+        let args = case_args domains (case_at i) in
         let recorder = Observation_transcript.create options.policy in
         ignore
           (Observation_transcript.record recorder p.ctx (fun () -> Eval.call p.ctx p.case_fn args));
@@ -789,8 +812,9 @@ let run_cases options (p : prepared) (cases : int list list) ~runnable =
               stopped := true;
               Incomplete_run
         in
-        { state; transcript = Some transcript })
-    cases
+        runs.(i) <- { state; transcript = Some transcript }))
+    runnable;
+  runs
 
 (* --- verdicts --- *)
 
@@ -813,19 +837,25 @@ let kind_of_position = function
   | Output_position _ ->
       Effect
 
+exception Bug_review_comparison of string
+
+let comparison_verdict = function
+  | Ok Observation_transcript.Equal -> Agree
+  | Ok (Divergent { position; _ }) -> Differ (kind_of_position position)
+  | Ok (Inconclusive _) -> Inconclusive
+  | Error diagnostics ->
+      (* both versions record under the one request policy, so the comparison cannot refuse *)
+      raise (Bug_review_comparison (String.concat "\n" (List.map Diag.to_string diagnostics)))
+
 let pair_verdict old_run new_run =
   match (old_run.state, new_run.state) with
   | (Incomplete_run | Not_started), _ | _, (Incomplete_run | Not_started) -> Unrun
   | Failed_run _, Failed_run _ -> Both_failed
   | Failed_run _, _ | _, Failed_run _ -> Differ Failure_kind
-  | Complete_run, Complete_run -> (
-      match
-        Observation_transcript.compare (Option.get old_run.transcript)
-          (Option.get new_run.transcript)
-      with
-      | Ok Observation_transcript.Equal -> Agree
-      | Ok (Divergent { position; _ }) -> Differ (kind_of_position position)
-      | Ok (Inconclusive _) | Error _ -> Inconclusive)
+  | Complete_run, Complete_run ->
+      comparison_verdict
+        (Observation_transcript.compare (Option.get old_run.transcript)
+           (Option.get new_run.transcript))
 
 (* --- grouping (exact conjunctions) --- *)
 
@@ -888,13 +918,13 @@ type review = {
   status : string;
   mode : mode;
   sizes : int list;
-  cases : int list list;  (** element indices per case, in case order *)
-  case_numbers : int list;  (** each case's number (its position) *)
-  old_runs : run list;
-  new_runs : run list;
-  verdicts : verdict list;
+  total : int;  (** the declared (or sampled) case count *)
+  cases : int -> int list;  (** case [n]'s element index per parameter, decoded on demand *)
+  old_runs : run array;  (** indexed by case number *)
+  new_runs : run array;
+  verdicts : verdict array;
   groups : group list;
-  domains : element list list;
+  domains : element array array;
   options : options;
   selected : int option;
 }
@@ -956,8 +986,8 @@ let request_bytes options ~(old_p : prepared) ~(new_p : prepared) ~kinds ~mode ~
 let request_identity bytes = Hash.of_string ("jacquard-behavior-review-request-v1\000" ^ bytes)
 
 let counts review =
-  let count p = List.length (List.filter p review.verdicts) in
-  ( List.length review.verdicts,
+  let count p = Array.fold_left (fun n v -> if p v then n + 1 else n) 0 review.verdicts in
+  ( Array.length review.verdicts,
     count (( = ) Agree),
     count (function Differ _ -> true | _ -> false),
     count (( = ) Inconclusive),
@@ -966,12 +996,12 @@ let counts review =
 
 let review_status ~mode ~old_runs ~new_runs ~verdicts =
   let failed r = match r.state with Failed_run _ -> true | _ -> false in
-  if List.exists failed old_runs || List.exists failed new_runs then "failed"
+  if Array.exists failed old_runs || Array.exists failed new_runs then "failed"
   else
     match mode with
     | Sampled _ -> "sampled"
     | Exhaustive ->
-        if List.mem Unrun verdicts then "exhaustive-incomplete" else "exhaustive-complete"
+        if Array.mem Unrun verdicts then "exhaustive-incomplete" else "exhaustive-complete"
 
 let exit_status review =
   let _, _, differ, inconclusive, failed, unrun = counts review in
@@ -998,12 +1028,6 @@ let serialize review =
   let cases, agree, differ, inconclusive, failed, unrun = counts review in
   line "counts cases=%d agree=%d differ=%d inconclusive=%d failed=%d unrun=%d" cases agree differ
     inconclusive failed unrun;
-  let case_at n =
-    List.nth review.cases (List.length (List.filter (fun m -> m < n) review.case_numbers))
-  in
-  let run_at runs n =
-    List.nth runs (List.length (List.filter (fun m -> m < n) review.case_numbers))
-  in
   List.iteri
     (fun index g ->
       let first = List.hd g.members in
@@ -1029,11 +1053,10 @@ let serialize review =
           List.iter (fun m -> line "member case=%d" m) g.members);
       line "witness case=%d" first;
       List.iteri
-        (fun k i ->
-          framed buf (Printf.sprintf "arg index=%d" k) (List.nth (List.nth review.domains k) i).data)
-        (case_at first);
+        (fun k i -> framed buf (Printf.sprintf "arg index=%d" k) review.domains.(k).(i).data)
+        (review.cases first);
       let transcript runs =
-        match (run_at runs first).transcript with
+        match runs.(first).transcript with
         | Some t -> Observation_transcript.serialize t
         | None -> ""
       in
@@ -1041,33 +1064,37 @@ let serialize review =
       framed buf "new" (transcript review.new_runs))
     review.groups;
   (* every case that does not agree, with each version's run state; equal unrun runs compacted *)
-  let rows =
-    List.filter_map
-      (fun (n, (v, (o, w))) -> if v = Agree then None else Some (n, v, o.state, w.state))
-      (List.combine review.case_numbers
-         (List.combine review.verdicts (List.combine review.old_runs review.new_runs)))
+  let state_at runs n = runs.(n).state in
+  let rec emit n =
+    if n < review.total then
+      let o = state_at review.old_runs n and w = state_at review.new_runs n in
+      match review.verdicts.(n) with
+      | Agree -> emit (n + 1)
+      | Unrun ->
+          let rec span last =
+            let m = last + 1 in
+            if
+              m < review.total
+              && review.verdicts.(m) = Unrun
+              && state_at review.old_runs m = o
+              && state_at review.new_runs m = w
+            then span m
+            else last
+          in
+          let last = span n in
+          if last = n then
+            line "case index=%d verdict=unrun old=%s new=%s" n (state_name o) (state_name w)
+          else
+            line "case index=%d to=%d verdict=unrun old=%s new=%s" n last (state_name o)
+              (state_name w);
+          emit (last + 1)
+      | v ->
+          line "case index=%d verdict=%s old=%s new=%s" n
+            (match v with Differ k -> "differ:" ^ kind_name k | v -> verdict_name v)
+            (state_name o) (state_name w);
+          emit (n + 1)
   in
-  let rec emit = function
-    | [] -> ()
-    | (n, Unrun, o, w) :: rest ->
-        let rec span last = function
-          | (m, Unrun, o', w') :: more when m = last + 1 && o' = o && w' = w -> span m more
-          | more -> (last, more)
-        in
-        let last, more = span n rest in
-        if last = n then
-          line "case index=%d verdict=unrun old=%s new=%s" n (state_name o) (state_name w)
-        else
-          line "case index=%d to=%d verdict=unrun old=%s new=%s" n last (state_name o)
-            (state_name w);
-        emit more
-    | (n, v, o, w) :: rest ->
-        line "case index=%d verdict=%s old=%s new=%s" n
-          (match v with Differ k -> "differ:" ^ kind_name k | v -> verdict_name v)
-          (state_name o) (state_name w);
-        emit rest
-  in
-  emit rows;
+  emit 0;
   line "claims declared-support-only";
   Buffer.contents buf
 
@@ -1092,14 +1119,12 @@ let check_policy options (old_p : prepared) (new_p : prepared) =
           :: diagnostics)
         (Observation_policy.validate_operations options.policy ~is_operation:in_both)
 
-let field_values options (old_p : prepared) cases =
+let field_values options (old_p : prepared) ~domains ~case_at runnable =
   Eval.with_invocation ~coverage:false ~fuel:options.fuel old_p.ctx @@ fun _ ->
   List.fold_right
-    (fun indices acc ->
+    (fun n acc ->
       let* acc = acc in
-      let args =
-        List.map2 (fun elements i -> (List.nth elements i).value) old_p.domain_values indices
-      in
+      let args = case_args domains (case_at n) in
       let* values =
         List.fold_right
           (fun (name, fn) acc ->
@@ -1114,8 +1139,8 @@ let field_values options (old_p : prepared) cases =
           (List.combine options.fields old_p.field_fns)
           (Ok [])
       in
-      Ok (values :: acc))
-    cases (Ok [])
+      Ok ((n, values) :: acc))
+    runnable (Ok [])
 
 let run options =
   let* () =
@@ -1181,55 +1206,52 @@ let run options =
   let mode =
     match options.sample with Some (count, seed) -> Sampled { count; seed } | None -> Exhaustive
   in
-  let* declared, numbered =
+  (* both versions run the old version's domain values: the new version's are refused above unless
+     their data-v1 renderings are byte-equal, and domain values are pure data *)
+  let domains = Array.of_list (List.map Array.of_list old_p.domain_values) in
+  (* the product is never materialized: a case's indices are decoded from its number *)
+  let* total, case_at =
     match mode with
     | Sampled { count; seed } ->
-        let cases = sample_indices old_p.domain_values ~count ~seed in
-        Ok (cases, List.init count Fun.id)
+        let sampled = Array.of_list (sample_indices old_p.domain_values ~count ~seed) in
+        Ok (count, Array.get sampled)
     | Exhaustive ->
         let total =
           List.fold_left (fun acc n -> if acc > product_cap then acc else acc * n) 1 sizes
         in
         if total > product_cap then
           refuse ~code:"E1012" "the domains' product has more than %d cases" product_cap
-        else Ok (List.init total (decode sizes), List.init total Fun.id)
+        else Ok (total, decode sizes)
   in
   let* selected =
     match options.only_case with
     | None -> Ok None
-    | Some k when k >= 0 && k < List.length declared -> Ok (Some k)
-    | Some k ->
-        refuse ~code:"E1012" "--case %d is not a case of this review (%d cases)" k
-          (List.length declared)
+    | Some k when k >= 0 && k < total -> Ok (Some k)
+    | Some k -> refuse ~code:"E1012" "--case %d is not a case of this review (%d cases)" k total
   in
-  let cases, case_numbers = (declared, numbered) in
   (* a --case selection runs only that case; every other declared case stays unrun *)
-  let runnable i = match selected with Some k -> i = k | None -> i < options.max_cases in
-  let runnable_cases =
-    List.filter_map
-      (fun (i, c) -> if runnable i then Some (i, c) else None)
-      (List.combine case_numbers cases)
+  let runnable =
+    match selected with Some k -> [ k ] | None -> List.init (min total options.max_cases) Fun.id
   in
   (* fields are pure and evaluated before any case runs, so a field that is not total over the
      cases to run refuses the review before anything runs *)
-  let* fields = field_values options old_p (List.map snd runnable_cases) in
-  let field_table = List.combine (List.map fst runnable_cases) fields in
-  let old_runs = run_cases options old_p cases ~runnable in
-  let new_runs = run_cases options new_p cases ~runnable in
-  let verdicts = List.map2 pair_verdict old_runs new_runs in
+  let* fields = field_values options old_p ~domains ~case_at runnable in
+  let field_table = Hashtbl.create (List.length fields) in
+  List.iter (fun (n, values) -> Hashtbl.replace field_table n values) fields;
+  let old_runs = run_cases options old_p ~domains ~total ~case_at ~runnable in
+  let new_runs = run_cases options new_p ~domains ~total ~case_at ~runnable in
+  let verdicts = Array.map2 pair_verdict old_runs new_runs in
   let atoms_of n =
-    let indices = List.nth cases n in
     List.concat
       (List.mapi
-         (fun k i ->
-           value_atoms (Printf.sprintf "arg%d" k)
-             (List.nth (List.nth old_p.domain_values k) i).observed)
-         indices)
+         (fun k i -> value_atoms (Printf.sprintf "arg%d" k) domains.(k).(i).observed)
+         (case_at n))
     @ List.map
         (fun (name, data) -> { path = "field=" ^ name; head = data })
-        (Option.value (List.assoc_opt n field_table) ~default:[])
+        (Option.value (Hashtbl.find_opt field_table n) ~default:[])
   in
-  let groups = groups ~atoms_of ~verdicts:(List.combine case_numbers verdicts) in
+  (* only run cases can agree or differ *)
+  let groups = groups ~atoms_of ~verdicts:(List.map (fun n -> (n, verdicts.(n))) runnable) in
   let request = request_bytes options ~old_p ~new_p ~kinds ~mode ~selected in
   Ok
     {
@@ -1238,44 +1260,81 @@ let run options =
       status = review_status ~mode ~old_runs ~new_runs ~verdicts;
       mode;
       sizes;
-      cases;
-      case_numbers;
+      total;
+      cases = case_at;
       old_runs;
       new_runs;
       verdicts;
       groups;
-      domains = old_p.domain_values;
+      domains;
       options;
       selected;
     }
 
 (* --- the readable report --- *)
 
-(* the readable report shows display names: data-v1 identity qualifiers ([#] and 64 hex digits
-   after a constructor name) are dropped, but never inside a text literal *)
+(* the readable report shows display names: a constructor's data-v1 identity qualifier ([#] and 64
+   hex digits directly after its name) is dropped. Nothing else is touched: a Hash value ([#hex]
+   after a delimiter), a text literal, and a quoted code value ([(quote ...)], copied whole) keep
+   every byte. *)
 let display data =
   let n = String.length data in
   let buf = Buffer.create n in
   let is_hex c = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') in
-  let rec go i in_text =
+  let name_char c =
+    (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || String.contains "-.?!_'" c
+  in
+  let quote = "(quote " in
+  (* copy a text literal starting at the quote mark [i]; returns the index after it *)
+  let rec text i =
+    if i >= n then i
+    else
+      let c = data.[i] in
+      Buffer.add_char buf c;
+      if c = '\\' && i + 1 < n then (
+        Buffer.add_char buf data.[i + 1];
+        text (i + 2))
+      else if c = '"' then i + 1
+      else text (i + 1)
+  in
+  (* copy a parenthesized code value starting at [i], text literals included *)
+  let rec code i depth =
+    if i >= n then i
+    else
+      match data.[i] with
+      | '"' ->
+          Buffer.add_char buf '"';
+          code (text (i + 1)) depth
+      | '(' ->
+          Buffer.add_char buf '(';
+          code (i + 1) (depth + 1)
+      | ')' ->
+          Buffer.add_char buf ')';
+          if depth = 1 then i + 1 else code (i + 1) (depth - 1)
+      | c ->
+          Buffer.add_char buf c;
+          code (i + 1) depth
+  in
+  let rec go i =
     if i < n then
       let c = data.[i] in
-      if in_text then (
+      if c = '"' then (
         Buffer.add_char buf c;
-        if c = '\\' && i + 1 < n then (
-          Buffer.add_char buf data.[i + 1];
-          go (i + 2) true)
-        else go (i + 1) (c <> '"'))
-      else if c = '"' then (
-        Buffer.add_char buf c;
-        go (i + 1) true)
-      else if c = '#' && i + 65 <= n && String.for_all is_hex (String.sub data (i + 1) 64) then
-        go (i + 65) false
+        go (text (i + 1)))
+      else if
+        c = '(' && i + String.length quote <= n && String.sub data i (String.length quote) = quote
+      then go (code i 0)
+      else if
+        c = '#' && i > 0
+        && name_char data.[i - 1]
+        && i + 65 <= n
+        && String.for_all is_hex (String.sub data (i + 1) 64)
+      then go (i + 65)
       else (
         Buffer.add_char buf c;
-        go (i + 1) false)
+        go (i + 1))
   in
-  go 0 false;
+  go 0;
   Buffer.contents buf
 
 let describe_run run =
@@ -1325,9 +1384,6 @@ let render review =
   line "  %d run: %d agree, %d differ, %d inconclusive, %d failed in both, %d unrun."
     (total - unrun) agree differ inconclusive failed unrun;
   let case_word n = Printf.sprintf "case %d (%d of %d)" n (n + 1) total in
-  let case_at n =
-    List.nth review.cases (List.length (List.filter (fun m -> m < n) review.case_numbers))
-  in
   List.iter
     (fun g ->
       line "";
@@ -1351,14 +1407,9 @@ let render review =
       let first = List.hd g.members in
       line "  witness %s: %s" (case_word first)
         (String.concat ", "
-           (List.mapi
-              (fun k i -> display (List.nth (List.nth review.domains k) i).data)
-              (case_at first)));
-      let run_at runs n =
-        List.nth runs (List.length (List.filter (fun m -> m < n) review.case_numbers))
-      in
-      line "    old: %s" (describe_run (run_at review.old_runs first));
-      line "    new: %s" (describe_run (run_at review.new_runs first)))
+           (List.mapi (fun k i -> display review.domains.(k).(i).data) (review.cases first)));
+      line "    old: %s" (describe_run review.old_runs.(first));
+      line "    new: %s" (describe_run review.new_runs.(first)))
     review.groups;
   (match (differ, inconclusive, failed, unrun) with
   | 0, 0, 0, 0 ->

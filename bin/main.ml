@@ -3829,12 +3829,11 @@ let review_t =
         $ Arg.(
             value & opt_all string []
             & info [ "domain" ] ~docv:"NAME"
-                ~doc:"A cases-file List or Distribution term, once per entry parameter, in order.")
+                ~doc:"A List or Distribution term, once per entry parameter, in order.")
         $ Arg.(
             value & opt_all string []
             & info [ "field" ] ~docv:"NAME"
-                ~doc:
-                  "A pure cases-file derived field over the entry's arguments, used in conditions.")
+                ~doc:"A pure derived field over the entry's arguments, used in conditions.")
         $ Arg.(
             value
             & opt (some string) None
@@ -3845,12 +3844,11 @@ let review_t =
         $ Arg.(
             value & opt_all string []
             & info [ "handle" ] ~docv:"OP=NAME"
-                ~doc:"Model operation OP at the root with the pure cases-file term NAME.")
+                ~doc:"Model operation OP at the root with the pure term NAME.")
         $ Arg.(
             value
             & opt (some string) None
-            & info [ "wrap" ] ~docv:"NAME"
-                ~doc:"A cases-file handler term wrapped around each case.")
+            & info [ "wrap" ] ~docv:"NAME" ~doc:"A handler term wrapped around each case.")
         $ relate_policy_arg
         $ Arg.(
             value & opt int 10_000_000

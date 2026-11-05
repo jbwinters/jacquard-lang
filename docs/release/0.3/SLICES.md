@@ -1084,3 +1084,20 @@ carry `check` (`tiers.t`); no prelude signature changes.
 `test/cli/partial-handler.t` and `test_effect_payload.ml` show the refusal, the
 inferred row, and a complete outer handler agreeing in both engines. The
 source inventory is now `1232 / 83 / 57`.
+
+Behavior review hardening. With partial handlers now keeping their effect, a
+`--wrap` that handles only some of an effect's operations leaves the effect in
+the case's row, so the review refuses it statically until every one of its
+operations is `--handle`d (`review.t`). The driver's prelude constructors and
+domain types are taken from the pinned standard prelude identities only; a
+modified `--prelude` that lacks them is refused (E1010) instead of being
+matched by name. The case product is decoded on demand and domain elements are
+read from arrays, so a 1,000,000-case product with `--max-cases 2` runs in
+46 MB instead of 530 MB, with a byte-identical report. The readable report
+drops only constructor identity qualifiers, so Hash values and quoted code keep
+their bytes; a transcript comparison that cannot be made is an internal error
+(`Bug_review_comparison`), never an inconclusive case; E1012 world messages
+name effects in surface spelling (`Two`). `docs/behavior-review.md` now states
+where named terms may live, that the cases file (and an adapter in it) checks
+with both versions, and each `--fuel` allowance. The source inventory is now
+`1234 / 83 / 57`.

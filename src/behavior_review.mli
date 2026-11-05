@@ -14,11 +14,11 @@ type options = {
   cases_file : string;
   cases_source : string;
   entry : string;
-  domains : string list;  (** one cases-file domain term per entry parameter, in order *)
+  domains : string list;  (** one domain term per entry parameter, in order *)
   fields : string list;  (** pure derived-field terms over the entry's arguments *)
   adapter : string option;  (** a new-version term with the old entry's contract *)
   handles : (string * string) list;  (** (operation name, pure model term) *)
-  wrap : string option;  (** a cases-file handler term wrapped around each case *)
+  wrap : string option;  (** a handler term wrapped around each case *)
   policy : Observation_policy.t;
   fuel : int;  (** each version's aggregate run fuel, and each preparation allowance *)
   max_cases : int;  (** cases run; later cases are unrun *)
@@ -68,6 +68,21 @@ val groups : atoms_of:(int -> atom list) -> verdicts:(int * verdict) list -> gro
     and gives each part an exact conjunction: the atoms all members share, greedily reduced in
     canonical order while no agreeing case satisfies the remainder; [`All] when nothing remains,
     [`Ungrouped] when the shared atoms already match an agreeing case. Deterministic. *)
+
+exception Bug_review_comparison of string
+(** Raised when the two one-run transcripts of a case cannot be compared at all. Both are recorded
+    under the request's one policy, so this is an internal invariant failure, never a verdict. *)
+
+val comparison_verdict : (Observation_transcript.verdict, Diag.t list) result -> verdict
+(** [comparison_verdict result] is the pair verdict of two complete runs: [Equal] agrees, a
+    divergence at the run's status or value is a [Decision] difference and one at an event an
+    [Effect] difference, [Inconclusive] is inconclusive; an [Error] raises {!Bug_review_comparison}
+    rather than counting as inconclusive. *)
+
+val display : string -> string
+(** [display data] is the readable-report spelling of a data-v1 rendering: every constructor's
+    identity qualifier ([#] and 64 hex digits directly after its name) is dropped; Hash values, text
+    literals and quoted code keep every byte. *)
 
 (** {1 Reviews} *)
 
