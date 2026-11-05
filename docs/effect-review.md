@@ -52,7 +52,19 @@ handler, grant, or availability promise.
 2. Run `jacquard check PROGRAM --manifest GRANTS`; a mismatch refuses without
    executing the program.
 3. Run `jacquard diff REVIEWED PROPOSED`; typed effect-row changes render as
-   authority changes keyed by resolved identity.
+   authority changes keyed by resolved identity, followed by the review line of
+   each removed and added effect:
+
+   ```text
+   changed  normalize-name
+     authority  {}  ->  {Net}
+       + Net [world/high] — reach a network endpoint through the granted handler
+     body       name  ->  lookup-alias(name)
+     dependents: greet
+   ```
+
+   An unblessed effect shows as `name#<12 hex>`, so two effects that reuse a
+   local name stay distinct. `--paths` prints kernel paths for tools.
 4. Confirm how every remaining effect is handled or installed. The canonical
    inventory is in the taxonomy; an unfamiliar user handler requires its own
    review.

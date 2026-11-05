@@ -1054,3 +1054,17 @@ The source inventory is unchanged.
 teardown (§8): a cancelled task stays retained until its scope is torn down,
 so three cancelled tasks still need four slots, and the count returns to what
 it was when a scope began, including a non-zero count.
+
+`jacquard diff` now prints a readable report by default. Each change is
+labelled with the part of the definition it falls in (`authority`, `signature`,
+`body`, `clause N` of a match, or an effect's `op` or a type's `con`) and shows
+both sides in surface syntax, naming each reference as the side that holds it
+binds it; an unnamed reference shows `#` and 12 hex digits, and a reference that
+reads the same on both sides but changed identity shows both identities. An
+authority change prints the rows by blessed display name (an unblessed effect as
+`name#<12 hex>`), then the review line of each removed and added effect. An
+added term shows its annotated signature. `--paths` prints the previous report
+byte for byte (kernel paths, `--syntax` notation, full hashes) for tools.
+`test/cli/diff.t` shows a reformat, a body change that adds a call and widens
+authority, a callee edit with its dependents and a rename in both modes;
+`escrow.t` and `surface.t` follow. The source inventory is unchanged.

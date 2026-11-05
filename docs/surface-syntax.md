@@ -1143,7 +1143,14 @@ source addition, change, or removal rather than a comparison against the prelude
 syntax follows each file extension and uses surface rendering when either source is `.jac`;
 `--syntax` overrides parsing and rendering for both operands. Mixed file/store operands, unreadable
 operands, malformed source, and top-level source expressions are diagnostics with exit status 1.
-Store/store comparison keeps its full-store, bootstrap-rendered default.
+Store/store comparison compares every binding in both stores.
+
+The default report is for people: each change names its region (`authority`, `signature`, `body`,
+`clause N`, or an effect's `op` or a type's `con`) and shows both sides in surface syntax with
+references printed by the name the side binds (`#` and 12 hex digits when unnamed). `--paths`
+prints the structural report instead, unchanged from earlier releases: each change at its kernel
+path, both subtrees in the notation that `--syntax` selects (bootstrap by default for stores), and
+references as full hashes.
 
 The original surface slice added two diagnostics specifically. First, a bare reference
 passed where a thunk type is expected (`fn () -> naive-checkout()` is the

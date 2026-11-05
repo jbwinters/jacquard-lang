@@ -132,7 +132,10 @@ refuses it, and semantic diff localizes the escalation.
   $ for f in "$JACQUARD_PRELUDE"/*.jqd; do jacquard store add escalated "$f" >/dev/null; done
   $ jacquard store add escalated workflow-escalated.jqd
   ok
-  $ jacquard diff approved escalated > pipe.out || echo "exit=$?"; grep -E 'changed|receipt.txt' < pipe.out
+  $ jacquard diff approved escalated > pipe.out || echo "exit=$?"; grep -E 'changed|eval-code' < pipe.out
+  changed  escrow.workflow
+    clause 1   `op:write`("receipt.txt", receipt)  ->  `op:eval-code`(quote { 0 })
+  $ jacquard diff approved escalated --paths > pipe.out || echo "exit=$?"; grep -E 'changed|receipt.txt' < pipe.out
   changed  escrow.workflow
       - (app (ref #543ff548b2d3f4fd32f78e8634a32d4d6217ad569816b8da33cac31686d9a43a op) (lit "receipt.txt") (var receipt))
       + (app (ref #543ff548b2d3f4fd32f78e8634a32d4d6217ad569816b8da33cac31686d9a43a op) (lit "receipt.txt") (var receipt))

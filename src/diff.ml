@@ -12,7 +12,35 @@
     classify as [Identical]; the file-level entry point reports "no semantic changes" for such
     diffs. *)
 
-type divergence = { path : string; a : string; b : string }
+(** The part of a definition a divergence falls in, for the readable report. [Signature] and [Body]
+    are a top-level binding's annotation and value; [Clause n] is the [n]th (1-based) clause of the
+    innermost [match] inside a body; [Member] is one operation of an effect or constructor of a
+    type. *)
+type region =
+  | Authority
+  | Signature
+  | Body
+  | Clause of int
+  | Operation
+  | Member of string * string  (** an effect's [op] or a type's [con], by kind and name *)
+  | Definition
+
+type authority_effect = { short : string; full : string }
+(** One effect of an authority row: [short] is the blessed display name, or [name#<12 hex>] for an
+    unblessed identity; [full] is {!Effect_registry.render_resolved}. *)
+
+(** What the readable report renders for a divergence. [Subtrees] are the two smallest enclosing
+    kernel forms (a differing scalar leaf is shown through its parent form); [Authority] the two
+    resolved rows; [Summary] reuses [a]/[b]. *)
+type detail =
+  | Subtrees of Form.t * Form.t
+  | Authority_rows of
+      (authority_effect list * string option) * (authority_effect list * string option)
+  | Summary
+
+type divergence = { path : string; a : string; b : string; region : region; detail : detail }
+(** [path], [a] and [b] are the structural report ([--paths]); [region] and [detail] feed the
+    readable one. *)
 
 type entry =
   | Identical
@@ -80,7 +108,33 @@ let render_authority_row ~effect_name_of (effects, tail) =
 (** Internal traversal. Only the row child of a typed [tarrow] is authority. [raw_context] becomes
     true at a quote boundary and prevents even type-shaped quoted data from receiving authority
     semantics. *)
-let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_context ~path
+let authority_effects ~effect_name_of (effects, tail) =
+  let describe identity =
+    let full =
+      Alloc_meter.rendered_piece
+        (Effect_registry.render_resolved ~name_hint:(effect_name_of identity) identity)
+    in
+    let short =
+      match Effect_registry.find_canonical identity with
+      | Some metadata -> metadata.Effect_registry.display_name
+      | None -> effect_name_of identity ^ "#" ^ String.sub (Hash.to_hex identity) 0 12
+    in
+    { short; full }
+  in
+  (List.sort (fun x y -> String.compare x.short y.short) (List.map describe effects), tail)
+
+(** [child_region region head i child] is the region of argument [i] (the form [child]) of a [head]
+    form in [region]. *)
+let child_region region head i (child : Form.t) =
+  match (region, head, i, child.Form.head, child.Form.args) with
+  | Definition, "binding", 1, _, _ -> Signature
+  | Definition, "binding", 2, _, _ -> Body
+  | (Body | Clause _), "match", i, _, _ when i >= 1 -> Clause i
+  | Definition, ("defeffect" | "deftype"), _, (("op" | "con") as kind), Form.Sym name :: _ ->
+      Member (kind, name)
+  | region, _, _, _, _ -> region
+
+let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_context ~region ~path
     (fa : Form.t) (fb : Form.t) : divergence list =
   if Form.equal_ignoring_meta fa fb then []
   else if
@@ -100,6 +154,10 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
         path = Alloc_meter.rendered_piece path;
         a = Alloc_meter.rendered_piece (render_authority_row ~effect_name_of old_row);
         b = Alloc_meter.rendered_piece (render_authority_row ~effect_name_of new_row);
+        region = Authority;
+        detail =
+          Authority_rows
+            (authority_effects ~effect_name_of old_row, authority_effects ~effect_name_of new_row);
       };
     ]
   else if
@@ -124,6 +182,8 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
                (match (a_mode, b_mode) with
                | Kernel.Multi, Kernel.Once -> " (handlers may no longer resume repeatedly)"
                | _ -> ""));
+        region = Operation;
+        detail = Summary;
       };
     ]
   else if fa.Form.head <> fb.Form.head || List.length fa.Form.args <> List.length fb.Form.args then
@@ -132,6 +192,8 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
         path = Alloc_meter.rendered_piece path;
         a = render_form syntax fa;
         b = render_form syntax fb;
+        region;
+        detail = Subtrees (fa, fb);
       };
     ]
   else
@@ -141,6 +203,7 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
            let path = Printf.sprintf "%s/%s[%d]" path fa.Form.head i in
            match (arg_a, arg_b) with
            | Form.F ga, Form.F gb ->
+               let region = child_region region fa.Form.head i ga in
                let child_raw_context =
                  raw_context || fa.Form.head = "quote" || fb.Form.head = "quote"
                in
@@ -149,8 +212,8 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
                  && i = 1
                in
                form_divergences_in ~syntax ~effect_name_of
-                 ~authority_context:child_authority_context ~raw_context:child_raw_context ~path ga
-                 gb
+                 ~authority_context:child_authority_context ~raw_context:child_raw_context ~region
+                 ~path ga gb
            | a, b ->
                if Form.equal_arg a b then []
                else
@@ -160,7 +223,15 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
                    | Form.F g -> Printer.inline_form g
                    | scalar -> Alloc_meter.rendered_piece (Printer.scalar_to_string scalar)
                  in
-                 [ { path = Alloc_meter.rendered_piece path; a = render a; b = render b } ])
+                 [
+                   {
+                     path = Alloc_meter.rendered_piece path;
+                     a = render a;
+                     b = render b;
+                     region;
+                     detail = Subtrees (fa, fb);
+                   };
+                 ])
          (List.combine fa.Form.args fb.Form.args))
 
 (** [form_divergences ~path old new] finds the smallest disagreeing subtrees with head paths. If
@@ -169,8 +240,8 @@ let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_cont
     while rows below [quote] remain ordinary data. [effect_name_of] supplies only the fallback hint
     for identities absent from the registry. *)
 let form_divergences ?(syntax = Bootstrap) ?(effect_name_of = fun _ -> "unregistered") ~path fa fb =
-  form_divergences_in ~syntax ~effect_name_of ~authority_context:false ~raw_context:false ~path fa
-    fb
+  form_divergences_in ~syntax ~effect_name_of ~authority_context:false ~raw_context:false
+    ~region:Definition ~path fa fb
 
 (* All ((name, kind), hash) bindings of a store, plus a way to fetch a decl's printed form.
    Keys carry the kind: a name bound to several kinds (an effect and its op, say) must be
@@ -338,12 +409,212 @@ let render (r : report) : string option =
             Printf.sprintf "changed  %s%s" n
               (match origin with Some tag -> " [" ^ tag ^ "]" | None -> "")
             :: (List.map
-                  (fun { path; a; b } -> Printf.sprintf "  at %s:\n    - %s\n    + %s" path a b)
+                  (fun { path; a; b; _ } -> Printf.sprintf "  at %s:\n    - %s\n    + %s" path a b)
                   divergences
                @
                match dependents with
                | [] -> []
                | ds -> [ Printf.sprintf "  dependents: %s" (String.concat ", " ds) ]))
+      r
+  in
+  if lines = [] then None else Some (String.concat "\n" lines)
+
+(* --- readable report (DX.2) --- *)
+
+(** [rename_hashes rename text] replaces every [#<64 hex>] in [text], with its optional [:kind] tag,
+    by [rename kind hex] ([kind] is [None] when untagged). *)
+let rename_hashes rename text =
+  let n = String.length text in
+  let is_hex c = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') in
+  let is_word c = (c >= 'a' && c <= 'z') || c = '_' in
+  let buffer = Buffer.create n in
+  let rec go i =
+    if i >= n then ()
+    else if
+      text.[i] = '#'
+      && i + 64 < n
+      && (let rec all j = j > 64 || (is_hex text.[i + j] && all (j + 1)) in
+          all 1)
+      && (i + 65 >= n || not (is_hex text.[i + 65]))
+    then (
+      let hex = String.sub text (i + 1) 64 in
+      let j = i + 65 in
+      let kind, j =
+        if j < n && text.[j] = ':' then
+          let rec word k = if k < n && is_word text.[k] then word (k + 1) else k in
+          let k = word (j + 1) in
+          if k > j + 1 then (Some (String.sub text (j + 1) (k - j - 1)), k) else (None, j)
+        else (None, j)
+      in
+      Buffer.add_string buffer (rename kind hex);
+      go j)
+    else (
+      Buffer.add_char buffer text.[i];
+      go (i + 1))
+  in
+  go 0;
+  Buffer.contents buffer
+
+(** [shorten_hashes text] abbreviates every full hash to [#] and its first 12 hex digits. *)
+let shorten_hashes text = rename_hashes (fun _ hex -> "#" ^ String.sub hex 0 12) text
+
+(** [side_lookup side] names a hash by the side's own bindings first, then by any name its store
+    binds (the prelude, for a source file), for the surface printer. *)
+let side_lookup side : Surface_print.lookup =
+  let table = Hashtbl.create 64 in
+  let add ((name, kind), hash) =
+    let key = (kind, Hash.to_hex hash) in
+    if not (Hashtbl.mem table key) then Hashtbl.add table key name
+  in
+  List.iter add side.bindings;
+  List.iter add (store_names side.store);
+  fun kind hash ->
+    let kind =
+      match kind with
+      | Surface_name.Term -> Some Resolve.KTerm
+      | Surface_name.Op -> Some Resolve.KOp
+      | Surface_name.Type -> Some Resolve.KType
+      | Surface_name.Con -> Some Resolve.KCon
+      | Surface_name.Effect -> Some Resolve.KEffect
+      | Surface_name.Tvar | Surface_name.Rvar -> None
+    in
+    Option.bind kind (fun kind -> Hashtbl.find_opt table (kind, Hash.to_hex hash))
+
+(** [readable_form lookup form] renders [form] in surface syntax with references named through
+    [lookup], falling back to bootstrap notation; unnamed hashes are abbreviated. *)
+let readable_form lookup form =
+  let text =
+    match Surface_print.print_fragment ~lookup form with
+    | Ok text when not (String.equal text "") -> text
+    | Ok _ | Error _ -> Printer.inline_form form
+  in
+  shorten_hashes text
+
+let region_label = function
+  | Authority -> "authority"
+  | Signature -> "signature"
+  | Body -> "body"
+  | Clause n -> Printf.sprintf "clause %d" n
+  | Operation -> "operation"
+  | Member (kind, name) -> kind ^ " " ^ name
+  | Definition -> "definition"
+
+(** [change_lines label old_text new_text] puts short single-line sides on one line and otherwise
+    stacks them as [-]/[+] lines, indenting continuation lines. *)
+let change_lines label old_text new_text =
+  let short text = String.length text <= 40 && not (String.contains text '\n') in
+  if short old_text && short new_text then
+    [ Printf.sprintf "  %-9s  %s  ->  %s" label old_text new_text ]
+  else
+    let side mark text =
+      Printf.sprintf "    %s %s" mark (String.concat "\n      " (String.split_on_char '\n' text))
+    in
+    [ Printf.sprintf "  %s" label; side "-" old_text; side "+" new_text ]
+
+(** [identified_form lookup form] renders [form] with each reference as [name#<12 hex>] (or
+    [#<12 hex>] when unnamed), for two sides that read the same by name but differ in identity. *)
+let identified_form (lookup : Surface_print.lookup) form =
+  let text =
+    match Surface_print.print_fragment form with
+    | Ok text when not (String.equal text "") -> text
+    | Ok _ | Error _ -> Printer.inline_form form
+  in
+  let kind_of_tag = function
+    | Some "term" -> Some Surface_name.Term
+    | Some "op" -> Some Surface_name.Op
+    | Some "type" -> Some Surface_name.Type
+    | Some "con" -> Some Surface_name.Con
+    | Some "effect" -> Some Surface_name.Effect
+    | _ -> None
+  in
+  rename_hashes
+    (fun tag hex ->
+      let name =
+        Option.bind (kind_of_tag tag) (fun kind ->
+            Option.bind (Hash.of_hex hex) (fun hash ->
+                Option.map (Surface_name.render kind) (lookup kind hash)))
+      in
+      Option.value ~default:"" name ^ "#" ^ String.sub hex 0 12)
+    text
+
+let divergence_lines ~old_lookup ~new_lookup { a; b; region; detail; _ } =
+  match detail with
+  | Subtrees (fa, fb) ->
+      let old_text = readable_form old_lookup fa and new_text = readable_form new_lookup fb in
+      if String.equal old_text new_text then
+        change_lines (region_label region) (identified_form old_lookup fa)
+          (identified_form new_lookup fb)
+      else change_lines (region_label region) old_text new_text
+  | Summary -> change_lines (region_label region) (shorten_hashes a) (shorten_hashes b)
+  | Authority_rows ((old_effects, old_tail), (new_effects, new_tail)) ->
+      let row (effects, tail) =
+        let items = List.map (fun e -> e.short) effects in
+        let items = match tail with Some tail -> items @ [ "| " ^ tail ] | None -> items in
+        "{" ^ String.concat ", " items ^ "}"
+      in
+      let missing_from others e = not (List.exists (fun o -> String.equal o.full e.full) others) in
+      let added = List.filter (missing_from old_effects) new_effects in
+      let removed = List.filter (missing_from new_effects) old_effects in
+      Printf.sprintf "  %-9s  %s  ->  %s" (region_label Authority)
+        (row (old_effects, old_tail))
+        (row (new_effects, new_tail))
+      :: (List.map (fun e -> "    - " ^ e.full) removed
+         @ List.map (fun e -> "    + " ^ e.full) added)
+
+(** [added_signature side name] is the annotated type of a term [name] in [side], when it has one.
+*)
+let added_signature side name =
+  match List.assoc_opt (name, Resolve.KTerm) side.bindings with
+  | None -> None
+  | Some hash -> (
+      match decl_form side hash with
+      | None -> None
+      | Some decl ->
+          let rec bindings (form : Form.t) =
+            if form.Form.head = "binding" then [ form ]
+            else
+              List.concat_map (function Form.F child -> bindings child | _ -> []) form.Form.args
+          in
+          List.find_map
+            (fun (binding : Form.t) ->
+              match binding.Form.args with
+              | [ Form.Sym bname; Form.F { Form.head = "group"; args = [ Form.F ty ]; _ }; _ ]
+                when String.equal bname name ->
+                  Some (readable_form (side_lookup side) ty)
+              | _ -> None)
+            (bindings decl))
+
+(** [render_readable ~old_side ~new_side report] renders [report] for people: regions instead of
+    kernel paths, both sides in surface syntax with references named on their own side (an unnamed
+    reference shows [#] and 12 hex digits), and blessed effects by display name with their review
+    meaning. Returns [None] when there are no semantic changes. *)
+let render_readable ~old_side ~new_side (r : report) : string option =
+  let old_lookup = side_lookup old_side and new_lookup = side_lookup new_side in
+  let rec dedupe = function
+    | x :: (y :: _ as rest) when x = y -> dedupe rest
+    | x :: rest -> x :: dedupe rest
+    | [] -> []
+  in
+  let lines =
+    List.concat_map
+      (fun (n, e) ->
+        match e with
+        | Identical -> []
+        | Renamed old_name -> [ Printf.sprintf "renamed  %s -> %s" old_name n ]
+        | Added -> (
+            match added_signature new_side n with
+            | Some signature -> [ Printf.sprintf "added    %s : %s" n signature ]
+            | None -> [ Printf.sprintf "added    %s" n ])
+        | Removed -> [ Printf.sprintf "removed  %s" n ]
+        | Changed { divergences; dependents; origin } -> (
+            Printf.sprintf "changed  %s%s" n
+              (match origin with Some tag -> " [" ^ tag ^ "]" | None -> "")
+            :: (dedupe (List.map (divergence_lines ~old_lookup ~new_lookup) divergences)
+               |> List.concat)
+            @
+            match dependents with
+            | [] -> []
+            | ds -> [ Printf.sprintf "  dependents: %s" (String.concat ", " ds) ]))
       r
   in
   if lines = [] then None else Some (String.concat "\n" lines)

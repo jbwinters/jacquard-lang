@@ -846,7 +846,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           let ds = Diff.form_divergences ~path:"log" a b in
           (* "at PATH: - A + B" per divergence, joined by "; ": sized and charged before it is
              built, then written once *)
-          let line { Diff.path; a; b } =
+          let line { Diff.path; a; b; _ } =
             String.length path + String.length a + String.length b + String.length "at : -  + "
           in
           let bytes =
@@ -858,7 +858,7 @@ let wire_builtins (ctx : Eval.ctx) : (unit, Diag.t list) result =
           else
             let buffer = Buffer.create bytes in
             List.iteri
-              (fun index { Diff.path; a; b } ->
+              (fun index { Diff.path; a; b; _ } ->
                 if index > 0 then Buffer.add_string buffer "; ";
                 Buffer.add_string buffer "at ";
                 Buffer.add_string buffer path;

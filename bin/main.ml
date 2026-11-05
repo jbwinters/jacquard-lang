@@ -1611,7 +1611,7 @@ let replay_cmd log_file program forks to_n compare prelude =
                           if ds = [] then Printf.printf "  op%d: identical request\n" (i + 1)
                           else
                             List.iter
-                              (fun { Diff.path; a; b } ->
+                              (fun { Diff.path; a; b; _ } ->
                                 Printf.printf "  at %s: - %s + %s\n" path a b)
                               ds
                       | Some _, None -> Printf.printf "  op%d: not reached by the fork\n" (i + 1)
@@ -1920,8 +1920,9 @@ let load_diff_source ~prelude ~syntax file =
                           file);
                    ])))
 
-let render_diff ~syntax ~old_side ~new_side =
-  match Diff.render (Diff.diff_sides_with_syntax ~syntax ~old_side ~new_side) with
+let render_diff ~paths ~syntax ~old_side ~new_side =
+  let report = Diff.diff_sides_with_syntax ~syntax ~old_side ~new_side in
+  match if paths then Diff.render report else Diff.render_readable ~old_side ~new_side report with
   | None ->
       print_endline "no semantic changes";
       ok
@@ -1929,7 +1930,7 @@ let render_diff ~syntax ~old_side ~new_side =
       print_endline report;
       ok
 
-let diff_cmd operand_a operand_b syntax prelude =
+let diff_cmd operand_a operand_b syntax prelude paths =
   match (classify_diff_operand operand_a, classify_diff_operand operand_b) with
   | Missing, Store_dir ->
       print_diags
@@ -1962,7 +1963,7 @@ let diff_cmd operand_a operand_b syntax prelude =
           let render_syntax =
             match syntax with Surface -> Diff.Surface | Auto | Bootstrap -> Diff.Bootstrap
           in
-          render_diff ~syntax:render_syntax ~old_side:(Diff.store_side old_side)
+          render_diff ~paths ~syntax:render_syntax ~old_side:(Diff.store_side old_side)
             ~new_side:(Diff.store_side new_side))
   | Source_file, Source_file -> (
       match
@@ -1981,7 +1982,7 @@ let diff_cmd operand_a operand_b syntax prelude =
                 then Diff.Surface
                 else Diff.Bootstrap
           in
-          render_diff ~syntax:render_syntax ~old_side ~new_side)
+          render_diff ~paths ~syntax:render_syntax ~old_side ~new_side)
 
 (* --- store subcommands (persistent, no implicit prelude) --- *)
 
@@ -2767,7 +2768,15 @@ let diff_t =
       $ diagnostic_format_arg
       $ Arg.(required & pos 0 (some string) None & info [] ~docv:"FILE_OR_STORE_A")
       $ Arg.(required & pos 1 (some string) None & info [] ~docv:"FILE_OR_STORE_B")
-      $ syntax_arg $ prelude_arg)
+      $ syntax_arg $ prelude_arg
+      $ Arg.(
+          value & flag
+          & info [ "paths" ]
+              ~doc:
+                "Print the structural report: each change at its kernel path, with both subtrees \
+                 in the notation chosen by $(b,--syntax) and references as hashes. The default \
+                 report names the changed region (authority, signature, body, clause N) and prints \
+                 references by name."))
 
 let store_pos_dir = Arg.(required & pos 0 (some string) None & info [] ~docv:"STORE")
 
