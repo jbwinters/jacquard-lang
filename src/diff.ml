@@ -105,15 +105,12 @@ let render_authority_row ~effect_name_of (effects, tail) =
   let items = match tail with Some tail -> effects @ [ "| " ^ tail ] | None -> effects in
   "authority {" ^ String.concat ", " items ^ "}"
 
-(** Internal traversal. Only the row child of a typed [tarrow] is authority. [raw_context] becomes
-    true at a quote boundary and prevents even type-shaped quoted data from receiving authority
-    semantics. *)
+(** [authority_effects ~effect_name_of row] describes a row's effects for the readable report. It
+    charges nothing: the traversal also serves the metered [code.diff] builtin, whose rendered text
+    is [a]/[b] alone. *)
 let authority_effects ~effect_name_of (effects, tail) =
   let describe identity =
-    let full =
-      Alloc_meter.rendered_piece
-        (Effect_registry.render_resolved ~name_hint:(effect_name_of identity) identity)
-    in
+    let full = Effect_registry.render_resolved ~name_hint:(effect_name_of identity) identity in
     let short =
       match Effect_registry.find_canonical identity with
       | Some metadata -> metadata.Effect_registry.display_name
@@ -134,6 +131,9 @@ let child_region region head i (child : Form.t) =
       Member (kind, name)
   | region, _, _, _, _ -> region
 
+(** Internal traversal. Only the row child of a typed [tarrow] is authority. [raw_context] becomes
+    true at a quote boundary and prevents even type-shaped quoted data from receiving authority
+    semantics. *)
 let rec form_divergences_in ~syntax ~effect_name_of ~authority_context ~raw_context ~region ~path
     (fa : Form.t) (fb : Form.t) : divergence list =
   if Form.equal_ignoring_meta fa fb then []
@@ -481,14 +481,16 @@ let side_lookup side : Surface_print.lookup =
     Option.bind kind (fun kind -> Hashtbl.find_opt table (kind, Hash.to_hex hash))
 
 (** [readable_form lookup form] renders [form] in surface syntax with references named through
-    [lookup], falling back to bootstrap notation; unnamed hashes are abbreviated. *)
+    [lookup], falling back to bootstrap notation. Unnamed references are abbreviated; in surface
+    text only kind-tagged hashes (as the printer writes references) are, so an ordinary text literal
+    holding a bare hash stays whole. *)
 let readable_form lookup form =
-  let text =
-    match Surface_print.print_fragment ~lookup form with
-    | Ok text when not (String.equal text "") -> text
-    | Ok _ | Error _ -> Printer.inline_form form
-  in
-  shorten_hashes text
+  match Surface_print.print_fragment ~lookup form with
+  | Ok text when not (String.equal text "") ->
+      rename_hashes
+        (fun kind hex -> match kind with Some _ -> "#" ^ String.sub hex 0 12 | None -> "#" ^ hex)
+        text
+  | Ok _ | Error _ -> shorten_hashes (Printer.inline_form form)
 
 let region_label = function
   | Authority -> "authority"
@@ -541,10 +543,16 @@ let divergence_lines ~old_lookup ~new_lookup { a; b; region; detail; _ } =
   match detail with
   | Subtrees (fa, fb) ->
       let old_text = readable_form old_lookup fa and new_text = readable_form new_lookup fb in
-      if String.equal old_text new_text then
-        change_lines (region_label region) (identified_form old_lookup fa)
-          (identified_form new_lookup fb)
-      else change_lines (region_label region) old_text new_text
+      if not (String.equal old_text new_text) then
+        change_lines (region_label region) old_text new_text
+      else
+        let old_identified = identified_form old_lookup fa
+        and new_identified = identified_form new_lookup fb in
+        if not (String.equal old_identified new_identified) then
+          change_lines (region_label region) old_identified new_identified
+        else
+          (* only an abbreviation hid the difference: print both sides in full *)
+          change_lines (region_label region) (Printer.inline_form fa) (Printer.inline_form fb)
   | Summary -> change_lines (region_label region) (shorten_hashes a) (shorten_hashes b)
   | Authority_rows ((old_effects, old_tail), (new_effects, new_tail)) ->
       let row (effects, tail) =
@@ -590,8 +598,11 @@ let added_signature side name =
     meaning. Returns [None] when there are no semantic changes. *)
 let render_readable ~old_side ~new_side (r : report) : string option =
   let old_lookup = side_lookup old_side and new_lookup = side_lookup new_side in
+  (* several differing scalars of one parent form carry that same parent: show it once *)
   let rec dedupe = function
-    | x :: (y :: _ as rest) when x = y -> dedupe rest
+    | ({ detail = Subtrees (fa, fb); _ } as x) :: { detail = Subtrees (ga, gb); _ } :: rest
+      when fa == ga && fb == gb ->
+        dedupe (x :: rest)
     | x :: rest -> x :: dedupe rest
     | [] -> []
   in
@@ -609,8 +620,7 @@ let render_readable ~old_side ~new_side (r : report) : string option =
         | Changed { divergences; dependents; origin } -> (
             Printf.sprintf "changed  %s%s" n
               (match origin with Some tag -> " [" ^ tag ^ "]" | None -> "")
-            :: (dedupe (List.map (divergence_lines ~old_lookup ~new_lookup) divergences)
-               |> List.concat)
+            :: List.concat_map (divergence_lines ~old_lookup ~new_lookup) (dedupe divergences)
             @
             match dependents with
             | [] -> []
