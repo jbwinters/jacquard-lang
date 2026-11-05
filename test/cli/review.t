@@ -376,6 +376,8 @@ until every one of its operations is modeled.
     Cause: missing world configuration: the old case performs effect `Two`, and not every one of its operations is --handle'd
   $ jacquard review run --old wrap-two.jac --new wrap-two.jac --cases wrap-two-cases.jac --entry both --domain ints --wrap only-first --handle second=model > wrap-two.out 2>&1; echo "exit=$?"
   exit=3
+  $ sed -n 2p wrap-two.out
+    Cause: missing world configuration: the old case performs effect `Two`, and not every one of its operations is --handle'd
   $ jacquard review run --old wrap-two.jac --new wrap-two.jac --cases wrap-two-cases.jac --entry both --domain ints --wrap only-first --handle first=model --handle second=model > wrap-two.out 2>&1; echo "exit=$?"
   exit=0
 

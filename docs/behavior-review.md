@@ -106,14 +106,14 @@ cases. The review status is `sampled`.
 
 **Worlds.** A root world is a set of **modeled operations**: `--handle OP=NAME`
 installs, at the root of each version, a handler for the operation each version
-resolves the name `OP` to, which answers every call by applying the cases-file
-term `NAME` to the call's arguments and resuming with its result. `NAME` must
+resolves the name `OP` to, which answers every call by applying the term
+`NAME` to the call's arguments and resuming with its result. `NAME` must
 have the operation's parameter and result types and an empty effect row (it is
 pure, so a case cannot depend on another case's handler state). These
 operations reach the root, so the policy records them and their arguments and
 results are compared. No other root handler, no grant, and no live handler is
 ever installed: any other operation that reaches the root fails the case.
-`--wrap NAME` names a cases-file handler term `(() ->{e} r) ->{e'} r`; a case
+`--wrap NAME` names a handler term `(() ->{e} r) ->{e'} r`; a case
 then runs `wrap(fn () -> entry(x1, ..., xn))` as a closure application, and
 the wrap must keep the entry's result type (E1012).
 Operations a wrap handles never reach the root, so they are not observed (OBS.1
@@ -304,7 +304,7 @@ claims declared-support-only
   is its `Cons`/`Nil` constructors, so element j of a list sits at
   `.1` repeated j times then `.0`; a tuple's head is `tuple/<arity>`; Int, Real
   and Text leaves are literal heads (their data-v1 spelling). Each
-  `--field NAME` (a pure cases-file term taking the entry's n arguments and
+  `--field NAME` (a pure term taking the entry's n arguments and
   returning a supported data value; its checked row must be empty, E1012) adds
   one atom `field=<name>` whose head is its whole data-v1 value. Fields are
   evaluated in the old version for every case that will run, before any case

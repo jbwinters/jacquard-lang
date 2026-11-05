@@ -1206,6 +1206,8 @@ let run options =
   let mode =
     match options.sample with Some (count, seed) -> Sampled { count; seed } | None -> Exhaustive
   in
+  (* both versions run the old version's domain values: the new version's are refused above unless
+     their data-v1 renderings are byte-equal, and domain values are pure data *)
   let domains = Array.of_list (List.map Array.of_list old_p.domain_values) in
   (* the product is never materialized: a case's indices are decoded from its number *)
   let* total, case_at =
