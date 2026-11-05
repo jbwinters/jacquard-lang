@@ -1114,8 +1114,7 @@ group, loop or if body, which no longer end the compound early. Today's crams
 stay at zero violations; 23 of the new detector cases fail on the previous scanner.
 The crams that work inside a pretend checkout (`opaque-types`, the
 `project-*` crams) write their captures to the cram's top directory, outside
-the project trees. `scripts/dev/cram-status-mutation.py` reruns crams with
-the `jacquard`/`jac` exit status shifted by 50 inside each checked block only,
-and fails on any pinned block whose output and status do not change
-(`docs/ci-cd.md`). The source inventory is
+the project trees. `scripts/dev/cram-status-mutation.py` reruns a cram once
+per pinned block with the `jacquard`/`jac` exit status shifted by 50 inside that
+block only, and fails on any block whose run does not change (`docs/ci-cd.md`). The source inventory is
 unchanged at `1234 / 83 / 57`.

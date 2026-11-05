@@ -13,8 +13,8 @@
    substitutions are scanned), and subshells, brace groups and for/while/until/if/case compounds
    are pipeline stages like simple commands. A substitution as the command word counts as a tool.
 
-   The pinned statuses are tested by scripts/dev/cram-status-mutation.py, which reruns the crams
-   with the `jacquard`/`jac` exit status shifted by 50 inside each checked block (see
+   The pinned statuses are tested by scripts/dev/cram-status-mutation.py, which reruns a cram once
+   per checked block with the `jacquard`/`jac` exit status shifted by 50 inside that block (see
    docs/ci-cd.md); it runs the crams, so it is a manual check rather than part of this suite. *)
 
 type token = Word of string | Op of string
@@ -89,14 +89,13 @@ let env_split_string w =
   || String.starts_with ~prefix:"--split-string=" w
   || (n >= 2 && w.[0] = '-' && w.[1] <> '-' && cluster 1)
 
-(* A `timeout`/`sleep`-style duration: digits with an optional fraction and unit (`60`, `1.5s`,
-   `2m`). *)
+(* A `timeout`/`sleep`-style duration: a number with a digit, an optional fraction and an optional
+   unit (`60`, `1.5s`, `.5`, `2m`). *)
 let is_duration w =
   let n = String.length w in
   let body = if n > 1 && String.contains "smhd" w.[n - 1] then n - 1 else n in
-  body > 0
-  && is_digit w.[0]
-  && String.for_all (fun c -> is_digit c || c = '.') (String.sub w 0 body)
+  let number = String.sub w 0 (max 0 body) in
+  String.exists is_digit number && String.for_all (fun c -> is_digit c || c = '.') number
 
 (* [shell_script args] is the command string of `sh -c`: the first operand after the options when
    an option cluster contains `c`. *)
@@ -675,6 +674,7 @@ let test_detector_cases () =
       "2>&- jac run x | head -1";
       "jac run x > 2 2>&1 | wc -c";
       "timeout 1m jac run x | head -1";
+      "timeout .5 jac run x | head -1";
       "bash --rcfile f -c 'jac run x | head -1'";
       "case $x in a) echo ;;& esac; jac run x | head -1";
     ];
