@@ -1068,3 +1068,19 @@ byte for byte (kernel paths, `--syntax` notation, full hashes) for tools.
 `test/cli/diff.t` shows a reformat, a body change that adds a call and widens
 authority, a callee edit with its dependents and a rename in both modes;
 `escrow.t` and `surface.t` follow. The source inventory is unchanged.
+
+A handler now discharges an effect only when it has a clause for every one of
+the effect's operations. A partial handler forwards its omitted operations to
+the next handler out, so the effect stays in its residual row; before, the row
+dropped it, so a program could check as pure and then stop on an unhandled
+operation. Payload effects keep their existing refusal of partial handlers.
+Shipped handlers that left an operation out now have a clause for it: the
+console capture helpers in `docs/stdlib.md`, `test/cli/world.t` and the
+formula notebook's interaction tests gain `read-line`, and the kernel fixtures
+in `native.t`, `round-robin.t`, `checker-effects.t` and `test_check.ml` cover
+`sleep`, the remaining Async operations and `read-line`. The interposing Check
+handlers in `prelude/18-fault.jqd` forward `fail`, so their continuations now
+carry `check` (`tiers.t`); no prelude signature changes.
+`test/cli/partial-handler.t` and `test_effect_payload.ml` show the refusal, the
+inferred row, and a complete outer handler agreeing in both engines. The
+source inventory is now `1232 / 83 / 57`.

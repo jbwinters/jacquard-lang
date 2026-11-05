@@ -748,7 +748,8 @@ or `None` once standard input has ended; the end is sticky, so every later
 terminal authority, and the manifest lists both. `console.scripted-input` is the
 scripted boundary: one shared line list, `next-line` yields each line and then
 `None`, `read-line` yields each line and then `""`, output is discarded. A handler
-in public syntax discharges the effect with no grant at all:
+in public syntax with a clause for every operation of both effects discharges
+them with no grant at all:
 
 ```jacquard doctest=stdlib-console-input mode=run fixture=stdlib-console-input.jac stdout=stdlib-console-input.stdout stderr=empty exit=0
 echo-lines() = match next-line() {
@@ -770,6 +771,13 @@ capture(thunk, inputs) =
           match remaining {
             | Cons(line, more) -> { put((more, output)); k(Some(line)) }
             | Nil -> k(None)
+          }
+        }
+        | read-line() resume k -> {
+          let (remaining, output) = get()
+          match remaining {
+            | Cons(line, more) -> { put((more, output)); k(line) }
+            | Nil -> k("")
           }
         }
       },

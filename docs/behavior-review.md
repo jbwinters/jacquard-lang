@@ -111,8 +111,8 @@ Operations a wrap handles never reach the root, so they are not observed (OBS.1
 records root operations only). **Missing world configuration** is refused
 (E1012) statically: the effect row of the case (the entry, or adapter, through
 any wrap) may contain only effects every one of whose operations is
-`--handle`d. Coverage is checked operation by operation, because handling some
-of an effect's operations can remove the whole effect from a handler's row.
+`--handle`d. Coverage is checked operation by operation, because a row names
+effects, not individual operations.
 
 **Adapter.** `--adapter NAME` names a new-version term (in NEW or the cases
 file) whose entry contract equals the **old** entry's; the review then compares

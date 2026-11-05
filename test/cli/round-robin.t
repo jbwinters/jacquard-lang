@@ -197,7 +197,10 @@ that narrower seam, not native scheduler support.
   $ cat > handled-yield.jqd <<'EOF_JQD'
   > (handle (app (var async.yield))
   >   (ret (pvar x) (var x))
-  >   (opclause async.yield () k (app (var k) (tuple))))
+  >   (opclause async.yield () k (app (var k) (tuple)))
+  >   (opclause async.spawn ((pvar thunk)) k (tuple))
+  >   (opclause async.await ((pvar task)) k (tuple))
+  >   (opclause async.cancel ((pvar task)) k (tuple)))
   > EOF_JQD
   $ jacquard run handled-yield.jqd > interpreter.out 2>&1
   $ jacquard build handled-yield.jqd -o handled-yield > /dev/null

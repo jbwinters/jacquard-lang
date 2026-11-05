@@ -37,7 +37,8 @@ A handler for console removes console, but the net effect remains in the manifes
   > (handle
   >   (tuple (app (var print) (lit "x")) (app (var net.get) (lit "https://example.com")))
   >   (ret (pvar x) (var x))
-  >   (opclause print ((pvar msg)) k (app (var k) (tuple))))
+  >   (opclause print ((pvar msg)) k (app (var k) (tuple)))
+  >   (opclause read-line () k (app (var k) (lit ""))))
   > EOF_JQD
   $ jacquard check handle-net.jqd --print-sigs
   _ : ((), Text)

@@ -75,6 +75,13 @@ handle { cell-read() } {
 | cell-read() resume k -> k(1)
 }|}
     );
+    ( "User effects: a partial handler does not discharge its effect",
+      {|once effect Two where { first : (Int) -> Int; second : (Int) -> Int }
+only-first(thunk) = handle thunk() { | return v -> v | first(n) resume k -> k(n) }
+leak : () ->{} Int
+leak() = only-first(fn () -> second(1))
+leak()|}
+    );
     ( "State: complete forwarding handler retains the outer payload",
       {|state.run(fn () -> handle { put("hi"); get() } {
 | return value -> value
@@ -142,6 +149,24 @@ handle { poly(["hi"]) } {
 
 let positive =
   [
+    ( "User effects: a partial handler leaves its effect in the residual row",
+      {|once effect Two where { first : (Int) -> Int; second : (Int) -> Int }
+only-first(thunk) = handle thunk() { | return v -> v | first(n) resume k -> k(n) }
+forward : () ->{Two} Int
+forward() = only-first(fn () -> second(1))
+forward()|}
+    );
+    ( "User effects: a complete outer handler discharges forwarded operations",
+      {|once effect Two where { first : (Int) -> Int; second : (Int) -> Int }
+only-first(thunk) = handle thunk() { | return v -> v | first(n) resume k -> k(n) }
+outer : () ->{} Int
+outer() = handle only-first(fn () -> add(first(1), second(2))) {
+| return v -> v
+| first(n) resume k -> k(n)
+| second(n) resume k -> k(n)
+}
+outer()|}
+    );
     ("State: same payload type", {|(state.run(fn () -> { put(42); get() }, 0) : (Int, Int))|});
     ( "State: independent instantiations",
       {|(state.run(fn () -> get(), 0), state.run(fn () -> get(), "hi"))|} );

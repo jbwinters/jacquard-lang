@@ -197,7 +197,8 @@ let test_handler_preserves_unhandled_continuation_row () =
     "unhandled subject suffix escapes even when the clause drops resume" "() ->{Abort} ()"
     (sig_of h
        "(lam () (handle (let nonrec (pwild) (app (var print) (lit \"x\")) (app (var abort))) (ret \
-        (pvar x) (var x)) (opclause print ((pvar text)) k (tuple))))");
+        (pvar x) (var x)) (opclause print ((pvar text)) k (tuple)) (opclause read-line () k (app \
+        (var k) (lit \"\")))))");
   Alcotest.(check string)
     "a Once resumption carries the same unhandled continuation row" "() ->{Console} ()"
     (sig_of h

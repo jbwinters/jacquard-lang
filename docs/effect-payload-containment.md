@@ -51,7 +51,10 @@ omitted `put` reaches an outer state region. The current effect rows cannot reta
 that per-operation forwarding relationship, so these partial handlers are refused
 even when a particular body uses only the covered operation. Complete nested
 handlers still establish independent regions. This restriction does not apply to
-effects without shared payload parameters.
+effects without shared payload parameters: a partial handler for such an effect
+is accepted, but it does not discharge the effect. The effect stays in the
+handler's residual row, because its omitted operations forward to the next
+handler out, and only a handler with a clause for every operation removes it.
 
 Acceptance requires the normal checker and CLI regressions for State, Throw,
 Emit, aliases, higher-order transport, annotations, nested handlers, and nominal
