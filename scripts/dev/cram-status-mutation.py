@@ -112,7 +112,9 @@ def wrappers(directory, bindir, state):
         with open(path, "w", encoding="utf-8") as fh:
             fh.write(
                 f'#!/bin/sh\n"{real}" "$@"\ns=$?\n'
-                f'if test -e "{target}" && test "$(cat "{block}" 2>/dev/null)" = "$(cat "{target}")"; then\n'
+                # shell builtins only: the tool may run with a PATH that has no `cat`
+                f'if test -e "{target}" && {{ read b < "{block}"; }} 2>/dev/null && read t < "{target}" &&\n'
+                f'  test "$b" = "$t"; then\n'
                 f"  exit $((s + {SHIFT}))\nfi\nexit $s\n"
             )
         os.chmod(path, 0o755)
