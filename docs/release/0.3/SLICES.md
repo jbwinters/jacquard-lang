@@ -1119,3 +1119,15 @@ the project trees. `scripts/dev/cram-status-mutation.py` reruns a cram once
 per checked block with the `jacquard`/`jac` exit status shifted by 50 inside
 that block only, and fails on any block whose run does not change
 (`docs/ci-cd.md`). The source inventory is unchanged at `1234 / 83 / 57`.
+
+Wildcard-continuation follow-ups. The surface printer now shows a continuation
+reloaded from its `.jqd` carrier as `resume _` when the name is exactly the
+spelling the encoding would pick for that clause (`Kernel.is_wildcard_resume`),
+so a reloaded or spliced clause prints as it was written and re-encodes to the
+same text; a referenced name, any other spelling, and every clause inside a
+quote keep the name, since `resume _` is refused there (E1245). The printer
+tracks quote depth as lowering does. `warp.t` pins `resume _` in a live
+`unquote` (accepted) and inside a nested quote, with or without an inner
+`unquote` (E1245). A unit case covers an operation parameter named
+`unused-resume`, which moves the spelling to `unused-resume-2` with an
+unchanged identity. The source inventory is now `1235 / 83 / 57`.
