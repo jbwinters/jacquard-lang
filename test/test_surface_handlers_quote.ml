@@ -1298,20 +1298,25 @@ let test_wildcard_resume_carrier () =
    where `resume _` is refused (E1245). An op parameter named `unused-resume` moves the spelling
    to `unused-resume-2`. *)
 let test_reloaded_wildcard_resume_printing () =
-  let op = "#" ^ Hash.to_hex (Hash.of_string "surface-reloaded-wildcard-op") ^ ":op" in
+  let bootstrap_op = "#" ^ Hash.to_hex (Hash.of_string "surface-reloaded-wildcard-op") in
+  let op = bootstrap_op ^ ":op" in
+  (* layout-insensitive comparison: the printer may wrap long clauses *)
   let flat source =
-    String.split_on_char '\n' source
-    |> List.concat_map (String.split_on_char ' ')
-    |> List.filter (( <> ) "")
-    |> String.concat " "
+    String.to_seq source
+    |> Seq.filter (fun c -> not (c = ' ' || c = '\n'))
+    |> String.of_seq |> String.split_on_char ')'
+    |> List.map (fun piece ->
+        if String.ends_with ~suffix:"," piece then String.sub piece 0 (String.length piece - 1)
+        else piece)
+    |> String.concat ")"
   in
   let handler params resume body =
-    Printf.sprintf "(handle (lit 1) (ret (pvar x) (var x)) (opclause %s (%s) %s %s))" op params
-      resume body
+    Printf.sprintf "(handle (lit 1) (ret (pvar x) (var x)) (opclause %s (%s) %s %s))" bootstrap_op
+      params resume body
   in
   let check_printed label jqd expected =
     let expression = bootstrap jqd in
-    Alcotest.(check string) label expected (flat (print_expr expression));
+    Alcotest.(check string) label (flat expected) (flat (print_expr expression));
     ignore (check_print_round_trip label expression)
   in
   check_printed "reloaded wildcard prints as _"
@@ -1322,15 +1327,14 @@ let test_reloaded_wildcard_resume_printing () =
     (Printf.sprintf "handle 1 { | return x -> x | %s(unused-resume) resume _ -> unused-resume }" op);
   check_printed "a referenced continuation keeps its name"
     (handler "(pvar y)" "unused-resume" "(app (var unused-resume) (var y))")
-    (Printf.sprintf
-       "handle 1 { | return x -> x | %s(y) resume unused-resume -> unused-resume(y) }" op);
+    (Printf.sprintf "handle 1 { | return x -> x | %s(y) resume unused-resume -> unused-resume(y) }"
+       op);
   check_printed "a spelling the encoding would not pick keeps its name"
     (handler "(pvar y)" "unused-resume-2" "(var y)")
-    (Printf.sprintf "handle 1 { | return x -> x | %s(y) resume unused-resume-2 -> y }" op);
+    (Printf.sprintf "handle 1 { | return x -> x | %s(y) resume `term:unused-resume-2` -> y }" op);
   check_printed "a quoted clause keeps its name"
     (Printf.sprintf "(quote %s)" (handler "(pvar y)" "unused-resume" "(var y)"))
-    (Printf.sprintf
-       "quote { handle 1 { | return x -> x | %s(y) resume unused-resume -> y } }" op);
+    (Printf.sprintf "quote { handle 1 { | return x -> x | %s(y) resume unused-resume -> y } }" op);
   check_printed "a live splice inside a quote prints as _"
     (Printf.sprintf "(quote (unquote %s))" (handler "(pvar y)" "unused-resume" "(var y)"))
     (Printf.sprintf "quote { unquote(handle 1 { | return x -> x | %s(y) resume _ -> y }) }" op);
@@ -1338,13 +1342,13 @@ let test_reloaded_wildcard_resume_printing () =
      through the .jqd carrier, and hashes like its named twin *)
   let wildcard =
     lower
-      (Printf.sprintf
-         "handle 1 { | return x -> x | %s(unused-resume) resume _ -> unused-resume }" op)
+      (Printf.sprintf "handle 1 { | return x -> x | %s(unused-resume) resume _ -> unused-resume }"
+         op)
   in
   let named =
     lower
-      (Printf.sprintf
-         "handle 1 { | return x -> x | %s(unused-resume) resume k -> unused-resume }" op)
+      (Printf.sprintf "handle 1 { | return x -> x | %s(unused-resume) resume k -> unused-resume }"
+         op)
   in
   let carrier = Printer.print (Kernel.expr_to_form wildcard) in
   Alcotest.(check bool)
@@ -1353,7 +1357,8 @@ let test_reloaded_wildcard_resume_printing () =
        (String.split_on_char ' ' (String.map (function '(' | ')' | '\n' -> ' ' | c -> c) carrier)));
   Alcotest.(check bool)
     "collision carrier hash" true
-    (Hash.equal (hash_expr "collision" wildcard) (hash_expr "collision reparsed" (bootstrap carrier)));
+    (Hash.equal (hash_expr "collision" wildcard)
+       (hash_expr "collision reparsed" (bootstrap carrier)));
   Alcotest.(check bool)
     "collision hash equals the named twin" true
     (Hash.equal (hash_expr "collision" wildcard) (hash_expr "collision named" named))

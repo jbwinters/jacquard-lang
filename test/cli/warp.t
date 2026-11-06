@@ -324,7 +324,7 @@ handler may discard the continuation, while a nested quote (even one whose
 `unquote` only leaves the inner quote) is still quoted data:
 
   $ cat wildcard-resume.jac > wildcard-splice.jac
-  $ echo 'spliced = quote { unquote(handle 1 { | return x -> x | halt() resume _ -> 0 }) }' >> wildcard-splice.jac
+  $ echo 'spliced = quote { unquote(handle { quote { 1 } } { | return x -> x | halt() resume _ -> quote { 0 } }) }' >> wildcard-splice.jac
   $ jacquard check wildcard-splice.jac > splice.out 2>&1; status=$?; cat splice.out; echo "exit:$status"
   ok
   exit:0

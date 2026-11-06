@@ -380,8 +380,7 @@ let pp_named kind fmt name = Format.pp_print_string fmt (render_name kind name)
 (* A continuation the clause never mentions and that its encoding would spell the same way prints
    as [resume _] outside quotes; anything else keeps its name. *)
 let pp_resume context fmt (clause : Kernel.opclause) =
-  if context.quote_depth = 0 && Kernel.is_wildcard_resume clause then
-    Format.pp_print_string fmt "_"
+  if context.quote_depth = 0 && Kernel.is_wildcard_resume clause then Format.pp_print_string fmt "_"
   else pp_named Surface_name.Term fmt clause.resume
 
 let pp_value_name kind fmt name =
