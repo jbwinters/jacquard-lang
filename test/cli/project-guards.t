@@ -2,7 +2,7 @@ Local projects: output guards, version-control hygiene, composed diagnostics,
 caching, and location independence for every command (PKG.1,
 docs/designs/project-structure.md §6, §10, §11, §16).
 
-  $ export JACQUARD_PRELUDE=$PWD/../../prelude
+  $ top=$PWD && export JACQUARD_PRELUDE=$PWD/../../prelude
   $ export JACQUARD_RUNTIME=$PWD/../../runtime
   $ mkdir -p work/liba work/app && cd work && mkdir .git && root=$PWD
   $ cat > liba/project.jqd <<'M'
@@ -30,18 +30,18 @@ The two libraries' private helpers stay distinct natively as well:
 An output may not overwrite an input, a unit of a dependency, or land inside a
 dependency (E1725); a build inside the project's own directory is fine:
 
-  $ jacquard project build demo -o lib.jac > pipe.out 2>&1 || echo "exit=$?"; head -2 < pipe.out
+  $ jacquard project build demo -o lib.jac > "$top/pipe.out" 2>&1 || echo "exit=$?"; head -2 < "$top/pipe.out"
   exit=1
   error[E1725]: An output path overlaps an input.
     Cause: native output $TESTCASE_ROOT/work/app/lib.jac overlaps the input $TESTCASE_ROOT/work/app/lib.jac
   $ head -1 lib.jac
   app.helper(x) = int.add(x, 7)
-  $ jacquard project build demo -o ../liba/a.jac > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1725\]' < pipe.out
+  $ jacquard project build demo -o ../liba/a.jac > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1725\]' < "$top/pipe.out"
   exit=1
   error[E1725]
   $ head -1 ../liba/a.jac
   liba.helper(x) = int.add(x, 100)
-  $ jacquard project test --seed 1 --cache-dir ../liba/cache > pipe.out 2>&1 || echo "exit=$?"; grep -o 'error\[E1725\].*' < pipe.out
+  $ jacquard project test --seed 1 --cache-dir ../liba/cache > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1725\].*' < "$top/pipe.out"
   exit=1
   error[E1725]: An output path overlaps an input.
   $ ls ../liba
@@ -50,18 +50,18 @@ dependency (E1725); a build inside the project's own directory is fine:
 
 The Warp result cache lives under the project's .jacquard/ and is reused:
 
-  $ jacquard project test --seed 1 > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  $ jacquard project test --seed 1 > "$top/pipe.out" || echo "exit=$?"; tail -1 < "$top/pipe.out"
   cache: 0 hit, 1 ran
-  $ jacquard project test --seed 1 > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  $ jacquard project test --seed 1 > "$top/pipe.out" || echo "exit=$?"; tail -1 < "$top/pipe.out"
   cache: 1 hit, 0 ran
 
 `test` and `build` give the same results from the project, a parent, and an
 unrelated directory, with an empty HOME:
 
   $ export HOME=$(mktemp -d)
-  $ (cd .. && jacquard project test --project app --seed 1 --no-cache) > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  $ (cd .. && jacquard project test --project app --seed 1 --no-cache) > "$top/pipe.out" || echo "exit=$?"; tail -1 < "$top/pipe.out"
   1 passed, 0 failed, 0 skipped, 0 refused
-  $ (cd /tmp && jacquard project test --project "$root/app" --seed 1 --no-cache) > pipe.out || echo "exit=$?"; tail -1 < pipe.out
+  $ (cd /tmp && jacquard project test --project "$root/app" --seed 1 --no-cache) > "$top/pipe.out" || echo "exit=$?"; tail -1 < "$top/pipe.out"
   1 passed, 0 failed, 0 skipped, 0 refused
   $ (cd /tmp && jacquard project build --project "$root/app" demo -o "$root/far.bin" > /dev/null) && "$root/far.bin"
   (101, 8)
@@ -71,15 +71,15 @@ unrelated directory, with an empty HOME:
 The order of a consumer's dependencies is not part of any pin, its context,
 or its identities:
 
-  $ jacquard project interface > pipe.out || echo "exit=$?"; head -1 < pipe.out > before.ctx && jacquard project hash demo > before.hash
+  $ jacquard project interface > "$top/pipe.out" || echo "exit=$?"; head -1 < "$top/pipe.out" > "$top/before.ctx" && jacquard project hash demo > "$top/before.hash"
   $ grep -o '(dep (as a)[^)]*)[^)]*))' project.jqd > dep-a && grep -o '(dep (as b)[^)]*)[^)]*))' project.jqd > dep-b
   $ printf '(project-v1 (name "app") (requires (core "0.2")) (namespace app) (units "lib.jac")\n  (deps %s %s)\n  (entries (run demo (units "demo.jac") (native)) (test suite (units "tests.jac"))))\n' "$(cat dep-b)" "$(cat dep-a)" > project.jqd
   $ grep -o '(deps (dep (as .)' project.jqd
   (deps (dep (as b)
-  $ jacquard project pin --dry-run > pipe.out || echo "exit=$?"; sed -E 's/[0-9a-f]{64}/HASH/' < pipe.out
+  $ jacquard project pin --dry-run > "$top/pipe.out" || echo "exit=$?"; sed -E 's/[0-9a-f]{64}/HASH/' < "$top/pipe.out"
   b: HASH (unchanged)
   a: HASH (unchanged)
-  $ jacquard project interface > pipe.out || echo "exit=$?"; head -1 < pipe.out > after.ctx; jacquard project hash demo > after.hash || echo "exit=$?"; cmp after.ctx before.ctx && cmp after.hash before.hash && echo identical
+  $ jacquard project interface > "$top/pipe.out" || echo "exit=$?"; head -1 < "$top/pipe.out" > "$top/after.ctx"; jacquard project hash demo > "$top/after.hash" || echo "exit=$?"; cmp "$top/after.ctx" "$top/before.ctx" && cmp "$top/after.hash" "$top/before.hash" && echo identical
   identical
 
 A pin that cannot write leaves the old manifest intact:
@@ -93,7 +93,7 @@ A pin that cannot write leaves the old manifest intact:
 
 Project state belongs to one checkout; tracking it is W1701:
 
-  $ git init -q && git add -f .jacquard; jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -A1 'W1701' < pipe.out | sed 's/[0-9]* file(s)/N file(s)/'
+  $ git init -q && git add -f .jacquard; jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'W1701' < "$top/pipe.out" | sed 's/[0-9]* file(s)/N file(s)/'
   warning[W1701]: Local project state is tracked by version control.
     Cause: N file(s) under $TESTCASE_ROOT/work/app/.jacquard are tracked by version control, e.g. .jacquard/build/demo/recipe.jqd
   $ rm -rf .git
@@ -104,7 +104,7 @@ A definition checked against a signature in another unit names both files
   $ mkdir ../split && cd ../split
   $ printf '(project-v1 (name "s") (requires (core "0.2")) (namespace s) (units "sig.jac" "def.jac"))' > project.jqd
   $ printf 's.f : (Int) ->{} Text\n' > sig.jac && printf 's.f(x) = x\n' > def.jac
-  $ jacquard project check > pipe.out 2>&1 || echo "exit=$?"; grep -o '[a-z]*\.jac:[0-9:-]*: [a-z]*\[[EW][0-9]*\]' < pipe.out
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o '[a-z]*\.jac:[0-9:-]*: [a-z]*\[[EW][0-9]*\]' < "$top/pipe.out"
   exit=1
   def.jac:1:1-11: error[E0804]
   sig.jac:1:7-22: warning[W1702]

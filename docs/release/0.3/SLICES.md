@@ -1101,3 +1101,21 @@ name effects in surface spelling (`Two`). `docs/behavior-review.md` now states
 where named terms may live, that the cases file (and an adapter in it) checks
 with both versions, and each `--fuel` allowance. The source inventory is now
 `1234 / 83 / 57`.
+
+Cram-status law hardening. The `cram-status` scanner now also sees the
+scripts of `sh -c`/`bash -c`, wrapper options that take a value (`timeout -s
+KILL 60`, `env -u`, `nice -n`, `xargs -I {}`, `time -f`; `env -S` counts as a
+tool), a command or backtick substitution used as the command word, tools
+inside process substitutions (whose status is never recorded), escaped
+backticks inside backtick substitutions, `$((cmd) | ...)` as a command
+substitution rather than arithmetic, `;&` and `;;&`, multi-digit and closing
+descriptor duplication (`2>&10`, `2>&-`), and stray `)` or `;;` inside a brace
+group, loop or if body, which no longer end the compound early. Today's crams
+stay at zero violations; 25 of the new detector cases fail on the previous
+scanner.
+The crams that work inside a pretend checkout (`opaque-types`, the
+`project-*` crams) write their captures to the cram's top directory, outside
+the project trees. `scripts/dev/cram-status-mutation.py` reruns a cram once
+per checked block with the `jacquard`/`jac` exit status shifted by 50 inside
+that block only, and fails on any block whose run does not change
+(`docs/ci-cd.md`). The source inventory is unchanged at `1234 / 83 / 57`.

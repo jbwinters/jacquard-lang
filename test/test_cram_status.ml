@@ -6,14 +6,21 @@
 
      jacquard run x.jac > pipe.out 2>&1 || echo "exit=$?"; head -1 < pipe.out
 
-   The scanner is a small POSIX-shell lexer and parser: words lose their quotes, command and
-   arithmetic substitutions are scanned as nested scripts, here-document bodies are data (an
-   unquoted body's substitutions are scanned), and subshells, brace groups and
-   for/while/until/if/case compounds are pipeline stages like simple commands. *)
+   The scanner is a small POSIX-shell lexer and parser: words lose their quotes, command
+   substitutions (`$(...)` and backticks, with escaped backticks nested) and the scripts of
+   `sh -c`/`bash -c` are scanned as nested scripts, a process substitution's status is never
+   recorded so any tool inside one is flagged, here-document bodies are data (an unquoted body's
+   substitutions are scanned), and subshells, brace groups and for/while/until/if/case compounds
+   are pipeline stages like simple commands. A substitution as the command word counts as a tool.
+
+   The pinned statuses are tested by scripts/dev/cram-status-mutation.py, which reruns a cram once
+   per checked block with the `jacquard`/`jac` exit status shifted by 50 inside that block (see
+   docs/ci-cd.md); it runs the crams, so it is a manual check rather than part of this suite. *)
 
 type token = Word of string | Op of string
 
-let tool_words = [ "jacquard"; "jac"; "sh"; "bash"; "dash" ]
+let shell_words = [ "sh"; "bash"; "dash" ]
+let tool_words = [ "jacquard"; "jac" ] @ shell_words
 
 let filter_words =
   [
@@ -41,6 +48,71 @@ let filter_words =
 
 (* Words that run the command they prefix; options and numbers after them are skipped too. *)
 let prefix_words = [ "!"; "command"; "env"; "exec"; "nice"; "nohup"; "time"; "timeout"; "xargs" ]
+let is_digit c = c >= '0' && c <= '9'
+
+(* Options of a prefix word whose value is the next word (`--opt=value` is one word already). *)
+let prefix_value_options = function
+  | "timeout" -> [ "-s"; "--signal"; "-k"; "--kill-after" ]
+  | "env" -> [ "-u"; "--unset"; "-C"; "--chdir" ]
+  | "nice" -> [ "-n"; "--adjustment" ]
+  | "exec" -> [ "-a" ]
+  | "time" -> [ "-f"; "--format"; "-o"; "--output" ]
+  | "xargs" ->
+      [
+        "-I";
+        "-n";
+        "-P";
+        "-L";
+        "-s";
+        "-d";
+        "-E";
+        "-a";
+        "--max-args";
+        "--max-procs";
+        "--max-lines";
+        "--max-chars";
+        "--delimiter";
+        "--eof";
+        "--arg-file";
+        "--process-slot-var";
+      ]
+  | _ -> []
+
+(* `env -S STRING` splits STRING into the command it runs: treated as a tool. In a short-option
+   cluster, the text after `u` or `C` is that option's value (`-uSHELL`). *)
+let env_split_string w =
+  let n = String.length w in
+  let rec cluster i =
+    i < n && match w.[i] with 'S' -> true | 'u' | 'C' -> false | _ -> cluster (i + 1)
+  in
+  w = "--split-string"
+  || String.starts_with ~prefix:"--split-string=" w
+  || (n >= 2 && w.[0] = '-' && w.[1] <> '-' && cluster 1)
+
+(* A `timeout`/`sleep`-style duration: a number with a digit, an optional fraction and an optional
+   unit (`60`, `1.5s`, `.5`, `2m`). *)
+let is_duration w =
+  let n = String.length w in
+  let body = if n > 1 && String.contains "smhd" w.[n - 1] then n - 1 else n in
+  let number = String.sub w 0 (max 0 body) in
+  String.exists is_digit number && String.for_all (fun c -> is_digit c || c = '.') number
+
+(* [shell_script args] is the command string of `sh -c`: the first operand after the options when
+   an option cluster contains `c`. Each `o`/`O` in a cluster (`-euo pipefail`) takes the next word
+   as its value. *)
+let shell_script args =
+  let rec drop k l = match l with _ :: rest when k > 0 -> drop (k - 1) rest | _ -> l in
+  let rec options c = function
+    | ("--rcfile" | "--init-file") :: _ :: rest -> options c rest
+    | "--" :: rest -> operand c rest
+    | w :: rest when String.starts_with ~prefix:"--" w -> options c rest
+    | w :: rest when String.length w > 1 && (w.[0] = '-' || w.[0] = '+') ->
+        let values = ref 0 in
+        String.iteri (fun i ch -> if i > 0 && (ch = 'o' || ch = 'O') then incr values) w;
+        options (c || (w.[0] = '-' && String.contains w 'c')) (drop !values rest)
+    | rest -> operand c rest
+  and operand c = function w :: _ when c -> Some w | _ -> None in
+  options false args
 
 let is_tool word =
   let base = Filename.basename word in
@@ -79,16 +151,62 @@ let close_paren s i =
   in
   go i 1
 
+(* [close_backtick s i] is the index of the backtick closing one opened before [i], skipping
+   backslash escapes, or the length of [s] when there is none. *)
+let close_backtick s i =
+  let n = String.length s in
+  let rec go i =
+    if i >= n then n else if s.[i] = '\\' then go (i + 2) else if s.[i] = '`' then i else go (i + 1)
+  in
+  go i
+
+(* The script of a backtick substitution: [\`], [\\] and [\$] lose their backslash. *)
+let unescape_backticks t =
+  let n = String.length t in
+  let b = Buffer.create n in
+  let rec go i =
+    if i < n then
+      if t.[i] = '\\' && i + 1 < n && (t.[i + 1] = '`' || t.[i + 1] = '\\' || t.[i + 1] = '$') then (
+        Buffer.add_char b t.[i + 1];
+        go (i + 2))
+      else (
+        Buffer.add_char b t.[i];
+        go (i + 1))
+  in
+  go 0;
+  Buffer.contents b
+
 (* [analyze script found] scans one shell script, adding to [found] the text of every pipeline
-   stage that runs a tool and is not the pipeline's last stage. *)
+   stage that runs a tool and is not the pipeline's last stage; it returns whether a tool runs
+   anywhere in the script. *)
 let rec analyze script (found : string list ref) =
   let tokens = lex script found in
-  (* a stray `)`, `;;` or reserved word ends a list early; resume after it *)
-  let rec from i =
-    let j, _ = parse_list tokens i [] found in
-    if j < Array.length tokens then from (j + 1)
+  (* at top level a stray `)` or `;;` ends a list early; resume after it *)
+  let rec from i any =
+    let j, tool = parse_list tokens i [] [ ")"; ";;" ] found in
+    if j < Array.length tokens then from (j + 1) (any || tool) else any || tool
   in
-  from 0
+  from 0 false
+
+(* [substitution s i found] scans the substitution starting at [s.[i]] (`$(`, `$((` or a
+   backtick), analyzing a command substitution's script, and returns the index after it with its
+   stand-in word text: `$(X)` for a command substitution, so that one used as a command word is a
+   tool, and `X` for arithmetic. `$((` is arithmetic only when the inner parenthesis closes right
+   before the outer one; otherwise it is a command substitution of a script starting with a
+   subshell, as in `$((jac run x) | head -1)`. *)
+and substitution s i found =
+  let n = String.length s in
+  if s.[i] = '`' then (
+    let j = close_backtick s (i + 1) in
+    ignore (analyze (unescape_backticks (String.sub s (i + 1) (max 0 (j - i - 1)))) found);
+    (min n (j + 1), "$(X)"))
+  else
+    let inner = if i + 2 < n && s.[i + 2] = '(' then close_paren s (i + 3) else n in
+    if inner < n && s.[inner] = ')' then (inner + 1, "X")
+    else
+      let j = close_paren s (i + 2) in
+      ignore (analyze (String.sub s (i + 2) (max 0 (j - i - 3))) found);
+      (j, "$(X)")
 
 and lex s found =
   let n = String.length s in
@@ -97,7 +215,10 @@ and lex s found =
   let in_word = ref false in
   let heredocs = ref [] in
   (* a redirection or here-string target is lexed like any word (its substitutions are
-     scanned) and then dropped *)
+     scanned) and then dropped. [drop] is set by a redirection or here-string operator (not by
+     `>&N`, whose descriptor is skipped) and cleared when the next word, its target, is flushed
+     and discarded; a newline or control operator also clears it, so a target-less redirection
+     cannot swallow the next command's word. *)
   let drop = ref false in
   let flush () =
     if !in_word then if !drop then drop := false else toks := Word (Buffer.contents word) :: !toks;
@@ -112,37 +233,16 @@ and lex s found =
     Buffer.add_string word str;
     in_word := true
   in
-  (* index just past the [close] matching an [open_] at depth 1, skipping quotes *)
-  let rec matching i open_ close depth =
-    if i >= n then n
-    else if s.[i] = '\\' then matching (i + 2) open_ close depth
-    else if s.[i] = '\'' then matching (skip_quote (i + 1) '\'') open_ close depth
-    else if s.[i] = '"' then matching (skip_quote (i + 1) '"') open_ close depth
-    else if s.[i] = close then if depth = 1 then i + 1 else matching (i + 1) open_ close (depth - 1)
-    else if s.[i] = open_ then matching (i + 1) open_ close (depth + 1)
-    else matching (i + 1) open_ close depth
-  and skip_quote i q =
+  let rec skip_quote i q =
     if i >= n then n
     else if s.[i] = '\\' && q = '"' then skip_quote (i + 2) q
     else if s.[i] = q then i + 1
     else skip_quote (i + 1) q
   in
-  let substitution i =
-    (* at "$(" or "`": scan the nested script, return the index after it *)
-    if s.[i] = '`' then (
-      let j = match String.index_from_opt s (i + 1) '`' with Some j -> j | None -> n in
-      analyze (String.sub s (i + 1) (max 0 (j - i - 1))) found;
-      add 'X';
-      min n (j + 1))
-    else if i + 2 < n && s.[i + 2] = '(' then (
-      let j = matching (i + 3) '(' ')' 2 in
-      add 'X';
-      j)
-    else
-      let j = matching (i + 2) '(' ')' 1 in
-      analyze (String.sub s (i + 2) (max 0 (j - i - 3))) found;
-      add 'X';
-      j
+  let subst i =
+    let j, stand_in = substitution s i found in
+    add_s stand_in;
+    j
   in
   let rec double i =
     if i >= n then n
@@ -152,8 +252,8 @@ and lex s found =
       | '\\' when i + 1 < n ->
           add s.[i + 1];
           double (i + 2)
-      | '$' when i + 1 < n && s.[i + 1] = '(' -> double (substitution i)
-      | '`' -> double (substitution i)
+      | '$' when i + 1 < n && s.[i + 1] = '(' -> double (subst i)
+      | '`' -> double (subst i)
       | c ->
           add c;
           double (i + 1)
@@ -191,23 +291,8 @@ and lex s found =
     let rec go i =
       if i < m then
         if body.[i] = '\\' then go (i + 2)
-        else if body.[i] = '`' || (body.[i] = '$' && i + 1 < m && body.[i + 1] = '(') then (
-          let sub = String.sub body i (m - i) in
-          let consumed = ref 0 in
-          (* reuse the lexer's substitution scanner on the remaining text *)
-          let sub_found = ref [] in
-          (if sub.[0] = '`' then
-             match String.index_from_opt sub 1 '`' with
-             | Some j ->
-                 analyze (String.sub sub 1 (j - 1)) sub_found;
-                 consumed := j + 1
-             | None -> consumed := String.length sub
-           else
-             let j = close_paren sub 2 in
-             analyze (String.sub sub 2 (max 0 (j - 3))) sub_found;
-             consumed := j);
-          found := !sub_found @ !found;
-          go (i + max 1 !consumed))
+        else if body.[i] = '`' || (body.[i] = '$' && i + 1 < m && body.[i + 1] = '(') then
+          go (fst (substitution body i found))
         else go (i + 1)
     in
     go 0
@@ -262,8 +347,15 @@ and lex s found =
       | '"' ->
           in_word := true;
           go (double (i + 1))
-      | '`' -> go (substitution i)
-      | '$' when i + 1 < n && s.[i + 1] = '(' -> go (substitution i)
+      | '`' -> go (subst i)
+      | '$' when i + 1 < n && s.[i + 1] = '(' -> go (subst i)
+      | ('<' | '>') when i + 1 < n && s.[i + 1] = '(' ->
+          (* a process substitution: its status is never recorded, so a tool inside is flagged *)
+          let j = close_paren s (i + 2) in
+          if analyze (String.sub s (i + 2) (max 0 (j - i - 3))) found then
+            found := String.sub s i (j - i) :: !found;
+          add 'X';
+          go j
       | ('<' | '>') as c ->
           (* a redirection: drop a leading fd number and the target word *)
           if
@@ -286,7 +378,14 @@ and lex s found =
             while !j < n && (s.[!j] = '>' || s.[!j] = '&' || s.[!j] = '|') do
               incr j
             done;
-            if !j < n && s.[!j - 1] = '&' && s.[!j] >= '0' && s.[!j] <= '9' then go (!j + 1)
+            if !j < n && s.[!j - 1] = '&' && (is_digit s.[!j] || s.[!j] = '-') then (
+              (* `>&N`, `>&N-`, `>&-`: a descriptor, not a target word *)
+              let k = ref !j in
+              while !k < n && is_digit s.[!k] do
+                incr k
+              done;
+              if !k < n && s.[!k] = '-' then incr k;
+              go !k)
             else (
               drop := true;
               go !j)
@@ -298,7 +397,9 @@ and lex s found =
           flush ();
           drop := true;
           go (i + 2)
-      | ';' when i + 1 < n && s.[i + 1] = ';' -> op ";;" (i + 2)
+      (* `;;&` and `;&` end a case item like `;;` *)
+      | ';' when i + 2 < n && s.[i + 1] = ';' && s.[i + 2] = '&' -> op ";;" (i + 3)
+      | ';' when i + 1 < n && (s.[i + 1] = ';' || s.[i + 1] = '&') -> op ";;" (i + 2)
       | (';' | '&' | '(' | ')') as c -> op (String.make 1 c) (i + 1)
       | c ->
           add c;
@@ -314,19 +415,21 @@ and lex s found =
   Array.of_list (List.rev !toks)
 
 (* Parsing returns (next index, whether a tool runs anywhere in the parsed text). [stops] are
-   reserved words that end the current list at command position. *)
-and parse_list toks i stops found =
+   reserved words that end the current list at command position; [closers] are the operators that
+   end it (`)` for a subshell, `;;` for a case item). Any other `)` or `;;` is stray and skipped
+   like a separator, so a brace group, loop or if body continues to its own terminator. *)
+and parse_list toks i stops closers found =
   let n = Array.length toks in
   let rec go i any =
     if i >= n then (i, any)
     else
       match toks.(i) with
-      | Op ("\n" | ";" | "&" | "&&" | "||") -> go (i + 1) any
-      | Op (")" | ";;") -> (i, any)
+      | Op o when List.mem o closers -> (i, any)
+      | Op ("\n" | ";" | "&" | "&&" | "||" | ")" | ";;") -> go (i + 1) any
       | Word w when List.mem w stops -> (i, any)
       | _ ->
           let j, tool = parse_pipeline toks i stops found in
-          if j = i then (i + 1, any) else go j (any || tool)
+          if j = i then go (i + 1) any else go j (any || tool)
   in
   go i false
 
@@ -364,27 +467,27 @@ and parse_stage toks i stops found =
   let compound j =
     match if j < n then toks.(j) else Op "" with
     | Op "(" ->
-        let k, tool = parse_list toks (j + 1) [] found in
+        let k, tool = parse_list toks (j + 1) [] [ ")" ] found in
         Some ((if k < n && toks.(k) = Op ")" then k + 1 else k), tool)
     | Word "{" ->
-        let k, tool = parse_list toks (j + 1) [ "}" ] found in
+        let k, tool = parse_list toks (j + 1) [ "}" ] [] found in
         Some (expect k "}", tool)
     | Word ("for" | "select") ->
         let k = skip_to j "do" in
-        let k, tool = parse_list toks k [ "done" ] found in
+        let k, tool = parse_list toks k [ "done" ] [] found in
         Some (expect k "done", tool)
     | Word ("while" | "until") ->
-        let k, t1 = parse_list toks (j + 1) [ "do" ] found in
-        let k, t2 = parse_list toks (expect k "do") [ "done" ] found in
+        let k, t1 = parse_list toks (j + 1) [ "do" ] [] found in
+        let k, t2 = parse_list toks (expect k "do") [ "done" ] [] found in
         Some (expect k "done", t1 || t2)
     | Word "if" ->
         let rec arms k tool =
-          let k, t1 = parse_list toks k [ "then" ] found in
-          let k, t2 = parse_list toks (expect k "then") [ "elif"; "else"; "fi" ] found in
+          let k, t1 = parse_list toks k [ "then" ] [] found in
+          let k, t2 = parse_list toks (expect k "then") [ "elif"; "else"; "fi" ] [] found in
           let tool = tool || t1 || t2 in
           if k < n && toks.(k) = Word "elif" then arms (k + 1) tool
           else if k < n && toks.(k) = Word "else" then
-            let k, t3 = parse_list toks (k + 1) [ "fi" ] found in
+            let k, t3 = parse_list toks (k + 1) [ "fi" ] [] found in
             (expect k "fi", tool || t3)
           else (expect k "fi", tool)
         in
@@ -404,7 +507,7 @@ and parse_stage toks i stops found =
             while !k < n && toks.(!k) <> Op ")" do
               incr k
             done;
-            let k, t = parse_list toks (min n (!k + 1)) [ "esac" ] found in
+            let k, t = parse_list toks (min n (!k + 1)) [ "esac" ] [ ";;" ] found in
             let k = if k < n && toks.(k) = Op ";;" then k + 1 else k in
             items k (tool || t)
         in
@@ -423,26 +526,40 @@ and parse_stage toks i stops found =
       do
         incr j
       done;
-      let words = Array.sub toks start (!j - start) |> Array.to_list in
+      let words =
+        Array.sub toks start (!j - start)
+        |> Array.to_list
+        |> List.filter_map (function Word w -> Some w | Op _ -> None)
+      in
+      (* the command word and its arguments; [`Opaque] runs a command we cannot see *)
       let rec command_word = function
-        | Word w :: rest when is_assignment w -> command_word rest
-        | Word w :: rest when List.mem w prefix_words -> after_prefix rest
-        | Word w :: _ -> Some w
-        | _ -> None
-      and after_prefix = function
-        | Word w :: rest
-          when String.starts_with ~prefix:"-" w
-               || w <> ""
-                  && String.for_all (fun c -> (c >= '0' && c <= '9') || c = '.' || c = 's') w ->
-            after_prefix rest
+        | w :: rest when is_assignment w -> command_word rest
+        | w :: rest when List.mem w prefix_words -> after_prefix w rest
+        | w :: rest -> `Command (w, rest)
+        | [] -> `None
+      and after_prefix prefix = function
+        | w :: _ when prefix = "env" && env_split_string w -> `Opaque
+        | w :: _ :: rest when List.mem w (prefix_value_options prefix) -> after_prefix prefix rest
+        | w :: rest when String.starts_with ~prefix:"-" w || is_duration w ->
+            after_prefix prefix rest
         | rest -> command_word rest
       in
-      let tool = match command_word words with Some w -> is_tool w | None -> false in
+      let tool =
+        match command_word words with
+        | `Command (w, args) ->
+            (if List.mem (Filename.basename w) shell_words then
+               match shell_script args with
+               | Some script -> ignore (analyze script found)
+               | None -> ());
+            is_tool w
+        | `Opaque -> true
+        | `None -> false
+      in
       (!j, tool, text i !j)
 
 let masked_upstreams script =
   let found = ref [] in
-  analyze script found;
+  ignore (analyze script found);
   List.rev !found
 
 (* Commands of a cram transcript: each `  $ ` line with its `  > ` continuations. *)
@@ -526,6 +643,46 @@ let test_detector_cases () =
       ": >\"1\">&2\njac run x | head -1";
       ">\"1\">&2 jac run x | head -1";
       ": >\njac run x | head -1";
+      (* sh -c / bash -c scripts *)
+      "sh -c 'jac run x | head -1'";
+      "bash -ec \"jac run x | head -1\"";
+      "sh -o pipefail -c 'echo \"$(jac hash x | head -1)\"'";
+      "timeout 60 sh -c 'jac run x | head -1'";
+      (* wrapper options with values *)
+      "timeout -s KILL 60 jacquard run x | head -1";
+      "timeout --kill-after 5 60 jac run x | head -1";
+      "env -u HOME jac run x | head -1";
+      "env -C ../app jac project run demo | head -1";
+      "env -S 'jac run x' | head -1";
+      "nice -n 5 jac run x | head -1";
+      "xargs -I {} jac run {} < list | head -1";
+      "time -f %e jac run x | head -1";
+      (* a substitution as the command word *)
+      "$(which jac) run x | head -1";
+      "`which jac` run x | head -1";
+      (* process substitution, rarer operators, escaped backticks, `$((` *)
+      "diff <(jac run x) expected.out";
+      "while read l; do echo $l; done < <(jac run x)";
+      "cat f > >(jac run -)";
+      "jac run x 1<>f | head -1";
+      "case $x in a) echo ;& b) jac run x | head -1 ;;& esac";
+      "echo `echo \\`jac hash x | head -1\\``";
+      "cat <<EOF\nit's `jac hash x | head -1`\nEOF";
+      "echo $((jac run x) | head -1)";
+      (* stray `)` / `;;` inside compounds *)
+      "{ echo ); jac run x; } | head -1";
+      "for f in a; do echo ;; jac run x; done | head -1";
+      "if true; then echo ); jac run x; fi | head -1";
+      (* descriptor duplication *)
+      "2>&10 jac run x | head -1";
+      "2>&- jac run x | head -1";
+      "jac run x > 2 2>&1 | wc -c";
+      "timeout 1m jac run x | head -1";
+      "timeout .5 jac run x | head -1";
+      "bash --rcfile f -c 'jac run x | head -1'";
+      "case $x in a) echo ;;& esac; jac run x | head -1";
+      "bash -euo pipefail -c 'jac run x | head -1'";
+      "bash -ceo pipefail 'jac run x | head -1'";
     ];
   List.iter
     (fun cmd -> Alcotest.(check bool) ("accepts: " ^ cmd) false (flagged cmd))
@@ -541,6 +698,19 @@ let test_detector_cases () =
       "cat > s.sh <<'EOF'\njacquard run x | head -1\nEOF";
       "echo $((1<<2)) | wc -c";
       "for f in a b; do echo $f; done | head -1";
+      "sh -c 'echo x | head -1'";
+      "bash -euo pipefail -c 'echo x | head -1'";
+      "timeout -s KILL 60 cat f | head -1";
+      "xargs -n 1 echo < list | head -1";
+      "H=$(jac hash x) && echo \"$H\" | wc -c";
+      "diff <(sort a) <(sort b)";
+      "cat 0<>f | wc -l";
+      "case $x in a) echo ;& b) echo ;;& esac";
+      "echo $(( (1 + 2) * 3 )) | wc -c";
+      "echo x > 2 2>&1 | wc -c";
+      "echo x 2>&10 | wc -c";
+      "env -uSHELL echo x | head -1";
+      "timeout 1m cat f | head -1";
     ]
 
 let suite =
