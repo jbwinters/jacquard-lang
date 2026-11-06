@@ -408,7 +408,17 @@ let test_confirmed_pins_follow_the_store () =
     | None -> Alcotest.fail "the prelude's true is not pinned"
   in
   Store.hide_derived store hash;
-  Alcotest.(check bool) "a hidden pin is not returned" true (Option.is_none (pinned_true store))
+  Alcotest.(check bool) "a hidden pin is not returned" true (Option.is_none (pinned_true store));
+  (* a pinned name never falls back to the store's binding: a store whose bool differs from the
+     prelude's (as after a prelude change with a stale golden) binds [true], but not the pin *)
+  let store = fresh "rebound" in
+  ignore (Store.put_decl store (kernel_decl "(deftype bool () (con true) (con false))"));
+  Alcotest.(check bool)
+    "the store binds the name" true
+    (Option.is_some (Store.lookup_kind store "true" Resolve.KCon));
+  Alcotest.(check bool)
+    "a pinned name whose pin is absent is unavailable" true
+    (Option.is_none (pinned_true store))
 
 (* TYPE.1 S3a: dynamic code constructs or matches no opaque type, the owner's included *)
 let test_eval_code_refuses_sealed () =

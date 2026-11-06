@@ -79,6 +79,13 @@ val validate_argument_value :
     type: every invoke argument, operation argument and response, and result passes through it. A
     constructor of an opaque type is refused wherever it appears (E1604, TYPE.1). *)
 
+val boundary_type_supported : store:Store.t -> Types.ty -> (unit, Diag.t list) result
+(** [boundary_type_supported ~store ty] accepts a first-order boundary type: nominal types and
+    tuples whose reachable declarations (constructor fields, and the operations of effects in their
+    rows) contain no opaque type. It returns E1604 for an opaque type reached that way, for a nested
+    callable or unresolved type, and for any reachable identity the store cannot resolve to a type
+    or effect declaration, whose representation is therefore unknown (it fails closed). *)
+
 type operation_binding = {
   effect_identity : Hash.t;
   operation : Hash.t;

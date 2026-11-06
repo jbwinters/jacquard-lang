@@ -1131,3 +1131,17 @@ tracks quote depth as lowering does. `warp.t` pins `resume _` in a live
 `unquote` (E1245). A unit case covers an operation parameter named
 `unused-resume`, which moves the spelling to `unused-resume-2` with an
 unchanged identity. The source inventory is now `1235 / 83 / 57`.
+
+Abstract-types hardening, first part. The host boundary's opaque-type walk
+(`Host_protocol_v0.boundary_type_supported`, now in the interface) fails
+closed: a reachable identity the store cannot resolve to a type or effect
+declaration is refused with E1604, since its representation is unknown. The
+value guard caches the walk per identity across one value. Warp decodes a test
+report by the prelude's constructor identities (`mk-report`, `cons`, `nil`,
+`some`, `none`, `true`), so a value with the same constructor names is not a
+report. `Prelude_identity.lookup_kind` no longer falls back to the store's
+binding for a pinned name whose pinned identity is absent, so a stale bindings
+golden or a store with a different prelude makes the builtin unavailable
+instead of resolving it by name; names the prelude does not define still
+resolve by name. The host preflight fixture now seeds the prelude's own
+primitive declarations. The source inventory is now `1236 / 83 / 57`.

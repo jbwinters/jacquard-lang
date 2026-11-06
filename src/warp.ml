@@ -92,29 +92,34 @@ let discover (store : Store.t) (cctx : Check.ctx) : discovered list =
 let value_of ctx (h : Hash.t) : (Value.t, Runtime_err.t) result =
   Round_robin.run_expr ctx { Kernel.it = Kernel.Ref (h, Kernel.Term); meta = Meta.empty }
 
-(* decompose a runtime report; the shape is pinned by prelude/15-warp.jqd *)
-let verdict_of_report (v : Value.t) : (verdict, string) result =
+(* a report's constructors are the prelude's by frozen identity, like [prelude_true]: a user type
+   whose constructors share the names (mk-report, cons, some, ...) cannot pose as a report *)
+let prelude_con ctx name con =
+  match Prelude_identity.lookup_kind (Eval.store ctx) name Resolve.KCon with
+  | Some { Resolve.hash; _ } -> Hash.equal hash con
+  | None -> false
+
+(* decompose a runtime report; the shape is pinned by prelude/15-warp.jqd. A value whose
+   constructors are not the prelude's is malformed, whatever their display names. *)
+let verdict_of_report ctx (v : Value.t) : (verdict, string) result =
   let rec entries acc = function
-    | Value.VCon { name = "nil"; _ } -> Ok (List.rev acc)
+    | Value.VCon { con; args = []; _ } when prelude_con ctx "nil" con -> Ok (List.rev acc)
     | Value.VCon
-        {
-          name = "cons";
-          args = [ Value.VTuple [ Value.VText label; Value.VCon { name = ok; _ } ]; rest ];
-          _;
-        } ->
-        entries ((label, ok = "true") :: acc) rest
+        { con; args = [ Value.VTuple [ Value.VText label; Value.VCon { con = ok; _ } ]; rest ]; _ }
+      when prelude_con ctx "cons" con ->
+        entries ((label, prelude_true ctx ok) :: acc) rest
     | v -> Error (Printf.sprintf "malformed report entries: %s" (Value.display v))
   in
   match v with
-  | Value.VCon { name = "mk-report"; args = [ es; hard ]; _ } -> (
+  | Value.VCon { con; args = [ es; hard ]; _ } when prelude_con ctx "mk-report" con -> (
       match entries [] es with
       | Error e -> Error e
       | Ok es -> (
           let soft = List.filter_map (fun (l, ok) -> if ok then None else Some l) es in
           match hard with
-          | Value.VCon { name = "some"; args = [ Value.VText msg ]; _ } ->
+          | Value.VCon { con; args = [ Value.VText msg ]; _ } when prelude_con ctx "some" con ->
               Ok (Fail { soft; hard = Some msg })
-          | Value.VCon { name = "none"; _ } ->
+          | Value.VCon { con; args = []; _ } when prelude_con ctx "none" con ->
               if soft <> [] then Ok (Fail { soft; hard = None })
               else if es = [] then Ok NoChecks
               else Ok (Pass (List.length es))
@@ -143,7 +148,7 @@ let run_thunk ctx ~test_run (thunk : Value.t) : (verdict * Hash.t list, string) 
     Eval.with_fresh_coverage ctx (fun () -> Round_robin.run_call ctx test_run [ thunk ])
   in
   match result with
-  | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report report)
+  | Ok report -> Result.map (fun v -> (v, mine)) (verdict_of_report ctx report)
   | Error e when Runtime_err.is_incomplete e -> Error (Runtime_err.to_string e)
   | Error e ->
       Ok (Fail { soft = []; hard = Some ("runtime error: " ^ Runtime_err.to_string e) }, mine)
@@ -266,7 +271,7 @@ let run_thunk_seeded ctx ?(bounds = Round_robin.default_bounds) ~test_run ~progr
                 (Printf.sprintf "schedule: failed %d/%d, seed %d" (index + 1) schedules root_seed)
             )
       | Ok { Round_robin.result = Ok value; schedule; _ } -> (
-          match verdict_of_report value with
+          match verdict_of_report ctx value with
           | Error error -> Error error
           | Ok (Fail _ as verdict) ->
               Ok

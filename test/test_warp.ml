@@ -476,6 +476,43 @@ let test_user_fail_and_observe () =
       | Ok _ -> Alcotest.failf "%s: driven as the prelude's" body)
     [ "(app (var fail) (lit \"boom\"))"; "(app (var observe) (lit 1) (lit 2))" ]
 
+(* TYPE.1: a report is decoded by the prelude's constructor identities, never by display name, so
+   a user value with the same constructor names is not a report *)
+let test_report_decodes_by_identity () =
+  let report = eval_ok (run "(app (var check.true) (var true) (lit \"only\"))") in
+  (match Warp.verdict_of_report ctx report with
+  | Ok (Warp.Pass 1) -> ()
+  | _ -> Alcotest.fail "the genuine report should pass with one check");
+  let forged name = Value.VCon { con = Hash.of_string ("forged-" ^ name); name; args = [] } in
+  let forge_outer = function
+    | Value.VCon ({ args; _ } as c) ->
+        Value.VCon { c with con = Hash.of_string "forged-mk-report"; args }
+    | _ -> Alcotest.fail "expected a report constructor"
+  in
+  (match Warp.verdict_of_report ctx (forge_outer report) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a same-named forged report constructor was decoded");
+  match report with
+  | Value.VCon ({ args = [ _; hard ]; _ } as c) -> (
+      (match Warp.verdict_of_report ctx (Value.VCon { c with args = [ forged "nil"; hard ] }) with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a forged nil ended the entries");
+      (match
+         Warp.verdict_of_report ctx (Value.VCon { c with args = [ List.hd c.args; forged "none" ] })
+       with
+      | Error _ -> ()
+      | Ok _ -> Alcotest.fail "a forged none was read as no hard failure");
+      match List.hd c.args with
+      | Value.VCon ({ args = [ Value.VTuple [ label; _ ]; rest ]; _ } as entry) -> (
+          let forged_true =
+            Value.VCon { entry with args = [ Value.VTuple [ label; forged "true" ]; rest ] }
+          in
+          match Warp.verdict_of_report ctx (Value.VCon { c with args = [ forged_true; hard ] }) with
+          | Ok (Warp.Fail { soft = [ "only" ]; hard = None }) -> ()
+          | _ -> Alcotest.fail "a forged true counted as a passing check")
+      | _ -> Alcotest.fail "expected one report entry")
+  | _ -> Alcotest.fail "expected a two-field report"
+
 let suite =
   [
     Alcotest.test_case "report: all pass, in order" `Quick test_report_all_pass;
@@ -493,4 +530,5 @@ let suite =
     Alcotest.test_case "user operations are not prelude operations" `Quick
       test_user_ops_are_not_prelude_ops;
     Alcotest.test_case "user fail and observe" `Quick test_user_fail_and_observe;
+    Alcotest.test_case "report decodes by identity" `Quick test_report_decodes_by_identity;
   ]

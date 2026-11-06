@@ -33,10 +33,11 @@ let put_src store source =
 
 let named name hashes = List.assoc name hashes.Canon.named
 
+(* the prelude's own primitive declarations, so builtins find them by their pinned identities *)
 let seed_primitives store =
   List.iter
     (fun name ->
-      ignore (put_src store (Printf.sprintf "(deftype %s () (con host-%s-value))" name name)))
+      ignore (put_src store (Printf.sprintf "(deftype %s () (con %s-opaque))" name name)))
     [ "int"; "real"; "text"; "code"; "hash"; "secret" ]
 
 let required_hash store name kind =
@@ -375,6 +376,19 @@ let test_opaque_types_do_not_cross () =
           ~effects:[]
           ~result:(nominal (required_hash fixture.store "boundary-cb" Resolve.KType) [])
           ~arguments:[ Value.VInt 1 ] ~operations:[]));
+  (* the walk fails closed: an identity that is not a type or effect declaration in the store has
+     an unknown representation, so it cannot cross either *)
+  ignore
+    (expect_ok "a resolvable transparent type crosses"
+       (Host.boundary_type_supported ~store:fixture.store (int_type fixture)));
+  expect_code "an unresolvable type identity" "E1604"
+    (Host.boundary_type_supported ~store:fixture.store
+       (nominal (Hash.of_string "boundary-unresolvable-type") []));
+  expect_code "a term identity in type position" "E1604"
+    (Host.boundary_type_supported ~store:fixture.store (nominal fixture.pure_target []));
+  expect_code "an unresolvable identity inside a tuple" "E1604"
+    (Host.boundary_type_supported ~store:fixture.store
+       (Types.TTuple [ int_type fixture; nominal (Hash.of_string "boundary-unresolvable-item") [] ]));
   (* the value guard itself, as outgoing operation arguments and results meet it *)
   expect_code "the value guard refuses a nested opaque constructor" "E1604"
     (Host.validate_argument_value fixture.checker ~expected:(packet_int fixture)
