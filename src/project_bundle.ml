@@ -120,7 +120,14 @@ let write ~prelude_dir ~root:store_root ~out manifest_file =
   in
   let closure = reachable store roots in
   (* E1721: dynamic evaluation reachable from any root, through the prelude too *)
-  let evals = eval_identities store in
+  let* evals =
+    match eval_identities store with
+    | Some evals -> Ok evals
+    | None ->
+        error "E1721"
+          "the prelude's eval-code and Eval identities are absent, so dynamic evaluation cannot be \
+           ruled out"
+  in
   let* () =
     let reaching =
       Hashtbl.fold

@@ -823,18 +823,21 @@ let relational_leaf_context ~suite_seed ~member ~label =
     hash covers every stored closure and distribution transitively; the explicit fields bind the
     selected variant, its scalar controls, suite seed, applicable leaf-derived seed, execution mode,
     and native scheduler/derivation versions. *)
-let relational_key_string ~member ~suite_seed ~prop_mode value =
+let relational_key_string ctx ~member ~suite_seed ~prop_mode value =
   match value with
   | Value.VCon
       {
+        con;
         name = "same-under";
         args =
           [
             Value.VText label;
-            Value.VCon { name = "vary-schedule"; args = [ Value.VInt count; _ ]; _ };
+            Value.VCon
+              { con = variation; name = "vary-schedule"; args = [ Value.VInt count; _ ]; _ };
           ];
         _;
-      } ->
+      }
+    when prelude_con ctx "same-under" con && prelude_con ctx "vary-schedule" variation ->
       let _, test_seed = relational_leaf_context ~suite_seed ~member ~label in
       let mode =
         match prop_mode with
@@ -850,19 +853,31 @@ let relational_key_string ~member ~suite_seed ~prop_mode value =
            version (Hash.to_hex member) schedule_identity_version suite_seed mode)
   | Value.VCon
       {
+        con;
         name = "same-under";
-        args = [ Value.VText _; Value.VCon { name = "vary-world"; args = [ _; _; _ ]; _ } ];
+        args =
+          [
+            Value.VText _;
+            Value.VCon { con = variation; name = "vary-world"; args = [ _; _; _ ]; _ };
+          ];
         _;
-      } ->
+      }
+    when prelude_con ctx "same-under" con && prelude_con ctx "vary-world" variation ->
       Ok
         (Printf.sprintf "%s|relational|%s|variation=world|suite-seed=%d" version
            (Hash.to_hex member) suite_seed)
   | Value.VCon
       {
+        con;
         name = "same-under";
-        args = [ Value.VText label; Value.VCon { name = "vary-value"; args = [ _; _ ]; _ } ];
+        args =
+          [
+            Value.VText label;
+            Value.VCon { con = variation; name = "vary-value"; args = [ _; _ ]; _ };
+          ];
         _;
-      } ->
+      }
+    when prelude_con ctx "same-under" con && prelude_con ctx "vary-value" variation ->
       let _, sample_seed = relational_leaf_context ~suite_seed ~member ~label in
       Ok
         (Printf.sprintf
@@ -1037,12 +1052,14 @@ type totals = {
 }
 
 (* does a test value contain a prop anywhere? (drives cache-key choice) *)
-let rec value_has_prop (v : Value.t) : bool =
+let rec value_has_prop ctx (v : Value.t) : bool =
   match v with
-  | Value.VCon { name = "prop"; _ } -> true
-  | Value.VCon { name = "group"; args = [ _; tests ]; _ } ->
+  | Value.VCon { con; name = "prop"; _ } when prelude_con ctx "prop" con -> true
+  | Value.VCon { con; name = "group"; args = [ _; tests ]; _ } when prelude_con ctx "group" con ->
       let rec walk = function
-        | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> value_has_prop t || walk rest
+        | Value.VCon { con; name = "cons"; args = [ t; rest ]; _ } when prelude_con ctx "cons" con
+          ->
+            value_has_prop ctx t || walk rest
         | _ -> false
       in
       walk tests
@@ -1055,20 +1072,24 @@ let with_coverage ctx f = Eval.with_fresh_coverage ctx f
 let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~schedule_path
     ~structural_path ~display (v : Value.t) : (outcome list, string) result =
   match v with
-  | Value.VCon { name = "same-under"; args = [ Value.VText label; variation ]; _ } ->
+  | Value.VCon { con; name = "same-under"; args = [ Value.VText label; variation ]; _ }
+    when prelude_con ctx "same-under" con ->
       let display = display ^ "/" ^ label in
       let program, test_seed = relational_leaf_context ~suite_seed ~member ~label in
       let run () =
         match variation with
-        | Value.VCon { name = "vary-schedule"; args = [ Value.VInt count; thunk ]; _ } -> (
+        | Value.VCon { con; name = "vary-schedule"; args = [ Value.VInt count; thunk ]; _ }
+          when prelude_con ctx "vary-schedule" con -> (
             match prop_mode with
             | Sampling _ ->
                 run_vary_schedule_seeded ctx ~program ~suite_seed ~test_seed ~count thunk
             | Exhaustive { budget } ->
                 run_vary_schedule_exhaustive ctx ~program ~suite_seed ~budget ~count thunk)
-        | Value.VCon { name = "vary-world"; args = [ left; right; subject ]; _ } ->
+        | Value.VCon { con; name = "vary-world"; args = [ left; right; subject ]; _ }
+          when prelude_con ctx "vary-world" con ->
             run_vary_world ctx left right subject
-        | Value.VCon { name = "vary-value"; args = [ generator; function_ ]; _ } ->
+        | Value.VCon { con; name = "vary-value"; args = [ generator; function_ ]; _ }
+          when prelude_con ctx "vary-value" con ->
             run_vary_value ctx ~sample_seed:test_seed generator function_
         | malformed ->
             ( relational_failure
@@ -1077,7 +1098,8 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
       in
       let (verdict, note), coverage = with_coverage ctx run in
       Ok [ { display; verdict = Some verdict; note = Some note; coverage; cached = false } ]
-  | Value.VCon { name = "case"; args = [ Value.VText label; thunk ]; _ } -> (
+  | Value.VCon { con; name = "case"; args = [ Value.VText label; thunk ]; _ }
+    when prelude_con ctx "case" con -> (
       let display = display ^ "/" ^ label in
       let schedule_path = schedule_path @ [ label ] in
       let run =
@@ -1098,7 +1120,8 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
       | Ok (verdict, coverage, note) ->
           Ok [ { display; verdict = Some verdict; note; coverage; cached = false } ]
       | Error e -> Error (Printf.sprintf "%s: %s" display e))
-  | Value.VCon { name = "prop"; args = [ Value.VText label; thunk ]; _ } -> (
+  | Value.VCon { con; name = "prop"; args = [ Value.VText label; thunk ]; _ }
+    when prelude_con ctx "prop" con -> (
       let display = display ^ "/" ^ label in
       match prop_mode with
       | Sampling { seed; samples } -> (
@@ -1129,10 +1152,13 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
                     cached = false;
                   };
                 ]))
-  | Value.VCon { name = "group"; args = [ Value.VText label; tests ]; _ } ->
+  | Value.VCon { con; name = "group"; args = [ Value.VText label; tests ]; _ }
+    when prelude_con ctx "group" con ->
       let rec walk child_index acc = function
-        | Value.VCon { name = "nil"; _ } -> Ok (List.concat (List.rev acc))
-        | Value.VCon { name = "cons"; args = [ t; rest ]; _ } -> (
+        | Value.VCon { con; name = "nil"; _ } when prelude_con ctx "nil" con ->
+            Ok (List.concat (List.rev acc))
+        | Value.VCon { con; name = "cons"; args = [ t; rest ]; _ } when prelude_con ctx "cons" con
+          -> (
             match
               run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member
                 ~schedule_path:(schedule_path @ [ label ])
@@ -1151,7 +1177,8 @@ let rec run_value ctx ~test_run ~prop_mode ~schedule_plan ~suite_seed ~member ~s
         | v -> Error (Printf.sprintf "malformed group: %s" (Value.display v))
       in
       walk 0 [] tests
-  | Value.VCon { name = "wcase"; args = [ Value.VText label; thunk ]; _ } -> (
+  | Value.VCon { con; name = "wcase"; args = [ Value.VText label; thunk ]; _ }
+    when prelude_con ctx "wcase" con -> (
       (* world lane: the caller already verified grants; never cached *)
       let display = display ^ "/" ^ label in
       match run_thunk ctx ~test_run thunk with
@@ -1175,7 +1202,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~s
              the run parameters are part of what the entry means; pure-case terms key
              by member hash alone *)
           let base_key =
-            if value_has_prop v then
+            if value_has_prop ctx v then
               match prop_mode with
               | Sampling { seed; samples } ->
                   prop_key_string ~member:h ~mode:"sample" ~samples ~seed
@@ -1248,7 +1275,7 @@ let run_discovered ctx (cctx : Check.ctx) ~test_run ~prop_mode ~schedule_plan ~s
       match value_of ctx h with
       | Error error -> Error (Printf.sprintf "%s: %s" name (Runtime_err.to_string error))
       | Ok value -> (
-          match relational_key_string ~member:h ~suite_seed ~prop_mode value with
+          match relational_key_string ctx ~member:h ~suite_seed ~prop_mode value with
           | Error error -> Error (Printf.sprintf "%s: %s" name error)
           | Ok key -> (
               match cache_lookup ~cache_dir key with

@@ -178,8 +178,14 @@ let test_cache_evidence () =
   test_cache_entry_roundtrip ();
   test_cache_version_invalidates_pre_sc17_entries ()
 
+(* the prelude's constructor by its pinned identity *)
+let prelude_constructor name args =
+  match Prelude_identity.lookup_kind store name Resolve.KCon with
+  | Some { Resolve.hash; _ } -> Value.VCon { con = hash; name; args }
+  | None -> Alcotest.failf "the prelude constructor %s is not pinned" name
+
 let test_relational_cache_identity () =
-  let constructor name args = Value.VCon { con = Hash.of_string name; name; args } in
+  let constructor = prelude_constructor in
   let member = Hash.of_string "relational-member" in
   let thunk =
     Value.VClosure
@@ -195,7 +201,7 @@ let test_relational_cache_identity () =
   in
   let key ~seed ~count =
     match
-      Warp.relational_key_string ~member ~suite_seed:seed
+      Warp.relational_key_string ctx ~member ~suite_seed:seed
         ~prop_mode:(Warp.Sampling { seed; samples = 100 })
         (schedule count)
     with
@@ -219,7 +225,7 @@ let test_relational_cache_identity () =
     (not (String.equal first (key ~seed:74 ~count:3)));
   let exhaustive =
     match
-      Warp.relational_key_string ~member ~suite_seed:73
+      Warp.relational_key_string ctx ~member ~suite_seed:73
         ~prop_mode:(Warp.Exhaustive { budget = 20 })
         (schedule 3)
     with
@@ -231,7 +237,7 @@ let test_relational_cache_identity () =
     (not (String.equal first exhaustive));
   let exhaustive_other_seed =
     match
-      Warp.relational_key_string ~member ~suite_seed:74
+      Warp.relational_key_string ctx ~member ~suite_seed:74
         ~prop_mode:(Warp.Exhaustive { budget = 20 })
         (schedule 3)
     with
@@ -240,7 +246,25 @@ let test_relational_cache_identity () =
   in
   Alcotest.(check bool)
     "suite seed rekeys exhaustive relational case" true
-    (not (String.equal exhaustive exhaustive_other_seed))
+    (not (String.equal exhaustive exhaustive_other_seed));
+  (* TYPE.1: the key reads the variation by identity, so same-named user constructors are not a
+     relational value and cannot reach a cached verdict *)
+  let forged name args = Value.VCon { con = Hash.of_string ("forged-" ^ name); name; args } in
+  let refused label value =
+    match
+      Warp.relational_key_string ctx ~member ~suite_seed:73
+        ~prop_mode:(Warp.Sampling { seed = 73; samples = 100 })
+        value
+    with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s was keyed as a relational value" label
+  in
+  refused "a forged same-under"
+    (forged "same-under"
+       [ Value.VText "schedule"; constructor "vary-schedule" [ Value.VInt 3; thunk ] ]);
+  refused "a forged vary-schedule"
+    (constructor "same-under"
+       [ Value.VText "schedule"; forged "vary-schedule" [ Value.VInt 3; thunk ] ])
 
 (* --- W6.8: the memo trap — two tests sharing a dependency BOTH count it --- *)
 
@@ -507,11 +531,80 @@ let test_report_decodes_by_identity () =
           let forged_true =
             Value.VCon { entry with args = [ Value.VTuple [ label; forged "true" ]; rest ] }
           in
-          match Warp.verdict_of_report ctx (Value.VCon { c with args = [ forged_true; hard ] }) with
+          (match
+             Warp.verdict_of_report ctx (Value.VCon { c with args = [ forged_true; hard ] })
+           with
           | Ok (Warp.Fail { soft = [ "only" ]; hard = None }) -> ()
-          | _ -> Alcotest.fail "a forged true counted as a passing check")
+          | _ -> Alcotest.fail "a forged true counted as a passing check");
+          let forged_cons = Value.VCon { entry with con = Hash.of_string "forged-cons" } in
+          (match
+             Warp.verdict_of_report ctx (Value.VCon { c with args = [ forged_cons; hard ] })
+           with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "a forged cons was read as an entry");
+          let forged_some =
+            Value.VCon
+              { con = Hash.of_string "forged-some"; name = "some"; args = [ Value.VText "x" ] }
+          in
+          match
+            Warp.verdict_of_report ctx
+              (Value.VCon { c with args = [ List.hd c.args; forged_some ] })
+          with
+          | Error _ -> ()
+          | Ok _ -> Alcotest.fail "a forged some was read as a hard failure")
       | _ -> Alcotest.fail "expected one report entry")
   | _ -> Alcotest.fail "expected a two-field report"
+
+(* TYPE.1: the test-tree walk reads case, group, cons and nil by identity *)
+let test_tree_walk_by_identity () =
+  let test_run =
+    match Prelude_identity.lookup_kind store "test.run" Resolve.KTerm with
+    | Some { Resolve.hash; _ } -> (
+        match
+          Eval.run_expr ctx { Kernel.it = Kernel.Ref (hash, Kernel.Term); meta = Meta.empty }
+        with
+        | Ok v -> v
+        | Error e -> Alcotest.failf "test.run value: %s" (Runtime_err.to_string e))
+    | None -> Alcotest.fail "test.run is not pinned"
+  in
+  let thunk = eval_ok "(lam () (app (var check.true) (var true) (lit \"ok\")))" in
+  let walk value =
+    Warp.run_value ctx ~test_run
+      ~prop_mode:(Warp.Sampling { seed = 1; samples = 1 })
+      ~schedule_plan:Warp.Default_schedule ~suite_seed:1 ~member:(Hash.of_string "tree-member")
+      ~schedule_path:[] ~structural_path:[] ~display:"t" value
+  in
+  let forged name args = Value.VCon { con = Hash.of_string ("forged-" ^ name); name; args } in
+  let case = prelude_constructor "case" [ Value.VText "c"; thunk ] in
+  (match walk case with
+  | Ok [ { Warp.verdict = Some (Warp.Pass 1); _ } ] -> ()
+  | _ -> Alcotest.fail "the genuine case should pass");
+  (match
+     walk
+       (prelude_constructor "group"
+          [ Value.VText "g"; prelude_constructor "cons" [ case; prelude_constructor "nil" [] ] ])
+   with
+  | Ok [ _ ] -> ()
+  | _ -> Alcotest.fail "the genuine group should run its case");
+  List.iter
+    (fun (label, value) ->
+      match walk value with Error _ -> () | Ok _ -> Alcotest.failf "%s was run as a test" label)
+    [
+      ("a forged case", forged "case" [ Value.VText "c"; thunk ]);
+      ( "a forged group",
+        forged "group"
+          [ Value.VText "g"; prelude_constructor "cons" [ case; prelude_constructor "nil" [] ] ] );
+      ( "a forged cons",
+        prelude_constructor "group"
+          [ Value.VText "g"; forged "cons" [ case; prelude_constructor "nil" [] ] ] );
+      ("a forged nil", prelude_constructor "group" [ Value.VText "g"; forged "nil" [] ]);
+    ];
+  Alcotest.(check bool)
+    "a forged prop is not a prop" false
+    (Warp.value_has_prop ctx (forged "prop" [ Value.VText "p"; thunk ]));
+  Alcotest.(check bool)
+    "a genuine prop is a prop" true
+    (Warp.value_has_prop ctx (prelude_constructor "prop" [ Value.VText "p"; thunk ]))
 
 let suite =
   [
@@ -531,4 +624,5 @@ let suite =
       test_user_ops_are_not_prelude_ops;
     Alcotest.test_case "user fail and observe" `Quick test_user_fail_and_observe;
     Alcotest.test_case "report decodes by identity" `Quick test_report_decodes_by_identity;
+    Alcotest.test_case "test tree walks by identity" `Quick test_tree_walk_by_identity;
   ]

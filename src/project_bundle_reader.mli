@@ -18,8 +18,10 @@ val reachable : Store.t -> Hash.t list -> (Hash.t, Kernel.decl) Hashtbl.t
 (** Every declaration reachable from the roots, prelude ones included; quoted data is not code, so
     only live splices are followed. *)
 
-val eval_identities : Store.t -> Hash.t list
-(** The identities whose reference means dynamic evaluation: [eval-code] and [Eval]. *)
+val eval_identities : Store.t -> Hash.t list option
+(** The identities whose reference means dynamic evaluation: the prelude's [eval-code] and [Eval],
+    by pinned identity. [None] when the store does not hold both; callers then refuse (E1721) rather
+    than treat the check as passed. *)
 
 type entry =
   | Run_entry of { name : string; steps : Hash.t list; grants : string list }

@@ -29,15 +29,12 @@ let reachable store roots =
   seen
 
 let eval_identities store =
-  List.filter_map Fun.id
-    [
-      Option.map
-        (fun (e : Resolve.entry) -> e.hash)
-        (Prelude_identity.lookup_kind store "eval-code" Resolve.KOp);
-      Option.map
-        (fun (e : Resolve.entry) -> e.hash)
-        (Prelude_identity.lookup_kind store "eval" Resolve.KEffect);
-    ]
+  match
+    ( Prelude_identity.lookup_kind store "eval-code" Resolve.KOp,
+      Prelude_identity.lookup_kind store "eval" Resolve.KEffect )
+  with
+  | Some eval_code, Some eval -> Some [ eval_code.Resolve.hash; eval.Resolve.hash ]
+  | _ -> None
 
 (* --- reading and verifying (design §9, "Import and run") --- *)
 
@@ -704,7 +701,14 @@ let verify_unguarded ?prelude ~store ~checker path =
     | None -> Ok ()
   in
   let* () =
-    let evals = eval_identities store in
+    let* evals =
+      match eval_identities store with
+      | Some evals -> Ok evals
+      | None ->
+          refuse "E1721"
+            "the prelude's eval-code and Eval identities are absent, so dynamic evaluation cannot \
+             be ruled out"
+    in
     match
       Hashtbl.fold
         (fun decl_hash decl acc ->

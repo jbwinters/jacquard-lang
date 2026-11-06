@@ -185,7 +185,8 @@ never caches a posterior that holds an opaque value:
 
 Migration (docs/release/api-identities/DECISION.md, Opaque Types): opacity is
 part of the type's identity, so making a pinned dependency's type transparent,
-changing an opaque type's representation, or adding an export each changes the
+changing an opaque type's representation (a renamed constructor, or one that
+gains a field), or adding an export each changes the
 dependency's context identity, and the consumer must re-pin (E1710). The
 interface diff calls any changed exported identity breaking, even where clients
 still compile after re-pinning; only the added export is compatible:
@@ -200,15 +201,26 @@ still compile after re-pinning; only the added export is compatible:
   $ jacquard project pin > /dev/null && jacquard project run demo
   <opaque mig-coin>
   $ sed -i 's/^opaque type/type/' ../lib/m.jac
-  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*' < "$top/pipe.out"
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|\(breaking\|compatible\) *\(type\|term\) [a-z.-]*' < "$top/pipe.out"
   exit=1
   error[E1710]: A dependency's pin does not match its context identity.
-  changed: interface; breaking
+  breaking   type mig-coin
+  breaking   term mig.flip
+  breaking   term mig.heads
   $ cp ../lib/m.orig ../lib/m.jac && sed -i 's/MigTails/MigOther/g' ../lib/m.jac
-  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|changed: [a-z]*; [a-z]*' < "$top/pipe.out"
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|\(breaking\|compatible\) *\(type\|term\) [a-z.-]*' < "$top/pipe.out"
   exit=1
   error[E1710]: A dependency's pin does not match its context identity.
-  changed: interface; breaking
+  breaking   type mig-coin
+  breaking   term mig.flip
+  breaking   term mig.heads
+  $ printf 'opaque type MigCoin = | MigHeads | MigTails(n: Int)\nmig.heads = MigHeads\nmig.flip(c) = match c { | MigHeads -> MigTails(0) | MigTails(_) -> MigHeads }\n' > ../lib/m.jac
+  $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|\(breaking\|compatible\) *\(type\|term\) [a-z.-]*' < "$top/pipe.out"
+  exit=1
+  error[E1710]: A dependency's pin does not match its context identity.
+  breaking   type mig-coin
+  breaking   term mig.flip
+  breaking   term mig.heads
   $ cp ../lib/m.orig ../lib/m.jac && printf 'mig.tails = MigTails\n' >> ../lib/m.jac && sed -i 's/(term mig.flip)/(term mig.flip) (term mig.tails)/' ../lib/project.jqd
   $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E1710\].*\|(changed: .*)' < "$top/pipe.out"
   exit=1
