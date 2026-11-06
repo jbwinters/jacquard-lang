@@ -828,6 +828,16 @@ and row_to_form ({ effects; rvar; wmeta } : row) : Form.t =
     (List.map (fun e -> Form.F (form "eref" [ gref_arg e ])) effects
     @ match rvar with Some v -> [ Form.Sym v ] | None -> [])
 
+(** [is_wildcard_resume clause] holds when the clause's continuation is the wildcard: the kernel
+    name ["_"], or exactly the spelling [expr_to_form] gives a wildcard in this clause (the first
+    of [unused-resume], [unused-resume-2], ... that the clause's parameters and body do not
+    mention). Such a binder captures nothing, so printers may show it as [resume _]; parsing that
+    back and encoding it picks the same spelling. Never fails. *)
+let is_wildcard_resume ({ params; resume; obody; _ } : opclause) =
+  String.equal resume "_"
+  || String.equal resume
+       (wildcard_resume_symbol (expr_to_form obody :: List.map pat_to_form params))
+
 let binding_to_form { bname; annot; value; bmeta } =
   form ~meta:bmeta "binding"
     [

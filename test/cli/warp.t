@@ -318,3 +318,21 @@ continuation; a generated name could capture a spliced reference.
   $ jacquard check wildcard-quoted.jac > quoted.out 2>&1; status=$?; grep -o 'error\[E1245\]' quoted.out; echo "exit:$status"
   error[E1245]
   exit:1
+
+The rule counts quote depth: a live `unquote` splices ordinary code, so its
+handler may discard the continuation, while a nested quote (even one whose
+`unquote` only leaves the inner quote) is still quoted data:
+
+  $ cat wildcard-resume.jac > wildcard-splice.jac
+  $ echo 'spliced = quote { unquote(handle 1 { | return x -> x | halt() resume _ -> 0 }) }' >> wildcard-splice.jac
+  $ jacquard check wildcard-splice.jac > splice.out 2>&1; status=$?; cat splice.out; echo "exit:$status"
+  ok
+  exit:0
+  $ echo 'nested = quote { quote { handle 1 { | return x -> x | halt() resume _ -> 0 } } }' > wildcard-nested.jac
+  $ jacquard check wildcard-nested.jac > nested.out 2>&1; status=$?; grep -o 'error\[E1245\]' nested.out; echo "exit:$status"
+  error[E1245]
+  exit:1
+  $ echo 'inner = quote { quote { unquote(handle 1 { | return x -> x | halt() resume _ -> 0 }) } }' > wildcard-inner.jac
+  $ jacquard check wildcard-inner.jac > inner.out 2>&1; status=$?; grep -o 'error\[E1245\]' inner.out; echo "exit:$status"
+  error[E1245]
+  exit:1

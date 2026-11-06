@@ -521,7 +521,11 @@ mention. The hash addresses the continuation by position, so a stored
 declaration's identity matches its named twin. Quoted code is name-addressed
 data that a runtime splice can extend, where a generated name could capture a
 spliced reference, so a handler inside `quote` must name its continuation
-(E1245); a live `unquote` is ordinary code and may use `resume _`.
+(E1245); a live `unquote` is ordinary code and may use `resume _`. The
+surface printer shows a reloaded continuation as `resume _` when it is exactly
+the spelling the encoding would pick for that clause (so nothing refers to it
+and printing it back re-encodes the same text), except inside a quote, where
+it keeps the name.
 
 ## 5. The forms
 

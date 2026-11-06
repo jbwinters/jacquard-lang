@@ -16,10 +16,12 @@ let default_width = 100
 
 exception Bug_unsupported_surface_form
 
-type context = { trivia : bool }
+(* [quote_depth] counts the enclosing [quote]s minus the live [unquote]s between them, as surface
+   lowering does: a wildcard continuation is only printable as [resume _] at depth 0 (E1245). *)
+type context = { trivia : bool; quote_depth : int }
 
-let canonical_context = { trivia = false }
-let trivia_context = { trivia = true }
+let canonical_context = { trivia = false; quote_depth = 0 }
+let trivia_context = { trivia = true; quote_depth = 0 }
 
 let leading_comments meta =
   let trivia = Meta.comment_texts Meta.key_trivia meta in
@@ -374,6 +376,13 @@ let pp_lit fmt = function
   | Kernel.LText s -> Format.fprintf fmt "\"%s\"" (Printer.escape_text s)
 
 let pp_named kind fmt name = Format.pp_print_string fmt (render_name kind name)
+
+(* A continuation the clause never mentions and that its encoding would spell the same way prints
+   as [resume _] outside quotes; anything else keeps its name. *)
+let pp_resume context fmt (clause : Kernel.opclause) =
+  if context.quote_depth = 0 && Kernel.is_wildcard_resume clause then
+    Format.pp_print_string fmt "_"
+  else pp_named Surface_name.Term fmt clause.resume
 
 let pp_value_name kind fmt name =
   match kind with
@@ -1077,10 +1086,11 @@ and pp_kernel_expr context lookup fmt (expr : Kernel.expr) =
   | Kernel.Handle { body; ret; ops } -> pp_handle context lookup expr.meta fmt body ret ops
   | Kernel.Quote payload -> pp_quote context lookup expr.meta fmt payload
   | Kernel.Unquote splice ->
-      Format.fprintf fmt "unquote(%a" (pp_expr context lookup) splice;
+      let inner = { context with quote_depth = context.quote_depth - 1 } in
+      Format.fprintf fmt "unquote(%a" (pp_expr inner lookup) splice;
       pp_inner context expr.meta fmt;
       pp_closing fmt
-        (ends_in_last_line_comment context (pp_expr context lookup) expr.meta [ splice ])
+        (ends_in_last_line_comment inner (pp_expr inner lookup) expr.meta [ splice ])
         ")"
 
 and if_branches = function
@@ -1349,10 +1359,6 @@ and pp_sequence_contents context lookup fmt expr =
   pp_expr context lookup fmt result
 
 and pp_handle context lookup meta fmt body ret ops =
-  let pp_resume fmt name =
-    if String.equal name "_" then Format.pp_print_string fmt "_"
-    else pp_named Surface_name.Term fmt name
-  in
   let pp_ret fmt (clause : Kernel.ret) =
     pp_leading context clause.rmeta fmt;
     Format.fprintf fmt "@[<hov 2>| return %a ->@ %a@]" (pp_pat context lookup) clause.rbinder
@@ -1369,7 +1375,7 @@ and pp_handle context lookup meta fmt body ret ops =
       clause.params;
     Format.fprintf fmt ")";
     pp_trailing context params_meta fmt;
-    Format.fprintf fmt " resume %a ->@ %a@]" pp_resume clause.resume (pp_arm_body context lookup)
+    Format.fprintf fmt " resume %a ->@ %a@]" (pp_resume context) clause (pp_arm_body context lookup)
       clause.obody;
     pp_trailing context clause.ometa fmt
   in
@@ -1403,10 +1409,11 @@ and is_atomic_call_head expr =
 and pp_quote context lookup meta fmt payload =
   match surface_quote_expr payload with
   | Some expr ->
-      Format.fprintf fmt "@[<hov 2>quote {@ %a" (pp_expr context lookup) expr;
+      let inner = { context with quote_depth = context.quote_depth + 1 } in
+      Format.fprintf fmt "@[<hov 2>quote {@ %a" (pp_expr inner lookup) expr;
       pp_inner context meta fmt;
       pp_following_break fmt
-        (ends_in_last_line_comment context (pp_expr context lookup) meta [ expr ])
+        (ends_in_last_line_comment inner (pp_expr inner lookup) meta [ expr ])
         "}";
       Format.fprintf fmt "@]"
   | None ->
@@ -1779,15 +1786,11 @@ let pp_ret_fragment context lookup fmt (clause : Kernel.ret) =
     (pp_arm_body context lookup) clause.rbody
 
 let pp_op_fragment context lookup fmt (clause : Kernel.opclause) =
-  let pp_resume fmt name =
-    if String.equal name "_" then Format.pp_print_string fmt "_"
-    else pp_named Surface_name.Term fmt name
-  in
   Format.fprintf fmt "@[<hv 2>| %a(%a) resume %a ->@ %a@]"
     (pp_gref lookup Surface_name.Op clause.ometa)
     clause.op
     (pp_comma_list context (pp_pat context lookup))
-    clause.params pp_resume clause.resume (pp_arm_body context lookup) clause.obody
+    clause.params (pp_resume context) clause (pp_arm_body context lookup) clause.obody
 
 let fragment_error form =
   Error
