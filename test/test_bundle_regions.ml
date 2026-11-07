@@ -45,7 +45,7 @@ let build_bundle () =
   write
     (Filename.concat work "libp/project.jqd")
     "(project-v1 (name \"libp\") (requires (core \"0.2\")) (namespace libp) (units \"p.jac\") \
-     (exports (type libp-score) (term libp.make) (term libp.wrap)))";
+     (exports (type libp-score) (term libp.make) (term libp.wrap) (term libp.loop)))";
   write
     (Filename.concat work "libp/p.jac")
     "opaque type LibpScore = | LibpScore(value: Int)\n\
@@ -55,12 +55,18 @@ let build_bundle () =
      libp.plain(n) = LibpPlain(n)\n\
      libp.keep : (LibpPlain) ->{} LibpPlain\n\
      libp.keep(p) = p\n\
-     libp.wrap(n) = libp.keep(libp.plain(n))\n";
+     libp.wrap(n) = libp.keep(libp.plain(n))\n\
+     libp.seal(n) = if int.gt?(n, 100) then libp.loop(int.sub(n, 1)) else LibpScore(n)\n\
+     libp.loop(n) = libp.seal(n)\n";
   write
     (Filename.concat work "app/project.jqd")
     "(project-v1 (name \"app\") (requires (core \"0.2\")) (namespace app) (units \"a.jac\") (deps \
      (dep (as p) (path \"../libp\"))) (entries (run demo (units \"demo.jac\"))))";
-  write (Filename.concat work "app/a.jac") "app.go(n) = (libp.make(n), libp.wrap(n))\n";
+  write
+    (Filename.concat work "app/a.jac")
+    "opaque type AppToken = | AppToken(value: Int)\n\
+     app.token(n) = AppToken(n)\n\
+     app.go(n) = (libp.make(n), libp.wrap(n), app.token(n))\n";
   write (Filename.concat work "app/demo.jac") "app.go(1)\n";
   let manifest = Filename.concat work "app/project.jqd" in
   let session, graph =
@@ -79,25 +85,26 @@ let field name (f : Form.t) =
     (function Form.F ({ Form.head; _ } as g) when head = name -> Some g | _ -> None)
     f.Form.args
 
-(* re-export [helper] from the bundle's own context as [as_name], recomputing its records *)
-let forge_reexport bundle ~helper ~as_name =
-  let loaded =
-    expect "load" (Project_bundle_reader.load ~prelude_dir ~root:(fresh_dir "load") bundle)
-  in
-  let store = loaded.Project_bundle_reader.store and checker = loaded.checker in
-  let own = loaded.bundle.Project_bundle_reader.context in
-  let _, form, (interface : Interface.t) =
-    List.find (fun (id, _, _) -> Hash.equal id own) loaded.bundle.contexts
-  in
-  let hash =
-    match Store.lookup_kind store helper Resolve.KTerm with
-    | Some { Resolve.hash; _ } -> hash
-    | None -> Alcotest.failf "%s is not bound in the bundle" helper
-  in
-  let exports =
-    ((as_name, Resolve.KTerm), hash)
-    :: List.map (fun (e : Interface.export) -> ((e.name, e.kind), e.hash)) interface.exports
-  in
+let load bundle =
+  expect "load" (Project_bundle_reader.load ~prelude_dir ~root:(fresh_dir "load") bundle)
+
+let record_file bundle = Filename.concat bundle (Project_bundle_reader.version ^ ".jqd")
+let replace s ~sub ~by = Str.global_replace (Str.regexp_string sub) by s
+
+let exports_of (interface : Interface.t) =
+  List.map (fun (e : Interface.export) -> ((e.name, e.kind), e.hash)) interface.exports
+
+let bound (loaded : Project_bundle_reader.t) name =
+  match Store.lookup_kind loaded.store name Resolve.KTerm with
+  | Some { Resolve.hash; _ } -> hash
+  | None -> Alcotest.failf "%s is not bound in the bundle" name
+
+(* rewrite context [id]'s record and interface so that it exports [exports], with the dependency
+   edges named in [renamed] pointing at their new identities; the new identity is returned and the
+   bundle record is left to [rename_contexts] *)
+let rewrite_context (loaded : Project_bundle_reader.t) bundle id ~exports ~renamed =
+  let store = loaded.store and checker = loaded.checker in
+  let _, form, _ = List.find (fun (id', _, _) -> Hash.equal id id') loaded.bundle.contexts in
   let derived =
     expect "derive" (Interface.of_side ~recorded:true checker { Diff.store; bindings = exports })
   in
@@ -106,15 +113,17 @@ let forge_reexport bundle ~helper ~as_name =
     | Some d ->
         List.filter_map
           (function
-            | Form.F { Form.head = "dep"; args = [ Form.Sym alias; Form.Hash h ]; _ } ->
-                Some (alias, h)
+            | Form.F { Form.head = "dep"; args = [ Form.Sym alias; Form.Hash h ]; _ } -> (
+                match List.find_opt (fun (old, _) -> Hash.equal old h) renamed with
+                | Some (_, h') -> Some (alias, h')
+                | None -> Some (alias, h))
             | _ -> None)
           d.Form.args
     | None -> []
   in
   let record = Project_context.form store ~interface:derived ~exports ~deps in
   let forged = Project_context.identity record in
-  let old_name = Hash.to_hex own ^ ".jqd" and new_name = Hash.to_hex forged ^ ".jqd" in
+  let old_name = Hash.to_hex id ^ ".jqd" and new_name = Hash.to_hex forged ^ ".jqd" in
   List.iter
     (fun d -> Sys.remove (Filename.concat bundle (Filename.concat d old_name)))
     [ "contexts"; "interfaces" ];
@@ -122,10 +131,37 @@ let forge_reexport bundle ~helper ~as_name =
   write
     (Filename.concat bundle (Filename.concat "interfaces" new_name))
     (Interface.serialize derived);
-  let head = Filename.concat bundle (Project_bundle_reader.version ^ ".jqd") in
-  let text = read head in
-  let replace s ~sub ~by = Str.global_replace (Str.regexp_string sub) by s in
-  write head (replace text ~sub:(Hash.to_hex own) ~by:(Hash.to_hex forged))
+  forged
+
+let rename_contexts bundle pairs =
+  let head = record_file bundle in
+  write head
+    (List.fold_left
+       (fun text (old, forged) -> replace text ~sub:(Hash.to_hex old) ~by:(Hash.to_hex forged))
+       (read head) pairs)
+
+(* re-export [helper] from the bundle's own context as [as_name], recomputing its records *)
+let forge_reexport bundle ~helper ~as_name =
+  let loaded = load bundle in
+  let own = loaded.bundle.Project_bundle_reader.context in
+  let _, _, interface = List.find (fun (id, _, _) -> Hash.equal id own) loaded.bundle.contexts in
+  let exports = ((as_name, Resolve.KTerm), bound loaded helper) :: exports_of interface in
+  rename_contexts bundle [ (own, rewrite_context loaded bundle own ~exports ~renamed:[]) ]
+
+(* add the declaration bootstrap [src] declares, resolved against the bundle's names, to the bundle
+   as a hash-valid object, and recount the record's objects *)
+let forge_object (loaded : Project_bundle_reader.t) bundle src =
+  let hashes = Eval_support.put_src loaded.store (Store.names_view loaded.store) src in
+  let objects = Filename.concat bundle "objects" in
+  write
+    (Filename.concat objects (Hash.to_hex hashes.Canon.decl_hash ^ ".jqd"))
+    (read (Store.object_path loaded.store hashes.Canon.decl_hash));
+  let head = record_file bundle in
+  write head
+    (Str.global_replace (Str.regexp "(objects [0-9]+)")
+       (Printf.sprintf "(objects %d)" (Array.length (Sys.readdir objects)))
+       (read head));
+  hashes
 
 let codes bundle =
   match Project_bundle_reader.load ~prelude_dir ~root:(fresh_dir "verify") bundle with
@@ -191,16 +227,8 @@ let test_export_of_wrong_kind () =
 
 (* add a test entry to the bundle record whose root is [helper]: entries are author-trusted, but they
    cannot reach another context's unexported declarations *)
-let forge_test_root bundle ~helper =
-  let loaded =
-    expect "load" (Project_bundle_reader.load ~prelude_dir ~root:(fresh_dir "load") bundle)
-  in
-  let hash =
-    match Store.lookup_kind loaded.Project_bundle_reader.store helper Resolve.KTerm with
-    | Some { Resolve.hash; _ } -> hash
-    | None -> Alcotest.failf "%s is not bound in the bundle" helper
-  in
-  let head = Filename.concat bundle (Project_bundle_reader.version ^ ".jqd") in
+let add_test_root bundle hash =
+  let head = record_file bundle in
   let text = read head in
   let forged =
     Str.replace_first (Str.regexp_string "(entries ")
@@ -211,6 +239,8 @@ let forge_test_root bundle ~helper =
   if forged = text then Alcotest.fail "no (entries ...) in the record";
   write head forged
 
+let forge_test_root bundle ~helper = add_test_root bundle (bound (load bundle) helper)
+
 let test_entry_reaching_dependency_internals () =
   let bundle = build_bundle () in
   forge_test_root bundle ~helper:"libp.plain";
@@ -219,6 +249,98 @@ let test_entry_reaching_dependency_internals () =
   let bundle = build_bundle () in
   forge_test_root bundle ~helper:"libp.raw";
   Alcotest.(check (list string)) "nor the dependency's sealed type" [ "E1738" ] (codes bundle)
+
+(* hash-valid forged objects, rooted by a forged test entry of the consumer: a sealed constructor is
+   used whether it is applied, passed unapplied, or built inside a live splice; constructor syntax
+   in quoted data is not a use *)
+let forged body =
+  let bundle = build_bundle () in
+  let loaded = load bundle in
+  let hashes =
+    forge_object loaded bundle (Printf.sprintf "(defterm ((binding app.forged () %s)))" body)
+  in
+  add_test_root bundle (List.assoc "app.forged" hashes.Canon.named);
+  codes bundle
+
+let test_forged_constructor_objects () =
+  Alcotest.(check (list string))
+    "an applied constructor" [ "E1738" ]
+    (forged "(app (var libp-score) (lit 1))");
+  Alcotest.(check (list string)) "an unapplied constructor" [ "E1738" ] (forged "(var libp-score)");
+  Alcotest.(check (list string))
+    "a constructor inside a splice" [ "E1738" ]
+    (forged
+       "(quote (pair (unquote (match (app (var libp-score) (lit 1)) (clause (pwild) (quote (lit \
+        1)))))))");
+  Alcotest.(check (list string))
+    "constructor syntax in quoted data is not a use" [] (forged "(quote (libp-score 1))")
+
+(* a region stops at the exact member identities other contexts export, not at their groups: a
+   consumer's term calling the exported member of a dependency's recursive group stops there, while
+   one calling the group's private constructing member brings the group into its region *)
+let test_private_group_member () =
+  Alcotest.(check (list string))
+    "calling the group's exported member" []
+    (forged "(app (var libp.loop) (lit 1))");
+  Alcotest.(check (list string))
+    "calling the group's private constructing member" [ "E1738" ]
+    (forged "(app (var libp.seal) (lit 1))")
+
+(* a dependency's region cannot construct its consumer's sealed type: the library context is forged
+   to export a term constructing the application's opaque type, and the application's context and
+   the bundle record follow the library's new identity *)
+let test_dependency_constructing_consumer_type () =
+  let bundle = build_bundle () in
+  let loaded = load bundle in
+  let own = loaded.bundle.Project_bundle_reader.context in
+  let find id = List.find (fun (id', _, _) -> Hash.equal id id') loaded.bundle.contexts in
+  let lib, _, lib_interface =
+    List.find (fun (id, _, _) -> not (Hash.equal id own)) loaded.bundle.contexts
+  in
+  let hashes =
+    forge_object loaded bundle "(defterm ((binding libp.mint () (app (var app-token) (lit 1)))))"
+  in
+  let lib' =
+    rewrite_context loaded bundle lib
+      ~exports:
+        ((("libp.mint", Resolve.KTerm), List.assoc "libp.mint" hashes.Canon.named)
+        :: exports_of lib_interface)
+      ~renamed:[]
+  in
+  let _, _, own_interface = find own in
+  let own' =
+    rewrite_context loaded bundle own ~exports:(exports_of own_interface) ~renamed:[ (lib, lib') ]
+  in
+  rename_contexts bundle [ (lib, lib'); (own, own') ];
+  Alcotest.(check (list string))
+    "a dependency's export constructing the consumer's opaque type" [ "E1738" ] (codes bundle)
+
+(* a refused import leaves none of its objects or names in the importing store *)
+let test_refused_import_leaves_nothing () =
+  let bundle = build_bundle () in
+  forge_reexport bundle ~helper:"libp.raw" ~as_name:"app.raw";
+  let store, _ = expect "open" (Frontend.open_session ~prelude_dir ~root:(fresh_dir "import")) in
+  let checker = expect "checker" (Frontend.make_checker store) in
+  let hexes () = List.sort compare (List.map Hash.to_hex (Store.all_decl_hashes store)) in
+  let before = hexes () in
+  (match Project_bundle_reader.verify ~store ~checker bundle with
+  | Ok _ -> Alcotest.fail "the forged bundle verified"
+  | Error ds ->
+      Alcotest.(check (list string)) "refused late" [ "E1738" ] (List.filter_map Diag.code ds));
+  Alcotest.(check (list string)) "the store's declarations are unchanged" before (hexes ());
+  let objects = Filename.concat bundle "objects" in
+  Array.iter
+    (fun name ->
+      match Hash.of_hex (Filename.chop_suffix name ".jqd") with
+      | Some h ->
+          Alcotest.(check bool)
+            (name ^ " left no object file") false
+            (Sys.file_exists (Store.object_path store h))
+      | None -> Alcotest.failf "object %s is not named by a hash" name)
+    (Sys.readdir objects);
+  Alcotest.(check bool)
+    "the bundle's names are unbound" true
+    (Option.is_none (Store.lookup_kind store "libp.raw" Resolve.KTerm))
 
 (* TYPE.1 S2c: a builtin runs a term from a runtime hash (a posterior model) only if the prelude or a
    context in the run exports it *)
@@ -357,6 +479,11 @@ let suite =
     Alcotest.test_case "export of the wrong kind" `Quick test_export_of_wrong_kind;
     Alcotest.test_case "entry reaching dependency internals" `Quick
       test_entry_reaching_dependency_internals;
+    Alcotest.test_case "forged constructor objects" `Quick test_forged_constructor_objects;
+    Alcotest.test_case "private group member" `Quick test_private_group_member;
+    Alcotest.test_case "dependency constructing its consumer's type" `Quick
+      test_dependency_constructing_consumer_type;
+    Alcotest.test_case "refused import leaves nothing" `Quick test_refused_import_leaves_nothing;
     Alcotest.test_case "model guard" `Quick test_model_guard;
     Alcotest.test_case "project model guard" `Quick test_project_model_guard;
     Alcotest.test_case "runtime executor inventory" `Quick test_runtime_executor_inventory;

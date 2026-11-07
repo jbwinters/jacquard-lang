@@ -87,6 +87,14 @@ Every tampering is refused before anything runs:
   exit=1
   error[E1721]: A bundle root can reach dynamic evaluation, or the prelude cannot rule it out.
   $ echo 'extra.run() = 7' > ../extra/e.jac && (cd ../extra && jacquard project bundle -o ../extra.bundle > /dev/null)
+  $ cp -rL "$JACQUARD_PRELUDE" ../noeval-prelude && chmod -R u+w ../noeval-prelude && sed -i '/^(defeffect eval /d' ../noeval-prelude/03-effects.jqd
+  $ (cd ../extra && JACQUARD_PRELUDE=$PWD/../noeval-prelude jacquard project bundle -o ../noeval.bundle) > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E....\].*\|identities are absent.*' < "$top/pipe.out"; ls .. | grep -c noeval.bundle
+  exit=1
+  error[E1721]: A bundle root can reach dynamic evaluation, or the prelude cannot rule it out.
+  identities are absent, so dynamic evaluation cannot be ruled out
+  0
+  [1]
+  $ rm -rf ../noeval-prelude
   $ tamper && cp ../extra.bundle/objects/*.jqd ../t.bundle/objects/
   $ jacquard project run --bundle ../t.bundle demo > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E17..\].*\|is not reachable.*' < "$top/pipe.out" | head -2
   exit=1

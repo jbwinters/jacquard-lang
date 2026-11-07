@@ -1169,3 +1169,16 @@ guessing why. More forged-constructor tests cover Warp's `wcase`,
 the relational key; another checks that the prelude's own `eval` declaration
 yields both eval identities. The source inventory is unchanged at
 `1237 / 83 / 57`.
+
+Abstract-types hardening, fourth part. Hash-valid forged bundle objects, rooted
+by a forged test entry, are refused (E1738) when they use a dependency's sealed
+constructor applied, unapplied or inside a live splice; constructor syntax in
+quoted data is not a use. A consumer term calling the private constructing
+member of a dependency's recursive group is refused, while one calling the
+group's exported member verifies. A dependency context forged to export a term
+constructing its consumer's opaque type is refused, and a refused import leaves
+no declaration, object file or name in the importing store. `project-bundle.t`
+builds against a prelude copy without the `eval` effect and is refused with the
+absent-identity cause of E1721. The third part's forged Warp tests also covered
+`same-under` and `vary-schedule` in the test-tree walk. The source inventory is
+now `1241 / 83 / 57`.

@@ -7,8 +7,9 @@
     closure), [provenance.jqd] (not part of any identity), and [objects/] (the persisted bytes of
     every non-prelude declaration reachable from a run step, a test root, or an export).
 
-    Failure modes (domain [Project]): E1721 when dynamic evaluation is reachable from any root;
-    E1725 when the output overlaps an input or already exists. *)
+    Failure modes (domain [Project]): E1721 when dynamic evaluation is reachable from any root, or
+    when the store lacks the prelude's pinned [eval-code] and [Eval] declarations, so it cannot be
+    ruled out; E1725 when the output overlaps an input or already exists. *)
 
 val version : string
 (** ["bundle-v1"]. *)

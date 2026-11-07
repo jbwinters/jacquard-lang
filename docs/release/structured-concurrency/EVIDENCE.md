@@ -760,7 +760,7 @@ opam exec -- dune build test/test_jacquard.exe
 
 The current inventory is mechanically checked against compiled discovery:
 
-- Alcotest/QCheck cases: `1237`
+- Alcotest/QCheck cases: `1241`
 - Cram transcript files: `83`
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
