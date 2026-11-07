@@ -422,6 +422,7 @@ let test_confirmed_pins_follow_the_store () =
   (* E0702 names the cause: the name is bound, but not to the pinned declaration *)
   (match Prelude.lookup_hash store ~kind:Resolve.KCon "true" with
   | Error [ diagnostic ] ->
+      Alcotest.(check (option string)) "refused as E0702" (Some "E0702") (Diag.code diagnostic);
       let text = Diag.to_string diagnostic in
       let needle = "pinned declaration for it is absent" in
       let n = String.length needle and m = String.length text in
