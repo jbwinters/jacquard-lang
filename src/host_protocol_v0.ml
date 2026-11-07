@@ -767,39 +767,49 @@ let rec equal_boundary_types left right =
 
 (* TYPE.1: v0 has no encoding for an opaque type, so a boundary type that reaches one, directly or
    through the fields of a transparent wrapper, is refused (E1604). The walk follows each reachable
-   declaration's field types once. *)
-let reaches_opaque store identity =
-  let rec visit seen = function
-    | [] -> false
-    | hash :: rest when List.exists (Hash.equal hash) seen -> visit seen rest
-    | hash :: rest -> (
-        match Store.locate_internal store hash with
-        | Ok { Store.decl = { Kernel.it = Kernel.DefType { opaque = true; _ }; _ }; _ } -> true
-        | Ok { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; _ } ->
-            let fields =
-              List.concat_map
-                (fun (c : Kernel.conspec) ->
-                  List.concat_map (fun (f : Kernel.field) -> Store.ty_refs f.Kernel.fty) c.fields)
-                cons
-            in
-            visit (hash :: seen) (fields @ rest)
-        (* an effect in a field's arrow row carries its operations' types *)
-        | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; _ } ->
-            let types =
-              List.concat_map
-                (fun (o : Kernel.opspec) ->
-                  List.concat_map Store.ty_refs o.Kernel.op_params
-                  @ Store.ty_refs o.Kernel.op_result)
-                ops
-            in
-            visit (hash :: seen) (types @ rest)
-        | _ -> visit (hash :: seen) rest)
-  in
-  visit [] [ identity ]
+   declaration's field types once. It fails closed: an identity the store cannot resolve to a type
+   or effect declaration counts as reaching an opaque type, since its representation is unknown.
+   [memo] caches results per identity for one validation over an unchanging store. *)
+let reaches_opaque ~memo store identity =
+  let key = Hash.to_hex identity in
+  match Hashtbl.find_opt memo key with
+  | Some reaches -> reaches
+  | None ->
+      let rec visit seen = function
+        | [] -> false
+        | hash :: rest when List.exists (Hash.equal hash) seen -> visit seen rest
+        | hash :: rest -> (
+            match Store.locate_internal store hash with
+            | Ok { Store.decl = { Kernel.it = Kernel.DefType { opaque = true; _ }; _ }; _ } -> true
+            | Ok { Store.decl = { Kernel.it = Kernel.DefType { cons; _ }; _ }; _ } ->
+                let fields =
+                  List.concat_map
+                    (fun (c : Kernel.conspec) ->
+                      List.concat_map
+                        (fun (f : Kernel.field) -> Store.ty_refs f.Kernel.fty)
+                        c.fields)
+                    cons
+                in
+                visit (hash :: seen) (fields @ rest)
+            (* an effect in a field's arrow row carries its operations' types *)
+            | Ok { Store.decl = { Kernel.it = Kernel.DefEffect { ops; _ }; _ }; _ } ->
+                let types =
+                  List.concat_map
+                    (fun (o : Kernel.opspec) ->
+                      List.concat_map Store.ty_refs o.Kernel.op_params
+                      @ Store.ty_refs o.Kernel.op_result)
+                    ops
+                in
+                visit (hash :: seen) (types @ rest)
+            | Ok { Store.decl = { Kernel.it = Kernel.DefTerm _; _ }; _ } | Error _ -> true)
+      in
+      let reaches = visit [] [ identity ] in
+      Hashtbl.replace memo key reaches;
+      reaches
 
-let boundary_type_supported ~store ty =
+let boundary_type_supported_memo ~memo ~store ty =
   let rec check = function
-    | Types.TCon (identity, _) when reaches_opaque store identity ->
+    | Types.TCon (identity, _) when reaches_opaque ~memo store identity ->
         error ~code:"E1604"
           "An opaque type, or a type that contains one, cannot cross the v0 boundary."
     | Types.TCon (_, arguments) -> check_all arguments
@@ -815,6 +825,9 @@ let boundary_type_supported ~store ty =
         check_all rest
   in
   check (Types.repr ty)
+
+let boundary_type_supported ~store ty =
+  boundary_type_supported_memo ~memo:(Hashtbl.create 8) ~store ty
 
 let map_error ~code cause = function Ok value -> Ok value | Error _ -> error ~code cause
 
@@ -920,6 +933,8 @@ let constructor_info checker identity =
 
 let validate_argument_value checker ~expected value =
   let primitives = Check.primitive_types checker in
+  (* one memo for the whole value: a long list re-checks the same field types at every node *)
+  let memo = Hashtbl.create 8 in
   let mismatch cause = error ~code:"E1603" cause in
   let scalar identity expected cause =
     if equal_boundary_types (Types.TCon (identity, [])) expected then Ok () else mismatch cause
@@ -964,7 +979,7 @@ let validate_argument_value checker ~expected value =
                 mismatch "A constructor argument disagrees with its nominal parameter type."
           in
           let* () =
-            map_result (boundary_type_supported ~store:(Check.store checker)) fields
+            map_result (boundary_type_supported_memo ~memo ~store:(Check.store checker)) fields
             |> Result.map (fun _ -> ())
           in
           validate_all fields args

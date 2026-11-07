@@ -9,9 +9,10 @@ val binding_lines : Store.t -> string list
 
 val lookup_kind : Store.t -> string -> Resolve.nkind -> Resolve.entry option
 (** [lookup_kind store name kind] is the prelude declaration [name] of [kind] by its pinned
-    identity: the one the prelude binds publicly to [name] and [kind]. When the store does not hold
-    that identity (a reduced test prelude, or a name the prelude does not define) it falls back to
-    {!Store.lookup_kind}. *)
+    identity: the one the prelude binds publicly to [name] and [kind]. It fails closed: when [name]
+    and [kind] are pinned but the store does not hold that identity (a stale golden, or a store
+    whose prelude differs), the result is [None], never the store's binding for the name. Only a
+    name the prelude does not define falls back to {!Store.lookup_kind}. *)
 
 val pinned : Store.t -> string -> Resolve.nkind -> Hash.t option
 (** [pinned store name kind] is the pinned prelude identity of [name] and [kind] when [store] holds

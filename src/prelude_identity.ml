@@ -35,10 +35,14 @@ let table : (string * Resolve.nkind, Hash.t) Hashtbl.t =
 
 (* [Store.visible] remembers a confirmed pin until the store hides or removes an object, so the
    check is cheap on the per-operation paths that use it *)
+(* A pinned name never falls back to the store's binding: if the pinned identity is absent (a stale
+   golden after a prelude change, or a store that rebinds the name), the builtin is unavailable
+   rather than resolved by name. Only names the prelude does not define fall back. *)
 let lookup_kind store name kind =
   match Hashtbl.find_opt table (name, kind) with
   | Some hash when Store.visible store hash -> Some { Resolve.hash; kind }
-  | _ -> Store.lookup_kind store name kind
+  | Some _ -> None
+  | None -> Store.lookup_kind store name kind
 
 let pinned store name kind =
   match Hashtbl.find_opt table (name, kind) with
