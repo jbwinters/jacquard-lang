@@ -48,3 +48,5 @@ let pinned store name kind =
   match Hashtbl.find_opt table (name, kind) with
   | Some hash when Store.visible store hash -> Some hash
   | _ -> None
+
+let pinned_identity name kind = Hashtbl.find_opt table (name, kind)

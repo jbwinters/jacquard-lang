@@ -1145,3 +1145,15 @@ golden or a store with a different prelude makes the builtin unavailable
 instead of resolving it by name; names the prelude does not define still
 resolve by name. The host preflight fixture now seeds the prelude's own
 primitive declarations. The source inventory is now `1236 / 83 / 57`.
+
+Abstract-types hardening, second part. Warp's test-tree walk (`run_value`,
+`value_has_prop`) and its relational cache key (`relational_key_string`) read
+`case`, `prop`, `group`, `wcase`, `same-under`, `vary-schedule`, `vary-world`,
+`vary-value`, `cons` and `nil` by the prelude's identities, so a value built
+from same-named constructors is not a test and cannot reach a cached verdict.
+Bundle build and read refuse (E1721) when the prelude's `eval-code` and `Eval`
+identities are absent, instead of finding nothing to refuse. E0702 names a
+bound prelude name whose pinned declaration is absent, instead of calling it an
+unexpected kind. `opaque-types.t` lists every changed export for each migration
+step and adds a constructor that gains a field beside the rename. The source
+inventory is now `1237 / 83 / 57`.

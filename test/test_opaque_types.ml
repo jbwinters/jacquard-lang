@@ -418,7 +418,17 @@ let test_confirmed_pins_follow_the_store () =
     (Option.is_some (Store.lookup_kind store "true" Resolve.KCon));
   Alcotest.(check bool)
     "a pinned name whose pin is absent is unavailable" true
-    (Option.is_none (pinned_true store))
+    (Option.is_none (pinned_true store));
+  (* a name the prelude does not define still resolves by the store's binding *)
+  ignore (Store.put_decl store (kernel_decl "(deftype zz-local () (con zz-local-only))"));
+  Alcotest.(check bool)
+    "an unpinned name falls back to the store" true
+    (Option.is_some (Prelude_identity.lookup_kind store "zz-local-only" Resolve.KCon));
+  (* without the prelude's eval-code and Eval, bundle build and read cannot rule out dynamic
+     evaluation, so they refuse (E1721) rather than find nothing to refuse *)
+  Alcotest.(check bool)
+    "absent eval identities are not an empty list" true
+    (Option.is_none (Project_bundle_reader.eval_identities store))
 
 (* TYPE.1 S3a: dynamic code constructs or matches no opaque type, the owner's included *)
 let test_eval_code_refuses_sealed () =

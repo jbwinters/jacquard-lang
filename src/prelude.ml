@@ -246,9 +246,14 @@ let lookup_hash store ~kind name : (Hash.t, Diag.t list) result =
   match Prelude_identity.lookup_kind store name kind with
   | Some { Resolve.hash; _ } -> Ok hash
   | None -> (
-      match Store.lookup_name store name with
-      | Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
-      | None -> err ~code:"E0702" "prelude name `%s` is not in the store" name)
+      match (Prelude_identity.pinned_identity name kind, Store.lookup_name store name) with
+      | Some _, Some _ ->
+          err ~code:"E0702"
+            "prelude name `%s` is bound, but not to the prelude's pinned declaration (the store's \
+             prelude differs from this build's)"
+            name
+      | None, Some _ -> err ~code:"E0702" "prelude name `%s` has an unexpected kind" name
+      | _, None -> err ~code:"E0702" "prelude name `%s` is not in the store" name)
 
 (* APP.6 helpers *)
 
