@@ -617,10 +617,12 @@ let test_tree_walk_by_identity () =
        (prelude_constructor "group" [ Value.VText "g"; prelude_constructor "cons" [ prop; nil ] ]));
   Alcotest.(check bool)
     "a forged group hides nothing" false
-    (Warp.value_has_prop ctx (forged "group" [ Value.VText "g"; prelude_constructor "cons" [ prop; nil ] ]));
+    (Warp.value_has_prop ctx
+       (forged "group" [ Value.VText "g"; prelude_constructor "cons" [ prop; nil ] ]));
   Alcotest.(check bool)
     "a forged cons hides nothing" false
-    (Warp.value_has_prop ctx (prelude_constructor "group" [ Value.VText "g"; forged "cons" [ prop; nil ] ]));
+    (Warp.value_has_prop ctx
+       (prelude_constructor "group" [ Value.VText "g"; forged "cons" [ prop; nil ] ]));
   (* a world case runs only when it is the prelude's wcase *)
   (match walk (prelude_constructor "wcase" [ Value.VText "w"; thunk ]) with
   | Ok [ { Warp.verdict = Some (Warp.Pass 1); _ } ] -> ()
@@ -639,9 +641,13 @@ let test_tree_walk_by_identity () =
       ("a forged vary-value", forged "vary-value" [ thunk; thunk ]);
       ("a forged vary-schedule", forged "vary-schedule" [ Value.VInt 2; thunk ]);
     ];
-  (match walk (forged "same-under" [ Value.VText "r"; prelude_constructor "vary-schedule" [ Value.VInt 2; thunk ] ]) with
+  match
+    walk
+      (forged "same-under"
+         [ Value.VText "r"; prelude_constructor "vary-schedule" [ Value.VInt 2; thunk ] ])
+  with
   | Error _ -> ()
-  | Ok _ -> Alcotest.fail "a forged same-under was run as a test")
+  | Ok _ -> Alcotest.fail "a forged same-under was run as a test"
 
 let suite =
   [
