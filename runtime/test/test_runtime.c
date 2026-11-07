@@ -210,6 +210,29 @@ static void test_blocks(void) {
   free(boxed_shown);
   jq_drop(boxed_hash); /* owns and releases hv; ASAN proves the nested path is leak-free */
 
+  /* TYPE.1: jq_display, the user-facing rendering, redacts an opaque type's value wherever it
+     appears; jq_show, the structural key, keeps the representation */
+  static const jq_con_info coin_info = { 3, 0, 1, "coin-heads", "coin", 1 };
+  static const jq_con_info box_info = { 4, 0, 1, "box", NULL, 0 };
+  jq_value boxed_coin =
+      jq_con(&box_info, (jq_value[]){ jq_con(&coin_info, (jq_value[]){ jq_int(7) }) });
+  char *coin_displayed = jq_display(boxed_coin);
+  CHECK(strcmp(coin_displayed, "box(<opaque coin>)") == 0,
+        "display redacts an opaque value inside a constructor");
+  free(coin_displayed);
+  char *coin_shown = jq_show(boxed_coin);
+  CHECK(strcmp(coin_shown, "box(coin-heads(7))") == 0,
+        "show keeps an opaque value's representation");
+  free(coin_shown);
+  jq_drop(boxed_coin);
+  jq_value coin_pair =
+      jq_tuple(2, (jq_value[]){ jq_int(1), jq_con(&coin_info, (jq_value[]){ jq_int(8) }) });
+  char *pair_displayed = jq_display(coin_pair);
+  CHECK(strcmp(pair_displayed, "(1, <opaque coin>)") == 0,
+        "display redacts an opaque value inside a tuple");
+  free(pair_displayed);
+  jq_drop(coin_pair);
+
   const char *fixture = "ET4-native-fixture-secret";
   jq_value secret = jq_secret((const uint8_t *)fixture, strlen(fixture));
   CHECK(jq_is_secret(secret), "secret has a distinct runtime tag");

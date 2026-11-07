@@ -593,7 +593,7 @@ codes with `jacquard project pin|interface`, and the bundle codes with
 | E1718 | the manifest declares no entry of that name, or it is the other kind | `jacquard project run suite` for a test entry |
 | E1719 | a call-ABI companion conflicts with one already composed into the graph | two projects labelling one identical callable differently |
 | E1720 | a bundle's prelude or Core differs from the running tool | a bundle built by another Core release |
-| E1721 | `eval-code` or the `Eval` effect is reachable from a bundle root: a run step, a test root, or an exported callable of any context in the graph (a dependency's export the root never calls included), including through a returned closure (quoted data is not code; live splices are) | exporting `app.make() = fn () -> eval-code(...)` |
+| E1721 | `eval-code` or the `Eval` effect is reachable from a bundle root: a run step, a test root, or an exported callable of any context in the graph (a dependency's export the root never calls included), including through a returned closure (quoted data is not code; live splices are); also when the tool's prelude lacks the pinned `eval-code` and `Eval` declarations, so reachability cannot be ruled out | exporting `app.make() = fn () -> eval-code(...)` |
 | E1722 | a unit resolves, after symlinks, outside the project directory | `(units "../outside/far.jac")` |
 | E1723 | a unit is missing or not a regular file | a directory named `missing.jac` |
 | E1724 | two units in one composition differ only by letter case | `"src/types.jac"` and `"src/Types.jac"` |

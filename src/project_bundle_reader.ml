@@ -64,7 +64,7 @@ let verify_summary = function
   | "E1726" -> "A bundle object's hash does not match."
   | "E1727" -> "A bundle object's member ownership does not match."
   | "E1728" -> "A bundle closure is incomplete."
-  | "E1721" -> "A bundle root can reach dynamic evaluation."
+  | "E1721" -> "A bundle root can reach dynamic evaluation, or the prelude cannot rule it out."
   | "E1729" -> "A derived interface or context does not match the bundle record."
   | "E1735" -> "The bundle cannot be read."
   | "E1736" -> "A bundle exports a sealed constructor."
@@ -78,7 +78,9 @@ let verify_next = function
   | "E1720" -> "Run the bundle with the Core and prelude that built it, or rebuild it."
   | "E1726" | "E1727" | "E1728" | "E1729" | "E1736" | "E1738" | "E1739" | "E1707" | "E1714" ->
       "Rebuild the bundle with jacquard project bundle; do not edit its files."
-  | "E1721" -> "Bundles refuse dynamic evaluation in v1; rebuild without eval-code."
+  | "E1721" ->
+      "Bundles refuse dynamic evaluation in v1; rebuild without eval-code. If the cause names \
+       absent eval identities, use the standard prelude."
   | "E1735" -> "Check the bundle path; a bundle is a directory written by jacquard project bundle."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown bundle code " ^ code))
 

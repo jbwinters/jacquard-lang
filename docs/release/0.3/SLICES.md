@@ -1157,3 +1157,15 @@ bound prelude name whose pinned declaration is absent, instead of calling it an
 unexpected kind. `opaque-types.t` lists every changed export for each migration
 step and adds a constructor that gains a field beside the rename. The source
 inventory is now `1237 / 83 / 57`.
+
+Abstract-types hardening, third part. A C runtime unit test pins `jq_display`
+redaction: an opaque value inside a constructor or a tuple renders as
+`<opaque NAME>`, while `jq_show`, the structural key, keeps the representation.
+E1721's summary and next step now cover a prelude that lacks the pinned
+`eval-code` and `Eval` declarations, and `docs/errors.md` lists that cause.
+E0702 says a bound prelude name's pinned declaration is absent, without
+guessing why. More forged-constructor tests cover Warp's `wcase`,
+`vary-world` and `vary-value`, `group` and `cons` in the property check, and
+the relational key; another checks that the prelude's own `eval` declaration
+yields both eval identities. The source inventory is unchanged at
+`1237 / 83 / 57`.

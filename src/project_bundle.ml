@@ -3,7 +3,7 @@
 let ( let* ) = Result.bind
 
 let summary = function
-  | "E1721" -> "A bundle root can reach dynamic evaluation."
+  | "E1721" -> "A bundle root can reach dynamic evaluation, or the prelude cannot rule it out."
   | "E1725" -> "An output path overlaps an input."
   | "E1735" -> "No project manifest was found or it could not be read."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown bundle code " ^ code))
@@ -11,7 +11,8 @@ let summary = function
 let next_step = function
   | "E1721" ->
       "Keep eval-code out of every run step, test root, and exported callable; bundles refuse \
-       dynamic evaluation in v1."
+       dynamic evaluation in v1. If the cause names absent eval identities, use the standard \
+       prelude."
   | "E1725" -> "Write the bundle outside every unit and dependency directory."
   | "E1735" -> "Check the output path and its permissions."
   | code -> raise (Diag.Bug_invalid_diagnostic ("unknown bundle code " ^ code))

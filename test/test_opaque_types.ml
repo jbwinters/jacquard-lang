@@ -419,6 +419,15 @@ let test_confirmed_pins_follow_the_store () =
   Alcotest.(check bool)
     "a pinned name whose pin is absent is unavailable" true
     (Option.is_none (pinned_true store));
+  (* E0702 names the cause: the name is bound, but not to the pinned declaration *)
+  (match Prelude.lookup_hash store ~kind:Resolve.KCon "true" with
+  | Error [ diagnostic ] ->
+      let text = Diag.to_string diagnostic in
+      let needle = "pinned declaration for it is absent" in
+      let n = String.length needle and m = String.length text in
+      let rec go i = i + n <= m && (String.sub text i n = needle || go (i + 1)) in
+      Alcotest.(check bool) "E0702 names an absent pin" true (go 0)
+  | _ -> Alcotest.fail "a rebound pinned name should be one E0702");
   (* a name the prelude does not define still resolves by the store's binding *)
   ignore (Store.put_decl store (kernel_decl "(deftype zz-local () (con zz-local-only))"));
   Alcotest.(check bool)
@@ -428,7 +437,18 @@ let test_confirmed_pins_follow_the_store () =
      evaluation, so they refuse (E1721) rather than find nothing to refuse *)
   Alcotest.(check bool)
     "absent eval identities are not an empty list" true
-    (Option.is_none (Project_bundle_reader.eval_identities store))
+    (Option.is_none (Project_bundle_reader.eval_identities store));
+  (* the prelude's own declaration (eval-code is an operation of the eval effect, so the two are
+     present together) yields both identities *)
+  ignore (Store.put_decl store (kernel_decl "(deftype code () (con code-opaque))"));
+  ignore
+    (Eval_support.put_src store (Store.names_view store)
+       "(defeffect eval ((tvar a)) (op eval-code once ((tref code)) (tvar a)))");
+  Alcotest.(check int)
+    "the prelude's eval declaration yields both identities" 2
+    (match Project_bundle_reader.eval_identities store with
+    | Some identities -> List.length identities
+    | None -> 0)
 
 (* TYPE.1 S3a: dynamic code constructs or matches no opaque type, the owner's included *)
 let test_eval_code_refuses_sealed () =
