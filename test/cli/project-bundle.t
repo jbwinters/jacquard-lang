@@ -85,7 +85,7 @@ Every tampering is refused before anything runs:
   $ echo 'extra.run() = `op:eval-code`(quote { 1 })' > ../extra/e.jac
   $ (cd ../extra && jacquard project bundle -o ../extra.bundle) > "$top/pipe.out" 2>&1 || echo "exit=$?"; head -1 < "$top/pipe.out"
   exit=1
-  error[E1721]: A bundle root can reach dynamic evaluation.
+  error[E1721]: A bundle root can reach dynamic evaluation, or the prelude cannot rule it out.
   $ echo 'extra.run() = 7' > ../extra/e.jac && (cd ../extra && jacquard project bundle -o ../extra.bundle > /dev/null)
   $ tamper && cp ../extra.bundle/objects/*.jqd ../t.bundle/objects/
   $ jacquard project run --bundle ../t.bundle demo > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -o 'error\[E17..\].*\|is not reachable.*' < "$top/pipe.out" | head -2
@@ -114,7 +114,7 @@ closure returned by an exported callable whose own authority is pure:
   $ sed -i 's/(namespace app)/(namespace app) (exports (term app.make))/' project.jqd
   $ jacquard project bundle -o ../eval.bundle > "$top/pipe.out" 2>&1 || echo "exit=$?"; head -1 < "$top/pipe.out"; ls .. | grep -c eval.bundle
   exit=1
-  error[E1721]: A bundle root can reach dynamic evaluation.
+  error[E1721]: A bundle root can reach dynamic evaluation, or the prelude cannot rule it out.
   0
   [1]
   $ sed -i '$d' lib.jac && sed -i 's/ (exports (term app.make))//' project.jqd
@@ -303,7 +303,7 @@ never calls it (E1721):
   $ echo 'libu.spare(x) = `op:eval-code`(quote { x })' > ../libu/u.jac && sed -i 's/libu.spare(x) = /libu.used(x) = x\nlibu.spare(x) = /' ../libu/u.jac
   $ (cd ../appu && jacquard project pin > /dev/null && jacquard project bundle -o ../appu-eval.bundle 2>&1) > "$top/pipe.out" || echo "exit=$?"; head -1 < "$top/pipe.out"
   exit=1
-  error[E1721]: A bundle root can reach dynamic evaluation.
+  error[E1721]: A bundle root can reach dynamic evaluation, or the prelude cannot rule it out.
 
 Two source projects with one context identity but different namespaces (no
 exports, the same dependencies) compose as source, but a bundle records one

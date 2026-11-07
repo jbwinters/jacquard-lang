@@ -264,7 +264,11 @@ let test_relational_cache_identity () =
        [ Value.VText "schedule"; constructor "vary-schedule" [ Value.VInt 3; thunk ] ]);
   refused "a forged vary-schedule"
     (constructor "same-under"
-       [ Value.VText "schedule"; forged "vary-schedule" [ Value.VInt 3; thunk ] ])
+       [ Value.VText "schedule"; forged "vary-schedule" [ Value.VInt 3; thunk ] ]);
+  refused "a forged vary-world"
+    (constructor "same-under" [ Value.VText "world"; forged "vary-world" [ thunk; thunk; thunk ] ]);
+  refused "a forged vary-value"
+    (constructor "same-under" [ Value.VText "value"; forged "vary-value" [ thunk; thunk ] ])
 
 (* --- W6.8: the memo trap — two tests sharing a dependency BOTH count it --- *)
 
@@ -604,7 +608,46 @@ let test_tree_walk_by_identity () =
     (Warp.value_has_prop ctx (forged "prop" [ Value.VText "p"; thunk ]));
   Alcotest.(check bool)
     "a genuine prop is a prop" true
-    (Warp.value_has_prop ctx (prelude_constructor "prop" [ Value.VText "p"; thunk ]))
+    (Warp.value_has_prop ctx (prelude_constructor "prop" [ Value.VText "p"; thunk ]));
+  let prop = prelude_constructor "prop" [ Value.VText "p"; thunk ] in
+  let nil = prelude_constructor "nil" [] in
+  Alcotest.(check bool)
+    "a prop inside a genuine group is found" true
+    (Warp.value_has_prop ctx
+       (prelude_constructor "group" [ Value.VText "g"; prelude_constructor "cons" [ prop; nil ] ]));
+  Alcotest.(check bool)
+    "a forged group hides nothing" false
+    (Warp.value_has_prop ctx
+       (forged "group" [ Value.VText "g"; prelude_constructor "cons" [ prop; nil ] ]));
+  Alcotest.(check bool)
+    "a forged cons hides nothing" false
+    (Warp.value_has_prop ctx
+       (prelude_constructor "group" [ Value.VText "g"; forged "cons" [ prop; nil ] ]));
+  (* a world case runs only when it is the prelude's wcase *)
+  (match walk (prelude_constructor "wcase" [ Value.VText "w"; thunk ]) with
+  | Ok [ { Warp.verdict = Some (Warp.Pass 1); _ } ] -> ()
+  | _ -> Alcotest.fail "the genuine wcase should pass");
+  (match walk (forged "wcase" [ Value.VText "w"; thunk ]) with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a forged wcase was run as a test");
+  (* a relational case with a forged variation is malformed, not run *)
+  List.iter
+    (fun (label, variation) ->
+      match walk (prelude_constructor "same-under" [ Value.VText "r"; variation ]) with
+      | Ok [ { Warp.note = Some "same under: malformed variation"; _ } ] -> ()
+      | _ -> Alcotest.failf "%s was run as a variation" label)
+    [
+      ("a forged vary-world", forged "vary-world" [ thunk; thunk; thunk ]);
+      ("a forged vary-value", forged "vary-value" [ thunk; thunk ]);
+      ("a forged vary-schedule", forged "vary-schedule" [ Value.VInt 2; thunk ]);
+    ];
+  match
+    walk
+      (forged "same-under"
+         [ Value.VText "r"; prelude_constructor "vary-schedule" [ Value.VInt 2; thunk ] ])
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "a forged same-under was run as a test"
 
 let suite =
   [
