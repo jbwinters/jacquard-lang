@@ -98,6 +98,8 @@ passing them directly to each engine to retain defensive runtime coverage.
   identical: g51-scoped-throw-emit (exit 0)
   identical: g52-scoped-capability-show (exit 0)
   identical: g53-opaque-display (exit 0)
+  identical: g54-opaque-rebound-prelude (exit 0)
+  identical: g55-opaque-nested-inference (exit 0)
 
 Opaque host values are the exception to the public direct-member carrier: their
 marker identity is absent from the store's derived-hash index, so the checker and

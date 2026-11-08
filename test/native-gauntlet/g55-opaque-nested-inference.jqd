@@ -1,0 +1,23 @@
+; TYPE.2: nested opaque inference outcomes, printed redacted on both engines.
+; Enumeration keeps the two opaque outcomes apart, each nested dist.sample-lw
+; keeps two, and pmf finds 0.7; the unaggregated dist.sample-lw-v1 lists show
+; only that weighting runs over opaque values.
+(deftype coin () (opaque) (con heads) (con tails))
+(deftype box () (opaque) (con box-of (field (tref coin))))
+(let nonrec (pvar flip)
+  (lam () (app (var sample) (app (var categorical)
+    (app (var cons) (app (var mk-pair) (var heads) (lit 0.3))
+      (app (var cons) (app (var mk-pair) (var tails) (lit 0.7)) (var nil))))))
+(let nonrec (pvar model) (lam () (app (var box-of) (app (var flip))))
+(let nonrec (pvar nested)
+  (lam () (let nonrec (pvar inner) (app (var dist.sample-lw) (var model) (lit 4) (lit 7))
+    (tuple (app (var box-of) (app (var flip))) (app (var list.length) (var inner)))))
+(tuple
+  (app (var dist.enumerate-v1) (var model) (lit 8))
+  (app (var dist.sample-lw-v1) (var model) (lit 20) (lit 42))
+  (app (var dist.sample-lw-v1) (var nested) (lit 6) (lit 9))
+  (app (var pmf)
+    (app (var categorical)
+      (app (var cons) (app (var mk-pair) (app (var box-of) (var heads)) (lit 0.3))
+        (app (var cons) (app (var mk-pair) (app (var box-of) (var tails)) (lit 0.7)) (var nil))))
+    (app (var box-of) (var tails)))))))

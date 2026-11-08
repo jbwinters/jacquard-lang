@@ -312,7 +312,24 @@ let test_opaque_operation_signatures () =
       ("an operation returning an opaque type", f.gen_operation);
       ("an operation taking an opaque type", f.sink_operation);
       ("an operation returning one inside a transparent wrapper", f.gen_wrap_operation);
-    ]
+    ];
+  (* an invoke argument naming an opaque constructor is refused while it is decoded, before the
+     later sealed-value check: the cause is the decoder's *)
+  match
+    start
+      (invoke_json ~target:f.gen_target
+         ~parameters:[ int_type f ]
+         ~effects:[ f.gen_effect ] ~result:(int_type f)
+         ~arguments:[ opaque_value f ]
+         ~operations:[])
+  with
+  | Ok _ -> Alcotest.fail "an opaque invoke argument was admitted"
+  | Error [] -> Alcotest.fail "an opaque invoke argument was refused without a diagnostic"
+  | Error (d :: _) ->
+      Alcotest.(check string) "opaque invoke argument code" "E1604" (Diag.code_or_uncoded d);
+      Alcotest.(check string)
+        "refused by the decoder" "A boundary value names a constructor of an opaque type."
+        (Diag.cause d)
 
 let test_forged_opaque_responses () =
   let f = fixture () in
@@ -321,8 +338,9 @@ let test_forged_opaque_responses () =
     (fun (label, value) ->
       let session = pending () in
       let json = finished (Session.respond session (success value)) in
-      (* no admitted operation result can hold an opaque value (start refuses such signatures),
-         and the session reports every undecodable response as one E1608 *)
+      (* the decoder refuses the opaque constructor before the result type is checked, and the
+         session reports every undecodable response as one E1608, so this shows the refusal, not
+         which check made it; the decoder's cause is pinned on the invoke path below *)
       check_code "E1608" json;
       check_terminal "diagnostic" json;
       Alcotest.(check int) (label ^ ": not observed") 0 (List.length (observations json));

@@ -151,7 +151,6 @@ let make_fixture () =
        boundary-wrap))) (lam ((pvar n)) (app (var make-boundary-wrap) (app (var \
        make-boundary-score) (var n)))))))"
   in
-  (* a transparent type whose function field's effect returns the opaque type *)
   (* an effect whose operations return the opaque type, take it, or return it inside the transparent
      wrapper, and a target that performs it *)
   let gen =
@@ -165,6 +164,7 @@ let make_fixture () =
       "(defterm ((binding boundary.gen-target ((tarrow ((tref int)) (row (eref boundary-gen)) \
        (tref int))) (lam ((pvar n)) (match (app (var boundary.gen)) (clause (pwild) (var n)))))))"
   in
+  (* a transparent type whose function field's effect returns the opaque type *)
   ignore
     (put_src store
        "(deftype boundary-cb () (con boundary-cb-none) (con boundary-cb-some (field (tarrow () \

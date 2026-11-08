@@ -327,6 +327,9 @@ let test_private_group_member () =
     "calling the group's private constructing member" [ "E1738/region" ]
     (forged "(app (var libp.seal) (lit 1))")
 
+(* a dependency's region cannot construct its consumer's sealed type: the library context is forged
+   to export a term constructing the application's opaque type, and the application's context and
+   the bundle record follow the library's new identity *)
 let test_dependency_constructing_consumer_type () =
   let bundle = build_bundle () in
   let loaded = load bundle in
@@ -496,12 +499,23 @@ let test_reader_without_eval_identities () =
        (fun text (old, forged) -> replace text ~sub:old ~by:(Hash.to_hex forged))
        (Printer.print record ^ "\n")
        mapping);
-  let codes =
-    match Project_bundle_reader.load ~prelude_dir:noeval ~root:(fresh_dir "verify") bundle with
-    | Ok _ -> []
-    | Error ds -> List.filter_map Diag.code ds
-  in
-  Alcotest.(check (list string)) "refused for the absent identities" [ "E1721" ] codes
+  match Project_bundle_reader.load ~prelude_dir:noeval ~root:(fresh_dir "verify") bundle with
+  | Ok _ -> Alcotest.fail "a bundle read against an eval-less prelude was admitted"
+  | Error ds ->
+      Alcotest.(check (list string))
+        "refused for the absent identities" [ "E1721" ] (List.filter_map Diag.code ds);
+      Alcotest.(check bool)
+        "the cause names the absent identities" true
+        (List.for_all
+           (fun d ->
+             let cause = Diag.cause d in
+             let needle = "identities are absent" in
+             let n = String.length needle in
+             let rec go i =
+               i + n <= String.length cause && (String.sub cause i n = needle || go (i + 1))
+             in
+             go 0)
+           ds)
 
 (* TYPE.1 S2c: a builtin runs a term from a runtime hash (a posterior model) only if the prelude or a
    context in the run exports it *)
