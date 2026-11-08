@@ -1186,15 +1186,41 @@ now `1241 / 83 / 57`.
 Abstract-types hardening, fifth part. Opaque types cross a host session in
 neither direction: a configured operation that returns an opaque type, takes
 one, or returns one inside a transparent wrapper is refused when the session
-starts (E1604); a forged `effect_ok` carrying an opaque constructor, alone or
+starts (E1604). A forged `effect_ok` carrying an opaque constructor, alone or
 inside a transparent one, is refused as an invalid response (E1608) without
-resuming the computation or recording an observation; and an opaque operation argument or
-result is refused before any frame is emitted. No terminal names the
-constructor. The worker refuses the same signature before any request and the
-same forged response after one. In bundles, the forged-constructor cases now
+resuming the computation or recording an observation. The response decoder
+refuses the opaque constructor before the result type is checked, but the
+session reports every undecodable response as one E1608, so these tests show
+the refusal rather than which check made it; the decoder's opaque refusal is
+pinned by its cause on the invoke path. An opaque request argument is refused
+(E1604) before any request frame carries it, and an opaque invocation result
+ends in an error terminal (E1604) that does not carry it. No terminal names
+the constructor. The worker refuses the same signature before any request and
+the same forged response after one. In bundles, the forged-constructor cases now
 also show the refusal comes from the region rule, a constructor pattern is a
 use, quoted data carrying the constructor's identity is not, the recursive
 group's two members are checked to share one declaration, a refused import
 leaves the store's name file, object directory and bindings unchanged, and
 the reader refuses (E1721) a bundle forged to name a prelude without the
 `eval` effect. The source inventory is now `1246 / 83 / 57`.
+
+Abstract-types hardening, sixth part. The native and inference matrix: two
+native gauntlet twins, byte-identical on both engines and with their
+interpreter output pinned in `opaque-matrix.t`, run governance authority
+validation, likelihood weighting and `support` after a file rebinds `bool`,
+`result`, `ordering`, `option`, `list` and `pair` as its own opaque types (the
+builtins still build prelude values), and nested opaque outcomes through
+enumeration, nested likelihood weighting and `pmf` (enumeration keeps two
+opaque outcomes, each nested driver keeps two, `pmf` finds 0.7, and all print
+redacted). `opaque-matrix.t` builds a project natively whose root rebinds
+prelude term names while calling its dependency, with output identical to
+`project run`; a root that runs an entry may not rebind a prelude constructor
+name (E1731), with or without a dependency. Under `relate --vary grant=dist`,
+opaque results agree and diverge on the tested seeds as the same Int draw does,
+so the comparison keys them by structure (without a policy the divergence
+message shows that structure, as run-transcript-v1 messages do, §2.4); under
+an observation policy they are the unsupported opaque kind and the runs cannot
+be called equal (E1007), while the same policy compares the Int draw. The host
+session test now pins the decoder's own opaque refusal by its cause, the
+worker's signature refusal has a control run, and the reader's eval-less
+refusal is checked by its cause. The source inventory is now `1246 / 84 / 57`.

@@ -591,6 +591,21 @@ let test_opaque_routes () =
   in
   check_status "signature exit" Host_worker.Terminal_written run_sealed.status;
   check_fatal "opaque operation signature" ~code:"E1604" run_sealed;
+  (* control: the same target with no operation configured passes preflight and ends in an outcome *)
+  let run_bare =
+    run
+      (script
+         [
+           select ();
+           invoke ~target:f.sealed
+             ~parameters:[ nominal f.int_type ]
+             ~result:(nominal f.int_type) ~effects:[ f.sealed_effect ] ~operations:[]
+             ~arguments:[ int_value 1 ];
+         ])
+  in
+  Alcotest.(check string)
+    "the bare target reaches an outcome" "outcome"
+    (kind (terminal_after "bare target" run_bare));
   let hex = Hash.to_hex f.score_constructor in
   let mentions json =
     let text = Yojson.Safe.to_string json and n = String.length hex in
