@@ -197,8 +197,11 @@ The rules:
 - **Types and effects are owned by namespace** (TYPE.1). A type or effect
   belongs to the graph project whose namespace prefixes its name; prelude
   identities belong to none. No project may declare a type or effect inside
-  another project's namespace, even byte for byte (E1737), so a root without a
-  namespace cannot re-declare a dependency's type to become its co-owner.
+  another project's namespace, even byte for byte: a namespaced library's
+  types and effects must carry its own namespace (E1706), and a root without a
+  namespace or an entry unit that declares one inside another graph project's
+  namespace is refused (E1737), so a root without a namespace cannot
+  re-declare a dependency's type to become its co-owner.
 
 **Consequences:**
 

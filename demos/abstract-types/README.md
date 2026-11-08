@@ -11,6 +11,12 @@ a client holds has passed the library's checks.
 | `nel` | `NelList a` | at least one element | `nel.of-list`, `nel.singleton`, `nel.head`, `nel.to-list`, `nel.map` |
 | `req` | `ReqValid` | a non-blank name, an email with `@`, an age in 13..130 | `req.validate`, `req.name`, `req.email`, `req.age`, `req.reason` |
 
+`prob` keeps the IEEE comparison, so a computed negative zero (for example
+`real.mul(0.0, -1.0)`) lies in [0, 1] and `prob.of-real` accepts it;
+`prob.value` then returns `-0.0`, which generic display prints as `-0.0`. The
+client formats with `text.from-real-fixed`, which prints it as `0.000`. The
+literal `-0.0` is positive zero.
+
 `req` also exports the transparent `ReqInvalid` reasons, which clients may
 construct and match.
 
