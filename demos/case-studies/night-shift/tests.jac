@@ -58,7 +58,7 @@ night-shift-suite =
         380, int.eq, int.show, "retry charges 90+120+90 for db")
     }),
 
-    -- the decision spine, Eval stubbed: green ships once, red escalates
+    -- the decision spine, Eval stubbed: green reaches the lever (the stub aborts), red escalates
     Case("green preflight reaches the once-mode lever", fn () ->
       match throw.to-result(fn () ->
         eval-stub(fn () -> decide(preflight.solo(MkFleet(Ready, Ready, Ready))))) {
