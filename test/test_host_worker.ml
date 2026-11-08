@@ -51,6 +51,10 @@ type fixture = {
   echo : Hash.t;
   twice : Hash.t;
   crash : Hash.t;
+  score_constructor : Hash.t;
+  sealed_effect : Hash.t;
+  seal_operation : Hash.t;
+  sealed : Hash.t;
 }
 
 (* Populate a store with the real prelude, then reopen it without reloading the prelude: this is
@@ -82,6 +86,18 @@ let make_fixture () =
       "(defterm ((binding worker.crash ((tarrow ((tref int)) (row) (tref int))) (lam ((pvar n)) \
        (app (var div) (var n) (lit 0))))))"
   in
+  (* TYPE.1: an opaque type, and an effect whose operation returns it *)
+  let score =
+    put_src store "(deftype worker-score () (opaque) (con make-worker-score (field (tref int))))"
+  in
+  let sealed_effect =
+    put_src store "(defeffect worker-sealed () (op worker.seal once () (tref worker-score)))"
+  in
+  let sealed =
+    put_src store
+      "(defterm ((binding worker.sealed ((tarrow ((tref int)) (row (eref worker-sealed)) (tref \
+       int))) (lam ((pvar n)) (match (app (var worker.seal)) (clause (pwild) (var n)))))))"
+  in
   let reopened = expect_ok "reopen fixture store" (Store.open_store dir) in
   let prepared = expect_ok "prepare reopened store" (Host_worker.prepare reopened) in
   let checker = expect_ok "fixture checker" (Check.make_ctx reopened) in
@@ -97,6 +113,10 @@ let make_fixture () =
     echo = named "worker.echo" echo;
     twice = named "worker.twice" twice;
     crash = named "worker.crash" crash;
+    score_constructor = named "make-worker-score" score;
+    sealed_effect = named "worker-sealed" sealed_effect;
+    seal_operation = named "worker.seal" sealed_effect;
+    sealed = named "worker.sealed" sealed;
   }
 
 let fixture = lazy (make_fixture ())
@@ -546,6 +566,51 @@ let test_unconfigured_operation () =
   check_json "empty registry retained" (`List [])
     (get "operations" (get "capabilities" (core outcome)))
 
+(* TYPE.1: an operation whose signature reaches an opaque type is refused before any request, and a
+   forged response carrying an opaque constructor resumes nothing and is echoed nowhere *)
+let test_opaque_routes () =
+  let f = fixture () in
+  let sealed_entry =
+    `Assoc
+      [
+        ("effect", hash_json f.sealed_effect);
+        ("mode", `String "once");
+        ("operation", hash_json f.seal_operation);
+      ]
+  in
+  let run_sealed =
+    run
+      (script
+         [
+           select ();
+           invoke ~target:f.sealed
+             ~parameters:[ nominal f.int_type ]
+             ~result:(nominal f.int_type) ~effects:[ f.sealed_effect ] ~operations:[ sealed_entry ]
+             ~arguments:[ int_value 1 ];
+         ])
+  in
+  check_status "signature exit" Host_worker.Terminal_written run_sealed.status;
+  check_fatal "opaque operation signature" ~code:"E1604" run_sealed;
+  let hex = Hash.to_hex f.score_constructor in
+  let mentions json =
+    let text = Yojson.Safe.to_string json and n = String.length hex in
+    let rec go i = i + n <= String.length text && (String.sub text i n = hex || go (i + 1)) in
+    go 0
+  in
+  let score =
+    expect_ok "encode a forged opaque value"
+      (Host.encode_boundary_value
+         ~budget:(Host.create_boundary_budget Host.hard_limits)
+         (Value.VCon { con = f.score_constructor; name = "score"; args = [ Value.VInt 7 ] }))
+  in
+  let run = run (script [ select (); echo_invoke f "ping"; effect_ok score ]) in
+  check_status "forged response exit" Host_worker.Terminal_written run.status;
+  let outcome =
+    check_outcome ~requests:1 "forged opaque response" ~code:"E1608" ~terminal:"diagnostic" run
+  in
+  Alcotest.(check int) "the response is not observed" 0 (List.length (observations outcome));
+  Alcotest.(check bool) "no frame carries the constructor" false (List.exists mentions run.frames)
+
 let test_wrong_response_id () =
   let f = fixture () in
   let run =
@@ -811,6 +876,7 @@ let suite =
     Alcotest.test_case "unconfigured root operation finishes with E1606" `Quick
       test_unconfigured_operation;
     Alcotest.test_case "stale response id finishes with E1608" `Quick test_wrong_response_id;
+    Alcotest.test_case "opaque operation signatures and forged responses" `Quick test_opaque_routes;
     Alcotest.test_case "buffered message after outcome is ignored" `Quick test_message_after_outcome;
     Alcotest.test_case "runtime failure becomes a bounded diagnostic outcome" `Quick
       test_runtime_failure;
