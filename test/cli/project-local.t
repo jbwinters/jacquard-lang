@@ -210,7 +210,7 @@ obey the same collision rule:
   $ jacquard project check > "$top/pipe.out" 2>&1 || echo "exit=$?"; grep -A1 'E1731' < "$top/pipe.out"
   exit=1
   $TESTCASE_ROOT/shop/demo.jac:3:18-38: error[E1731]: Two visible constructors share a name.
-    Cause: constructor `shop-item` of type `wrapper` is also a constructor of type `shop-item` of the library
+    Cause: constructor `shop-item` of type `wrapper` is also a constructor of type `shop-item` of this project
   $ cp demo.bak demo.jac && jacquard project run demo
   5
   true
