@@ -1246,7 +1246,8 @@ clashes between the composed library's constructors and those of its
 dependencies or the prelude, which the library check has already judged, and
 still refuses an entry's own constructor that collides with a visible one
 (E1731). `opaque-matrix.t` now runs such a root against a dependency on both
-engines, with and without the dependency, and shows the dependency's builtins
-still return prelude values beside the root's sealed ones. E1731 names the
+engines, and on the interpreter without one, and shows that the dependency's
+code and the builtins it calls still return prelude values beside the root's
+sealed ones. E1731 names the
 root's own constructors as `of this project`. The source inventory is
 unchanged at `1246 / 85 / 57`.

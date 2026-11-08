@@ -184,7 +184,12 @@ The rules:
   visible together (local, dependency exports, prelude) are checked
   explicitly. Two with the same name from different owners is E1731, naming
   both owning types and projects. This keeps resolution unambiguous without
-  renaming anything.
+  renaming anything. One exception: a project's own type may reuse the
+  constructor names of a visible type with the same type name (a root without
+  a namespace declaring its own `Bool = False | True`), and inside that
+  project the names then mean its own constructors. An entry is judged only on
+  its own constructors, against everything its library sees and the library
+  itself; the library was already checked.
 - The contract applies to library units only (E1706); entry units are exempt.
 - The boundary is exact: `.` or `-` immediately follows the namespace, so
   `rotation.x` does not satisfy `rota`.

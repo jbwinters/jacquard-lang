@@ -3,9 +3,10 @@ docs/designs/abstract-types.md §2.4). A root without a namespace may rebind
 prelude term names; its dependency still calls the prelude's own declarations,
 and the native binary prints exactly what the interpreter prints. A root that
 runs an entry may also rebind prelude constructor names as its own opaque types:
-the dependency's builtins still build prelude values beside the root's sealed
-ones, on both engines. An entry's own constructor that collides with a visible
-one is still refused (E1731).
+the dependency's code and the builtins it calls still build prelude values
+beside the root's sealed ones, on both engines; a root with no dependency runs
+too. An entry's own constructor that collides with a visible one is still
+refused (E1731).
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude JACQUARD_RUNTIME=$PWD/../../runtime CC=clang
   $ export TMPDIR=$PWD

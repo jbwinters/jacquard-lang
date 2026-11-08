@@ -21,7 +21,7 @@
     - E1723: a unit is missing or not a regular file;
     - E1724: two units' canonical paths differ only by case;
     - E1730 / W1700: an entry's declared grants differ from its checked authority;
-    - E1731: a library constructor collides with a visible constructor of another type;
+    - E1731: a library or entry constructor collides with a visible constructor of another type;
     - E1732: the library references a name only an entry defines;
     - E1717: an export selector naming nothing the project defines;
     - E1733: a file changed while pinning;
