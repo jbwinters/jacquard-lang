@@ -71,6 +71,11 @@ type fixture = {
   opaque_constructor : Hash.t;
   wrapper_type : Hash.t;
   takes_opaque_target : Hash.t;
+  gen_effect : Hash.t;
+  gen_operation : Hash.t;
+  sink_operation : Hash.t;
+  gen_wrap_operation : Hash.t;
+  gen_target : Hash.t;
   returns_wrapper_target : Hash.t;
   returns_callback_target : Hash.t;
 }
@@ -147,8 +152,19 @@ let make_fixture () =
        make-boundary-score) (var n)))))))"
   in
   (* a transparent type whose function field's effect returns the opaque type *)
-  ignore
-    (put_src store "(defeffect boundary-gen () (op boundary.gen once () (tref boundary-score)))");
+  (* an effect whose operations return the opaque type, take it, or return it inside the transparent
+     wrapper, and a target that performs it *)
+  let gen =
+    put_src store
+      "(defeffect boundary-gen () (op boundary.gen once () (tref boundary-score)) (op \
+       boundary.sink once ((tref boundary-score)) (ttuple)) (op boundary.gen-wrap once () (tref \
+       boundary-wrap)))"
+  in
+  let gen_target =
+    put_src store
+      "(defterm ((binding boundary.gen-target ((tarrow ((tref int)) (row (eref boundary-gen)) \
+       (tref int))) (lam ((pvar n)) (match (app (var boundary.gen)) (clause (pwild) (var n)))))))"
+  in
   ignore
     (put_src store
        "(deftype boundary-cb () (con boundary-cb-none) (con boundary-cb-some (field (tarrow () \
@@ -185,6 +201,11 @@ let make_fixture () =
     opaque_constructor = named "make-boundary-score" opaque;
     wrapper_type = named "boundary-wrap" wrapper;
     takes_opaque_target = named "boundary.takes-opaque" takes_opaque;
+    gen_effect = named "boundary-gen" gen;
+    gen_operation = named "boundary.gen" gen;
+    sink_operation = named "boundary.sink" gen;
+    gen_wrap_operation = named "boundary.gen-wrap" gen;
+    gen_target = named "boundary.gen-target" gen_target;
     returns_wrapper_target = named "boundary.returns-wrapper" returns_wrapper;
     returns_callback_target = named "boundary.returns-cb" returns_callback;
   }

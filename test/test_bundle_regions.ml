@@ -250,45 +250,83 @@ let test_entry_reaching_dependency_internals () =
   forge_test_root bundle ~helper:"libp.raw";
   Alcotest.(check (list string)) "nor the dependency's sealed type" [ "E1738" ] (codes bundle)
 
+(* the codes a bundle's verification refuses with; an E1738 from the region rule is marked
+   [E1738/region], since the fallback for a constructing object in no region reports E1738 too *)
+let region_codes bundle =
+  let has text needle =
+    let n = String.length needle in
+    let rec go i = i + n <= String.length text && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  match Project_bundle_reader.load ~prelude_dir ~root:(fresh_dir "verify") bundle with
+  | Ok _ -> []
+  | Error ds ->
+      List.map
+        (fun d ->
+          match Diag.code d with
+          | Some "E1738" when has (Diag.cause d) "in the region of context" -> "E1738/region"
+          | Some code -> code
+          | None -> "uncoded")
+        ds
+
 (* hash-valid forged objects, rooted by a forged test entry of the consumer: a sealed constructor is
-   used whether it is applied, passed unapplied, or built inside a live splice; constructor syntax
-   in quoted data is not a use *)
+   used whether it is applied, passed unapplied, built inside a live splice, or matched in a pattern;
+   quoted data is not a use, even when it carries the constructor's identity. [CON] in [body] stands
+   for that identity. *)
 let forged body =
   let bundle = build_bundle () in
   let loaded = load bundle in
+  let con =
+    match Store.lookup_kind loaded.store "libp-score" Resolve.KCon with
+    | Some { Resolve.hash; _ } -> Hash.to_hex hash
+    | None -> Alcotest.fail "libp-score is not bound in the bundle"
+  in
+  let body = Str.global_replace (Str.regexp_string "CON") con body in
   let hashes =
     forge_object loaded bundle (Printf.sprintf "(defterm ((binding app.forged () %s)))" body)
   in
   add_test_root bundle (List.assoc "app.forged" hashes.Canon.named);
-  codes bundle
+  region_codes bundle
 
 let test_forged_constructor_objects () =
+  let refused = [ "E1738/region" ] in
   Alcotest.(check (list string))
-    "an applied constructor" [ "E1738" ]
+    "an applied constructor" refused
     (forged "(app (var libp-score) (lit 1))");
-  Alcotest.(check (list string)) "an unapplied constructor" [ "E1738" ] (forged "(var libp-score)");
+  Alcotest.(check (list string)) "an unapplied constructor" refused (forged "(var libp-score)");
   Alcotest.(check (list string))
-    "a constructor inside a splice" [ "E1738" ]
+    "a constructor inside a splice" refused
     (forged
        "(quote (pair (unquote (match (app (var libp-score) (lit 1)) (clause (pwild) (quote (lit \
         1)))))))");
   Alcotest.(check (list string))
-    "constructor syntax in quoted data is not a use" [] (forged "(quote (libp-score 1))")
+    "a constructor pattern" refused
+    (forged "(lam ((pvar s)) (match (var s) (clause (pcon libp-score (pvar n)) (var n))))");
+  Alcotest.(check (list string))
+    "constructor syntax in quoted data is not a use" [] (forged "(quote (libp-score 1))");
+  Alcotest.(check (list string))
+    "nor is the constructor's identity in quoted data" []
+    (forged "(quote (app (ref #CON con) (lit 1)))")
 
 (* a region stops at the exact member identities other contexts export, not at their groups: a
    consumer's term calling the exported member of a dependency's recursive group stops there, while
    one calling the group's private constructing member brings the group into its region *)
 let test_private_group_member () =
+  let loaded = load (build_bundle ()) in
+  let decl name =
+    match Store.locate loaded.store (bound loaded name) with
+    | Ok { Store.decl_hash; _ } -> Hash.to_hex decl_hash
+    | Error _ -> Alcotest.failf "%s does not locate" name
+  in
+  Alcotest.(check string)
+    "the two members share one declaration" (decl "libp.loop") (decl "libp.seal");
   Alcotest.(check (list string))
     "calling the group's exported member" []
     (forged "(app (var libp.loop) (lit 1))");
   Alcotest.(check (list string))
-    "calling the group's private constructing member" [ "E1738" ]
+    "calling the group's private constructing member" [ "E1738/region" ]
     (forged "(app (var libp.seal) (lit 1))")
 
-(* a dependency's region cannot construct its consumer's sealed type: the library context is forged
-   to export a term constructing the application's opaque type, and the application's context and
-   the bundle record follow the library's new identity *)
 let test_dependency_constructing_consumer_type () =
   let bundle = build_bundle () in
   let loaded = load bundle in
@@ -313,21 +351,26 @@ let test_dependency_constructing_consumer_type () =
   in
   rename_contexts bundle [ (lib, lib'); (own, own') ];
   Alcotest.(check (list string))
-    "a dependency's export constructing the consumer's opaque type" [ "E1738" ] (codes bundle)
+    "a dependency's export constructing the consumer's opaque type" [ "E1738/region" ]
+    (region_codes bundle)
 
-(* a refused import leaves none of its objects or names in the importing store *)
+(* a refused import leaves none of its objects or names in the importing store: its name index
+   file, object directory and bindings are as they were, and no bundle object locates *)
 let test_refused_import_leaves_nothing () =
   let bundle = build_bundle () in
   forge_reexport bundle ~helper:"libp.raw" ~as_name:"app.raw";
   let store, _ = expect "open" (Frontend.open_session ~prelude_dir ~root:(fresh_dir "import")) in
   let checker = expect "checker" (Frontend.make_checker store) in
   let hexes () = List.sort compare (List.map Hash.to_hex (Store.all_decl_hashes store)) in
-  let before = hexes () in
+  let before = hexes () and state = Test_frontend.store_state store in
   (match Project_bundle_reader.verify ~store ~checker bundle with
   | Ok _ -> Alcotest.fail "the forged bundle verified"
   | Error ds ->
       Alcotest.(check (list string)) "refused late" [ "E1738" ] (List.filter_map Diag.code ds));
   Alcotest.(check (list string)) "the store's declarations are unchanged" before (hexes ());
+  Alcotest.(check bool)
+    "the name file, object directory and bindings are unchanged" true
+    (Test_frontend.store_state store = state);
   let objects = Filename.concat bundle "objects" in
   Array.iter
     (fun name ->
@@ -335,12 +378,130 @@ let test_refused_import_leaves_nothing () =
       | Some h ->
           Alcotest.(check bool)
             (name ^ " left no object file") false
-            (Sys.file_exists (Store.object_path store h))
+            (Sys.file_exists (Store.object_path store h));
+          Alcotest.(check bool)
+            (name ^ " does not locate") true
+            (Result.is_error (Store.locate store h))
       | None -> Alcotest.failf "object %s is not named by a hash" name)
     (Sys.readdir objects);
   Alcotest.(check bool)
     "the bundle's names are unbound" true
     (Option.is_none (Store.lookup_kind store "libp.raw" Resolve.KTerm))
+
+(* the reader refuses (E1721) when the prelude it verifies against lacks the eval identities: a
+   bundle's record is forged to name a prelude copy without the [eval] effect, so the earlier
+   prelude comparison (E1720) passes *)
+let test_reader_without_eval_identities () =
+  let bundle = build_bundle () in
+  let noeval = fresh_dir "noeval-prelude" in
+  Unix.mkdir noeval 0o755;
+  Array.iter
+    (fun name ->
+      let text = read (Filename.concat prelude_dir name) in
+      let kept =
+        String.split_on_char '\n' text
+        |> List.filter (fun line -> not (String.starts_with ~prefix:"(defeffect eval " line))
+      in
+      write (Filename.concat noeval name) (String.concat "\n" kept))
+    (Sys.readdir prelude_dir);
+  Alcotest.(check bool)
+    "the copy dropped the eval effect" false
+    (read (Filename.concat noeval "03-effects.jqd")
+    = read (Filename.concat prelude_dir "03-effects.jqd"));
+  let store, _ =
+    expect "open" (Frontend.open_session ~prelude_dir:noeval ~root:(fresh_dir "noeval"))
+  in
+  let prelude_form =
+    Form.form "prelude"
+      (List.map
+         (fun (f, d) -> Form.F (Form.form "file" [ Form.Text f; Form.Text d ]))
+         (List.sort compare (Option.value ~default:[] (Store.prelude_manifest store))))
+  in
+  let with_prelude (form : Form.t) =
+    {
+      form with
+      Form.args =
+        List.map
+          (function Form.F { Form.head = "prelude"; _ } -> Form.F prelude_form | arg -> arg)
+          form.Form.args;
+    }
+  in
+  (* a context's identity covers the prelude manifest, so each context is re-derived against the
+     eval-less prelude, dependencies first, and its consumers and the record follow the rename *)
+  let contexts = Filename.concat bundle "contexts" in
+  let parsed =
+    List.map
+      (fun name ->
+        let path = Filename.concat contexts name in
+        ( Filename.chop_suffix name ".jqd",
+          expect "context" (Reader.parse_one ~file:path (read path)) ))
+      (Array.to_list (Sys.readdir contexts))
+  in
+  let deps_of form =
+    match field "deps" form with
+    | Some d ->
+        List.filter_map
+          (function
+            | Form.F { Form.head = "dep"; args = [ _; Form.Hash h ]; _ } -> Some (Hash.to_hex h)
+            | _ -> None)
+          d.Form.args
+    | None -> []
+  in
+  let renamed mapping (form : Form.t) =
+    let dep = function
+      | Form.F ({ Form.head = "dep"; args = [ alias; Form.Hash h ]; _ } as d) ->
+          let h = Option.value ~default:h (List.assoc_opt (Hash.to_hex h) mapping) in
+          Form.F { d with Form.args = [ alias; Form.Hash h ] }
+      | arg -> arg
+    in
+    {
+      form with
+      Form.args =
+        List.map
+          (function
+            | Form.F ({ Form.head = "deps"; _ } as d) ->
+                Form.F { d with Form.args = List.map dep d.Form.args }
+            | arg -> arg)
+          form.Form.args;
+    }
+  in
+  let rec rederive mapping = function
+    | [] -> mapping
+    | pending ->
+        let ready, rest =
+          List.partition
+            (fun (_, form) -> List.for_all (fun d -> List.mem_assoc d mapping) (deps_of form))
+            pending
+        in
+        if ready = [] then Alcotest.fail "the bundle's contexts do not form a graph";
+        let mapping =
+          List.fold_left
+            (fun mapping (id, form) ->
+              let form = with_prelude (renamed mapping form) in
+              let forged = Project_context.identity form in
+              let path dir hex = Filename.concat bundle (Filename.concat dir (hex ^ ".jqd")) in
+              Sys.remove (path "contexts" id);
+              write (path "contexts" (Hash.to_hex forged)) (Printer.print form ^ "\n");
+              Sys.rename (path "interfaces" id) (path "interfaces" (Hash.to_hex forged));
+              (id, forged) :: mapping)
+            mapping ready
+        in
+        rederive mapping rest
+  in
+  let mapping = rederive [] parsed in
+  let head = record_file bundle in
+  let record = with_prelude (expect "record" (Reader.parse_one ~file:head (read head))) in
+  write head
+    (List.fold_left
+       (fun text (old, forged) -> replace text ~sub:old ~by:(Hash.to_hex forged))
+       (Printer.print record ^ "\n")
+       mapping);
+  let codes =
+    match Project_bundle_reader.load ~prelude_dir:noeval ~root:(fresh_dir "verify") bundle with
+    | Ok _ -> []
+    | Error ds -> List.filter_map Diag.code ds
+  in
+  Alcotest.(check (list string)) "refused for the absent identities" [ "E1721" ] codes
 
 (* TYPE.1 S2c: a builtin runs a term from a runtime hash (a posterior model) only if the prelude or a
    context in the run exports it *)
@@ -484,6 +645,7 @@ let suite =
     Alcotest.test_case "dependency constructing its consumer's type" `Quick
       test_dependency_constructing_consumer_type;
     Alcotest.test_case "refused import leaves nothing" `Quick test_refused_import_leaves_nothing;
+    Alcotest.test_case "reader without eval identities" `Quick test_reader_without_eval_identities;
     Alcotest.test_case "model guard" `Quick test_model_guard;
     Alcotest.test_case "project model guard" `Quick test_project_model_guard;
     Alcotest.test_case "runtime executor inventory" `Quick test_runtime_executor_inventory;

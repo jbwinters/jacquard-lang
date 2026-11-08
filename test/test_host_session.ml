@@ -283,6 +283,80 @@ let test_outgoing_types () =
     (finished
        (Session.request (start ()) ~operation:f.send_operation ~arguments:[ Value.VInt 2; opaque ]))
 
+(* TYPE.1: an opaque type crosses a session in neither direction. Its constructor's identity never
+   reaches an emitted frame or terminal, and a forged response carrying one resumes nothing. *)
+let opaque_value f =
+  Value.VCon { con = f.opaque_constructor; name = "score"; args = [ Value.VInt 7 ] }
+
+let mentions_opaque f json =
+  let text = Yojson.Safe.to_string json and needle = Hash.to_hex f.opaque_constructor in
+  let n = String.length needle in
+  let rec go i = i + n <= String.length text && (String.sub text i n = needle || go (i + 1)) in
+  go 0
+
+let test_opaque_operation_signatures () =
+  let f = fixture () in
+  let gen_invoke operations =
+    invoke_json ~target:f.gen_target
+      ~parameters:[ int_type f ]
+      ~effects:[ f.gen_effect ] ~result:(int_type f) ~arguments:[ Value.VInt 1 ] ~operations
+  in
+  let start json = Session.start ~limits:Host.hard_limits ~checker:f.checker json in
+  ignore (expect_ok "the target starts with no operation configured" (start (gen_invoke [])));
+  List.iter
+    (fun (label, operation) ->
+      expect_code label "E1604"
+        (start
+           (gen_invoke [ operation_json ~effect_identity:f.gen_effect ~mode:"once" ~operation ])))
+    [
+      ("an operation returning an opaque type", f.gen_operation);
+      ("an operation taking an opaque type", f.sink_operation);
+      ("an operation returning one inside a transparent wrapper", f.gen_wrap_operation);
+    ]
+
+let test_forged_opaque_responses () =
+  let f = fixture () in
+  let score = opaque_value f in
+  List.iter
+    (fun (label, value) ->
+      let session = pending () in
+      let json = finished (Session.respond session (success value)) in
+      (* no admitted operation result can hold an opaque value (start refuses such signatures),
+         and the session reports every undecodable response as one E1608 *)
+      check_code "E1608" json;
+      check_terminal "diagnostic" json;
+      Alcotest.(check int) (label ^ ": not observed") 0 (List.length (observations json));
+      Alcotest.(check bool) (label ^ ": not echoed") false (mentions_opaque f json);
+      check_closed session)
+    [
+      ("an opaque constructor", score);
+      ( "an opaque constructor inside a transparent one",
+        Value.VCon
+          { con = f.packet_constructor; name = "packet"; args = [ score; Value.VText "payload" ] }
+      );
+    ]
+
+let test_outgoing_opaque_values () =
+  let f = fixture () in
+  let score = opaque_value f in
+  let json =
+    finished
+      (Session.request (start ()) ~operation:f.send_operation ~arguments:[ Value.VInt 2; score ])
+  in
+  check_code "E1604" json;
+  Alcotest.(check int) "no request emitted" 0 (List.length (requests json));
+  Alcotest.(check bool) "the argument is not echoed" false (mentions_opaque f json);
+  let session = pending () in
+  (match expect_ok "accepted response" (Session.respond session (success (Value.VText "ok"))) with
+  | Session.Resume _ -> ()
+  | _ -> Alcotest.fail "expected the computation to resume");
+  let json = finished (Session.finish session score) in
+  check_code "E1604" json;
+  check_terminal "diagnostic" json;
+  Alcotest.(check int) "the earlier exchange is kept" 1 (List.length (requests json));
+  Alcotest.(check bool) "the result is not echoed" false (mentions_opaque f json);
+  check_closed session
+
 let test_request_limit () =
   let limits = { Host.hard_limits with max_effect_requests = 1 } in
   let session = pending ~limits () in
@@ -500,6 +574,9 @@ let suite =
       ("rejected responses have no observation", test_rejected_responses);
       ("state violations and stale replies", test_state_violations);
       ("outgoing type and registry checks", test_outgoing_types);
+      ("opaque operation signatures", test_opaque_operation_signatures);
+      ("forged opaque responses", test_forged_opaque_responses);
+      ("outgoing opaque values", test_outgoing_opaque_values);
       ("cumulative request limit", test_request_limit);
       ("decoded response byte limits", test_response_limits);
       ("reserve growing terminal evidence", test_terminal_reservation);

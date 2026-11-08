@@ -1182,3 +1182,19 @@ builds against a prelude copy without the `eval` effect and is refused with the
 absent-identity cause of E1721. The third part's forged Warp tests also covered
 `same-under` and `vary-schedule` in the test-tree walk. The source inventory is
 now `1241 / 83 / 57`.
+
+Abstract-types hardening, fifth part. Opaque types cross a host session in
+neither direction: a configured operation that returns an opaque type, takes
+one, or returns one inside a transparent wrapper is refused when the session
+starts (E1604); a forged `effect_ok` carrying an opaque constructor, alone or
+inside a transparent one, is refused as an invalid response (E1608) without
+resuming the computation or recording an observation; and an opaque operation argument or
+result is refused before any frame is emitted. No terminal names the
+constructor. The worker refuses the same signature before any request and the
+same forged response after one. In bundles, the forged-constructor cases now
+also show the refusal comes from the region rule, a constructor pattern is a
+use, quoted data carrying the constructor's identity is not, the recursive
+group's two members are checked to share one declaration, a refused import
+leaves the store's name file, object directory and bindings unchanged, and
+the reader refuses (E1721) a bundle forged to name a prelude without the
+`eval` effect. The source inventory is now `1246 / 83 / 57`.
