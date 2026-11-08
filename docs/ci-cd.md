@@ -16,11 +16,13 @@ Pull-request evidence is split into three workflows:
   exhaustive forwarding evidence.
 
 The split changes scheduling and retry boundaries, not the definition of done.
-All three workflows run for pull requests, `main`, `release/**`, and manual
-dispatch. A transient failure in one workflow can be rerun without repeating
-the independent workflows. The core workflow keeps the established
-`Development gate`, `Native parity (clang)`, and `Native parity (gcc)` job
-names so the existing protected contexts do not disappear during migration.
+All three workflows run for pull requests, `main`, and manual dispatch; CI and
+Governance also run for `release/**` pushes, while GM12B covers release
+branches through their pull requests. A transient failure in one workflow can
+be rerun without repeating the independent workflows. The core workflow
+keeps the established `Development gate`, `Native parity (clang)`, and
+`Native parity (gcc)` job names so the existing protected contexts do not
+disappear during migration.
 The new Governance and GM.12B contexts become required only after their exact
 names have reported on both a real pull request and the resulting `main` push;
 the rollout procedure is in Recommended Branch Protection below.
@@ -203,8 +205,11 @@ would make the development loop unresponsive; it remains mandatory and cannot
 silently degrade into a sampled test. The job retains the actual transcript as
 an artifact and has a 240-minute fail-closed timeout. Pull requests and
 `main` pushes outside its semantic dependency closure take a successful no-op
-path. Unknown commit ranges fail closed by running the proof, and
-`release/**` pushes and manual dispatches always rerun it.
+path. Unknown commit ranges fail closed by running the proof, and pull
+requests from `release/**` branches and manual dispatches always rerun it.
+Release branches are only ever pull-request heads into `main`, so the
+workflow has no `release/**` push trigger: one run per release head, not one
+for the push and another for its pull request.
 Each `main` push has a unique, non-canceling workflow concurrency group so a
 later unrelated push cannot replace the run responsible for an earlier
 relevant range.
@@ -285,12 +290,58 @@ scripts/release/reproduce-0.3.sh
 ```
 
 It uploads `docs/release/0.3/` and generated evidence from
-`.scratch/release/0.3/` as a GitHub Actions artifact. The script verifies the
-complete 0.3 diff manifest, the 0.2 manifest at its tag, and every historical
-publication before running the
-build, test, parser-depth, GM.12B, dual-compiler native, packaging, demo, and
-gauntlet evidence. The historical 0.1 script and documentation remain retained
-for reproducing the older candidate, but are not the current release workflow.
+`.scratch/release/0.3/` as a GitHub Actions artifact. After a successful
+reproduction it also uploads a marker artifact,
+`release-evidence-pass-<commit>-<base>`, naming the commit it checked out
+(for a manual dispatch, the dispatched ref, not the dispatching branch tip)
+and the candidate base.
+
+A `jacquard-core-*` tag push reuses an earlier reproduction instead of
+repeating it: `scripts/release/find-prior-evidence.sh` looks for an unexpired
+marker for the tagged commit and the default base whose run is this workflow,
+started in this repository by a push to a `release/**` branch whose pushed
+commit is the tagged commit, and successful. Such a run executed the tagged
+commit's own workflow and scripts on that commit. A pull request run and a
+manual dispatch are never reused: a dispatch runs the code of its `ref` input,
+which its run record does not show. The tag run then succeeds without
+rebuilding and links the reused run in its summary; without such a marker, or
+on any API failure, it reproduces in full. `test/cli/release-evidence-reuse.t`
+pins the acceptance rules.
+
+Manual dispatches are grouped by the ref they reproduce, so dispatching
+different candidates from one branch no longer replaces queued runs; a
+repeated dispatch of the same ref still replaces that ref's pending run. A
+newer push to a `release/**` branch cancels the running reproduction of the
+stale head, which can never be tagged; tag and dispatch runs are never
+cancelled.
+
+The script verifies the complete 0.3 diff manifest, the 0.2 manifest at its
+tag, and every historical publication before running the build, test,
+parser-depth, GM.12B, dual-compiler native, packaging, demo, and gauntlet
+evidence. The historical 0.1 script and documentation remain retained for
+reproducing the older candidate, but are not the current release workflow.
+
+## Release Procedure
+
+The 0.3 cut needed two release pull requests and many review rounds. Check
+each step off for the next release:
+
+1. Freeze the candidate on a `release/<version>` branch opened as a pull
+   request into `main`; turn auto-merge off before any force-push.
+2. Sweep the upgrade notes against `docs/errors.md` at the previous tag:
+   `git diff <previous-tag> HEAD -- docs/errors.md` lists every added,
+   removed or reworded code the notes must mention.
+3. Bump the version, then rerun the cram transcripts: records sorted by hash
+   reorder when the version string changes, so a transcript must not depend
+   on that order, and a rewrite that silently changes nothing must fail.
+4. Point the release workflow's candidate base at the new base commit.
+5. Let the release branch's own push run Release Evidence on the final head
+   (do not also dispatch it), read its transcripts, wait for it to succeed,
+   then tag that exact commit; the tag push reuses the run. A dispatched run
+   is never reused, so a tag on a commit that only a dispatch reproduced
+   reproduces again.
+6. Freeze the published release documents and their test inventory at the
+   tag, as `docs/release/0.2/` is.
 
 ## Release Binaries
 
@@ -366,7 +417,7 @@ For `release/**`:
 For `jacquard-core-*` tags:
 
 - create tags only after the release evidence workflow is green for the exact
-  commit being tagged
+  commit being tagged; the tag push then reuses that run (Release Evidence)
 - preserve the uploaded evidence artifact with the tag/release notes
 - require the release-binaries workflow to complete before announcing the tag
 

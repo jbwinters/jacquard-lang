@@ -1224,3 +1224,17 @@ be called equal (E1007), while the same policy compares the Int draw. The host
 session test now pins the decoder's own opaque refusal by its cause, the
 worker's signature refusal has a control run, and the reader's eval-less
 refusal is checked by its cause. The source inventory is now `1246 / 84 / 57`.
+
+Release process, first part. GM12B no longer runs on `release/**` pushes:
+release branches are only pull-request heads into `main`, and their pull
+requests always rerun the proof, so a release head gets one run instead of
+two. Release Evidence groups manual dispatches by the ref they reproduce,
+checks out exactly the pushed commit on a push, and cancels only the stale
+head of a `release/**` branch. A `jacquard-core-*` tag push reuses an earlier
+successful reproduction of exactly the tagged commit and base, found by a
+marker artifact whose producing run must be this workflow, started in this
+repository by a push of the tagged commit to a release branch, and
+successful; a manual dispatch is never reused
+(`scripts/release/find-prior-evidence.sh`, pinned by
+`release-evidence-reuse.t`). `docs/ci-cd.md` gains a release procedure. The
+source inventory is now `1246 / 85 / 57`.

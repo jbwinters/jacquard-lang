@@ -1,10 +1,12 @@
 name: GM12B
 
+# Release branches are only ever pull-request heads into main, so their pull
+# request runs the proof; a release-branch push trigger would run it twice on
+# the same head.
 on:
   push:
     branches:
       - main
-      - "release/**"
   pull_request:
   workflow_dispatch:
 
@@ -35,6 +37,9 @@ jobs:
       - name: Determine evidence scope
         id: scope
         shell: bash
+        env:
+          # a fork chooses its branch name, so it reaches the script only as data
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           scope_regex='^(src/|bin/|prelude/|\.github/workflows/(ci|gm12b)\.yml$|\.tool-versions$|dune-project$|dune-workspace[^/]*$|[^/]+\.opam$|test/dune$|test/gm12b/dune$|test/cli/workspace-forward-laws\.(jqd|expected)$|scripts/ci/opam-install-deps\.sh$|scripts/release/check-gm12b-exhaustive\.sh$|docs/release/governed-membranes/GM12B-(EVIDENCE\.md|MANIFEST\.sha256)$)'
           zero_sha=0000000000000000000000000000000000000000
@@ -59,16 +64,20 @@ jobs:
           run=false
           case "${{ github.event_name }}" in
             pull_request)
-              if range_is_relevant \
-                "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"; then
-                run=true
-              fi
+              case "$HEAD_REF" in
+                release/*)
+                  run=true
+                  ;;
+                *)
+                  if range_is_relevant \
+                    "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}"; then
+                    run=true
+                  fi
+                  ;;
+              esac
               ;;
             push)
               case "${{ github.ref }}" in
-                refs/heads/release/*)
-                  run=true
-                  ;;
                 refs/heads/main)
                   if range_is_relevant "${{ github.event.before }}" "${{ github.sha }}"; then
                     run=true

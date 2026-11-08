@@ -34,7 +34,7 @@ The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
 - Alcotest/QCheck cases: `1246`
-- Cram transcript files: `84`
+- Cram transcript files: `85`
 - Documentation examples: `57` named examples across `9` documents
 
 The host protocol v0 conformance kit's `kit.json` records `core_version`
