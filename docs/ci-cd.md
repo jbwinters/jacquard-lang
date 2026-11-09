@@ -310,9 +310,11 @@ generated evidence from `.scratch/release/0.3/` as an artifact named
 `jacquard-release-0.3-evidence-<run>-<stage>`.
 
 The required check, `Reproduce 0.3 evidence`, passes only when a prior pass is
-reused or every stage passed. Only then, after a full reproduction, does it
-upload a marker artifact, `release-evidence-pass-<commit>-<base>`, naming the
-reproduced commit and the candidate base.
+reused or every stage passed. After a full reproduction it then uploads a
+marker artifact, `release-evidence-pass-<commit>-<base>`, naming the
+reproduced commit and the candidate base. It runs even when the run is
+cancelled, and then fails, because a skipped job would satisfy a required
+check.
 
 A `jacquard-core-*` tag push reuses an earlier reproduction instead of
 repeating it: `scripts/release/find-prior-evidence.sh` looks for an unexpired
@@ -437,7 +439,7 @@ For `jacquard-core-*` tags:
 
 - create tags only after the release evidence workflow is green for the exact
   commit being tagged; the tag push then reuses that run (Release Evidence)
-- preserve the uploaded evidence artifact with the tag/release notes
+- preserve the uploaded evidence artifacts with the tag/release notes
 - require the release-binaries workflow to complete before announcing the tag
 
 When introducing, renaming, or moving an independent workflow:

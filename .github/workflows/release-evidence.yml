@@ -151,11 +151,13 @@ jobs:
             .scratch/release/0.3/
 
   # The required check. It passes when a prior pass is reused or every stage
-  # passed, and only a full pass uploads the marker a later tag push reuses.
+  # passed, and only a full pass uploads the marker a later tag push reuses. It
+  # runs even in a cancelled run, so it fails there rather than being skipped:
+  # a skipped job would satisfy a required check.
   reproduce:
     name: Reproduce 0.3 evidence
     needs: [candidate, stage]
-    if: ${{ !cancelled() }}
+    if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

@@ -1274,6 +1274,7 @@ An `Identify candidate` job settles the commit and base once and, on a tag
 push, looks for a reusable pass; it alone holds `actions: read`. Each stage
 checks out exactly that commit and uploads its own transcripts. The required
 `Reproduce 0.3 evidence` job passes only when a pass is reused or every stage
-passed, and only after a full pass uploads the marker a tag push reuses. No
+passed, runs and fails in a cancelled run instead of being skipped, and only
+after a full pass uploads the marker a tag push reuses. No
 evidence step is added or removed. The source inventory is unchanged at
 `1246 / 85 / 57`.

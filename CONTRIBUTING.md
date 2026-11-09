@@ -76,8 +76,8 @@ workflows permits a failed class to be rerun without repeating the others.
 Each class is enforced by its own required branch-protection context after the
 staged context-name rollout described in `docs/ci-cd.md`. Release-candidate
 branches and `jacquard-core-*` tags must also satisfy
-`Release Evidence / Reproduce 0.3 evidence`, which runs the reproducibility
-script and uploads the transcript artifact.
+`Release Evidence / Reproduce 0.3 evidence`, which requires the reproducibility
+script to pass in every stage and each stage to upload its transcripts.
 
 ## Contributor licensing
 
