@@ -1264,3 +1264,17 @@ comment and `docs/ci-cd.md` now say that a cancelled stale release head can
 still be tagged, and its tag then reproduces in full unless another successful
 release push run of the same commit left a marker. The source inventory is
 unchanged at `1246 / 85 / 57`.
+
+Release process, third part. Release Evidence now runs its reproduction as
+four parallel jobs instead of one serial pass: `scripts/release/reproduce-0.3.sh`
+takes `JACQUARD_RELEASE_STAGES` (`core`, `gm12b`, `native-clang`,
+`native-gcc`; unset runs everything, as before), and every stage first checks
+the clean checkout, the manifests and the historical publications and builds.
+An `Identify candidate` job settles the commit and base once and, on a tag
+push, looks for a reusable pass; it alone holds `actions: read`. Each stage
+checks out exactly that commit and uploads its own transcripts. The required
+`Reproduce 0.3 evidence` job passes only when a pass is reused or every stage
+passed, runs and fails in a cancelled run instead of being skipped, and only
+after a full pass uploads the marker a tag push reuses. No
+evidence step is added or removed. The source inventory is unchanged at
+`1246 / 85 / 57`.

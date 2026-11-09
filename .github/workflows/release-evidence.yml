@@ -19,7 +19,6 @@ on:
 
 permissions:
   contents: read
-  actions: read
 
 # Each manual dispatch is grouped by the ref it reproduces, so dispatches of
 # different candidates from one branch no longer replace each other. A newer
@@ -37,10 +36,19 @@ env:
   TMPDIR: ${{ github.workspace }}/.scratch/tmp
 
 jobs:
-  reproduce:
-    name: Reproduce 0.3 evidence
+  # Settle exactly what is reproduced, and on a tag push whether an earlier pass
+  # of that commit and base can be reused, once for the whole run.
+  candidate:
+    name: Identify candidate
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      commit: ${{ steps.candidate.outputs.commit }}
+      base: ${{ steps.candidate.outputs.base }}
+      run_id: ${{ steps.prior.outputs.run_id }}
 
     steps:
       - name: Checkout candidate
@@ -70,65 +78,125 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ steps.candidate.outputs.commit }}
+          BASE: ${{ steps.candidate.outputs.base }}
         run: |
-          if run_id=$(scripts/release/find-prior-evidence.sh "$GITHUB_REPOSITORY" \
-            "${{ steps.candidate.outputs.commit }}" "${{ steps.candidate.outputs.base }}"); then
+          if run_id=$(scripts/release/find-prior-evidence.sh "$GITHUB_REPOSITORY" "$COMMIT" "$BASE"); then
             echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
             url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$run_id"
-            echo "Reusing release evidence for ${{ steps.candidate.outputs.commit }} from $url" |
-              tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Reusing release evidence for $COMMIT from $url" | tee -a "$GITHUB_STEP_SUMMARY"
           else
-            echo "No reusable release evidence for ${{ steps.candidate.outputs.commit }}; reproducing."
+            echo "No reusable release evidence for $COMMIT; reproducing."
           fi
 
+  # The reproduction's independent stages run in parallel, each on exactly the
+  # identified commit, and are skipped when a prior pass is reused.
+  stage:
+    name: Evidence stage (${{ matrix.stage }})
+    needs: candidate
+    if: needs.candidate.outputs.run_id == ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [core, gm12b, native-clang, native-gcc]
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v7.0.0
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.candidate.outputs.commit }}
+
+      - name: Check candidate
+        env:
+          COMMIT: ${{ needs.candidate.outputs.commit }}
+        run: test "$(git rev-parse HEAD)" = "$COMMIT"
+
       - name: Prepare temporary storage
-        if: steps.prior.outputs.run_id == ''
         run: mkdir -p "$TMPDIR"
 
       - name: Set up OCaml
-        if: steps.prior.outputs.run_id == ''
         uses: ocaml/setup-ocaml@v3.6.1
         with:
           ocaml-compiler: ${{ env.OCAML_COMPILER }}
 
       - name: Reproduce release evidence
-        if: steps.prior.outputs.run_id == ''
         env:
-          BASE_INPUT: ${{ github.event.inputs.base || 'f296ec1333072a1bdddb53f707eef836926cdb43' }}
+          COMMIT: ${{ needs.candidate.outputs.commit }}
+          BASE: ${{ needs.candidate.outputs.base }}
+          STAGE: ${{ matrix.stage }}
         run: |
           # A manual dispatch attests the commit it checked out, not the
           # dispatching branch tip that GITHUB_SHA names.
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
-            GITHUB_SHA=$(git rev-parse HEAD)
+            GITHUB_SHA=$COMMIT
             export GITHUB_SHA
           fi
           JACQUARD_RELEASE_REF=HEAD \
-          JACQUARD_RELEASE_BASE="$BASE_INPUT" \
+          JACQUARD_RELEASE_BASE="$BASE" \
+          JACQUARD_RELEASE_STAGES="$STAGE" \
           scripts/release/reproduce-0.3.sh
 
       - name: Upload evidence transcripts
-        if: always() && steps.prior.outputs.run_id == ''
+        if: always()
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: jacquard-release-0.3-evidence-${{ github.run_number }}
+          name: jacquard-release-0.3-evidence-${{ github.run_number }}-${{ matrix.stage }}
           if-no-files-found: error
           include-hidden-files: true
           path: |
             docs/release/0.3/
             .scratch/release/0.3/
 
+  # The required check. It passes when a prior pass is reused or every stage
+  # passed, and only a full pass uploads the marker a later tag push reuses. It
+  # runs even in a cancelled run, so it fails there rather than being skipped:
+  # a skipped job would satisfy a required check.
+  reproduce:
+    name: Reproduce 0.3 evidence
+    needs: [candidate, stage]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Require the evidence
+        env:
+          CANDIDATE: ${{ needs.candidate.result }}
+          RUN_ID: ${{ needs.candidate.outputs.run_id }}
+          STAGES: ${{ needs.stage.result }}
+          COMMIT: ${{ needs.candidate.outputs.commit }}
+        run: |
+          if [ "$CANDIDATE" != success ]; then
+            echo "the candidate could not be identified ($CANDIDATE)" >&2
+            exit 1
+          fi
+          if [ -n "$RUN_ID" ]; then
+            echo "reused the release evidence of run $RUN_ID for $COMMIT"
+            exit 0
+          fi
+          if [ "$STAGES" != success ]; then
+            echo "release evidence stages did not all pass ($STAGES)" >&2
+            exit 1
+          fi
+          echo "every release evidence stage passed for $COMMIT"
+
       - name: Write evidence marker
-        if: success() && steps.prior.outputs.run_id == ''
+        if: needs.candidate.outputs.run_id == '' && needs.stage.result == 'success'
+        env:
+          COMMIT: ${{ needs.candidate.outputs.commit }}
+          BASE: ${{ needs.candidate.outputs.base }}
         run: |
           mkdir -p .scratch/release-evidence-pass
-          printf 'commit %s\nbase %s\n' "${{ steps.candidate.outputs.commit }}" \
-            "${{ steps.candidate.outputs.base }}" > .scratch/release-evidence-pass/marker.txt
+          printf 'commit %s\nbase %s\n' "$COMMIT" "$BASE" > .scratch/release-evidence-pass/marker.txt
 
       - name: Upload evidence marker
-        if: success() && steps.prior.outputs.run_id == ''
+        if: needs.candidate.outputs.run_id == '' && needs.stage.result == 'success'
         uses: actions/upload-artifact@v7.0.1
         with:
-          name: release-evidence-pass-${{ steps.candidate.outputs.commit }}-${{ steps.candidate.outputs.base }}
+          name: release-evidence-pass-${{ needs.candidate.outputs.commit }}-${{ needs.candidate.outputs.base }}
           if-no-files-found: error
           include-hidden-files: true
           path: .scratch/release-evidence-pass/marker.txt
