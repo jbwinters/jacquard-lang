@@ -23,8 +23,10 @@ permissions:
 
 # Each manual dispatch is grouped by the ref it reproduces, so dispatches of
 # different candidates from one branch no longer replace each other. A newer
-# push to a release branch cancels the running reproduction of the stale head,
-# which can never be tagged; tags and dispatches are never cancelled.
+# push to a release branch cancels the running reproduction of the stale head;
+# a cancelled run leaves no marker, so a tag on that head reproduces in full
+# unless another successful release push run of the same commit left one.
+# Tags and dispatches are never cancelled.
 concurrency:
   group: release-evidence-${{ github.event_name == 'workflow_dispatch' && format('dispatch-{0}', github.event.inputs.ref) || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/') }}
@@ -64,7 +66,7 @@ jobs:
       # tagged commit against the same base; otherwise it reproduces in full.
       - name: Find prior evidence
         id: prior
-        if: startsWith(github.ref, 'refs/tags/jacquard-core-')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/jacquard-core-')
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}

@@ -201,8 +201,9 @@ When adding valid corpus files, regenerate the golden hashes with
 
 GitHub Actions mirrors the local definition of done:
 
-- `CI / Development gate` runs build, full tests, clean formatting, version
-  smoke, and release-doc presence on PRs, `main`, and `release/**`.
+- `CI / Development gate` runs build, full tests, the release demos, clean
+  formatting, version smoke, and release-doc presence on PRs, `main`, and
+  `release/**`.
 - `CI / Native parity (clang)` and `CI / Native parity (gcc)` run the runtime
   memory, differential, leak, and seeded fuzz evidence.
 - `Governance / Governance playground` runs the source-checkout viewer's

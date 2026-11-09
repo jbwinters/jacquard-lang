@@ -66,6 +66,9 @@ jobs:
       - name: Full test suite
         run: opam exec -- dune runtest
 
+      - name: Release demos
+        run: opam exec -- scripts/release/run-demos.sh
+
       - name: Release installer smoke
         run: scripts/release/smoke-installer.sh linux-x86_64
 

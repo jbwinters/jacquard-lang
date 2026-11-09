@@ -1251,3 +1251,16 @@ code and the builtins it calls still return prelude values beside the root's
 sealed ones. E1731 names the
 root's own constructors as `of this project`. The source inventory is
 unchanged at `1246 / 85 / 57`.
+
+Release process, second part. The demos Release Evidence reproduces now come
+from one list, `scripts/release/run-demos.sh`, which the CI development gate
+also runs after the full test suite, so a broken demo fails its pull request
+instead of the multi-hour release run; the release transcripts keep their
+names. Release Evidence looks for a prior pass only on a tag push, never on a
+manual dispatch from a tag, whose `ref` input may name other code. The reuse
+finder no longer expands run ids as file name patterns, and its cram refuses
+40-character commit and base names that are not lowercase hex. The concurrency
+comment and `docs/ci-cd.md` now say that a cancelled stale release head can
+still be tagged, and its tag then reproduces in full unless another successful
+release push run of the same commit left a marker. The source inventory is
+unchanged at `1246 / 85 / 57`.

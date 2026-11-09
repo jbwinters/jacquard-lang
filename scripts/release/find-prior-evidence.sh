@@ -47,6 +47,8 @@ artifacts=$("$gh" api --paginate "repos/$repo/actions/artifacts?name=$marker&per
 run_ids=$(printf '%s\n' "$artifacts" |
   jq -r '.artifacts[] | select(.expired == false) | .workflow_run.id' 2>/dev/null) || exit 1
 
+# Split the ids on whitespace only; never expand them as file name patterns.
+set -f
 for run_id in $run_ids; do
   case "$run_id" in
     '' | *[!0-9]*) continue ;;

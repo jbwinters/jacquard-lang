@@ -70,10 +70,15 @@ scripts/ci/opam-install-deps.sh \
   --deps-only . --with-test --with-doc --with-dev-setup -y
 opam exec -- dune build @all
 opam exec -- dune runtest
+opam exec -- scripts/release/run-demos.sh
 opam exec -- dune fmt
 git diff --exit-code
 _build/default/bin/main.exe --version
 ```
+
+`scripts/release/run-demos.sh` runs the demos Release Evidence reproduces, from
+the one list both use, so a broken demo fails its pull request instead of the
+multi-hour release run.
 
 The `dune fmt` plus `git diff --exit-code` pair is deliberate: if formatting
 auto-promotes anything, CI fails and prints the diff.
@@ -312,8 +317,9 @@ Manual dispatches are grouped by the ref they reproduce, so dispatching
 different candidates from one branch no longer replaces queued runs; a
 repeated dispatch of the same ref still replaces that ref's pending run. A
 newer push to a `release/**` branch cancels the running reproduction of the
-stale head, which can never be tagged; tag and dispatch runs are never
-cancelled.
+stale head. A cancelled run leaves no marker, so if that head is tagged anyway
+its tag reproduces in full, unless another successful release push run of the
+same commit left one. Tag and dispatch runs are never cancelled.
 
 The script verifies the complete 0.3 diff manifest, the 0.2 manifest at its
 tag, and every historical publication before running the build, test,
