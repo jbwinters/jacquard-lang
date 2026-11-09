@@ -73,21 +73,13 @@ capture clean-diff git diff --exit-code HEAD
 capture version sh -c 'test "$(_build/default/bin/main.exe --version)" = "0.3.0"'
 capture installer-smoke scripts/release/smoke-installer.sh linux-x86_64
 
-capture m1 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/basics/m1.sh
-capture m3 env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/inference/m3.sh
-capture clarifying-question env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/inference/clarifying-question.sh
-capture agent-dream env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/agent-dream.sh
-capture ambiguity-pipeline env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/inference/ambiguity-pipeline.sh
-capture demo-warp-tests env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/tooling/showcase-warp-tests.sh
-capture repair env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/tooling/repair.sh
-capture hostile-manifest env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/m4-hostile.sh
-capture preflight env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/preflight.sh
-capture escrow env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/worlds/escrow/run.sh
-capture release-risk env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/release-risk/run.sh
-capture stormglass env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/stormglass/run.sh
-capture structured-concurrency env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/concurrency/run.sh
-capture governed-workspace env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/governed-workspace/run.sh
-capture night-shift env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh demos/case-studies/night-shift/run.sh
+# The demo list is shared with the CI development gate (scripts/release/run-demos.sh).
+demo_list=$(scripts/release/run-demos.sh --list)
+while read -r name script <&3; do
+  capture "$name" env JACQUARD_PRELUDE="$ROOT/prelude" opam exec -- sh "$script"
+done 3<<DEMOS
+$demo_list
+DEMOS
 
 capture cli-and-gauntlet opam exec -- dune runtest --root "$ROOT" \
   test/cli/abstract-types-demos.t \

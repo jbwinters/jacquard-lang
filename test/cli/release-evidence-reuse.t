@@ -101,3 +101,9 @@ Malformed arguments are usage errors:
   $ $find o/r $C abc123; echo "exit $?"
   commit and base must be full lowercase hex object names
   exit 2
+  $ $find o/r gggggggggggggggggggggggggggggggggggggggg $B; echo "exit $?"
+  commit and base must be full lowercase hex object names
+  exit 2
+  $ $find o/r $C AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA; echo "exit $?"
+  commit and base must be full lowercase hex object names
+  exit 2

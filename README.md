@@ -710,8 +710,9 @@ JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=f296ec1333072a1bdddb53f707eef836
 
 GitHub Actions separates independently retryable evidence:
 
-- `CI / Development gate`: build, full tests, clean formatting, version smoke,
-  and release-doc presence on PRs, `main`, and `release/**`.
+- `CI / Development gate`: build, full tests, the release demos, clean
+  formatting, version smoke, and release-doc presence on PRs, `main`, and
+  `release/**`.
 - `CI / Native parity (clang|gcc)`: runtime memory, differential, leak, and
   seeded fuzz evidence for both supported C compilers.
 - `Governance / Governance playground`: lint, types, unit/accessibility tests,
