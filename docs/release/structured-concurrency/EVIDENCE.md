@@ -34,10 +34,10 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 984 compiled Alcotest/QCheck cases, 60 recursive
-cram transcript files, and 28 named doctest examples across 8 documents. The
-repository release-law checks recompute those counts instead of trusting this
-paragraph.
+At SC.16 the successor inventory was 984 compiled Alcotest/QCheck cases, 60
+recursive cram transcript files, and 28 named doctest examples across 8
+documents. The live inventory is no longer recorded or checked here;
+`scripts/release/inventory.sh` prints it.
 
 ## One program under four schedule handlers
 
@@ -924,7 +924,7 @@ unifier isolation case, plus one CLI transcript, bringing the live inventory to
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers described the source checkout at that merge.
 
-The serial host-session library adds 15 cases, bringing the current source
-inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
+The serial host-session library added 15 cases, bringing the source inventory
+at that merge to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence; the process worker remains
 unimplemented. See [the session contract](../../host-session-v0.md).

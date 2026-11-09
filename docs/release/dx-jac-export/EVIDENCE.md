@@ -109,7 +109,7 @@ unifier isolation case, plus one CLI transcript, bringing the live inventory to
 The historical publication manifests and their recorded source evidence remain
 unchanged; these inventory numbers described the source checkout at that merge.
 
-The serial host-session library adds 15 cases, bringing the current source
-inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
+The serial host-session library added 15 cases, bringing the source inventory
+at that merge to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence; the process worker remains
 unimplemented. See [the session contract](../../host-session-v0.md).
