@@ -1261,5 +1261,6 @@ manual dispatch from a tag, whose `ref` input may name other code. The reuse
 finder no longer expands run ids as file name patterns, and its cram refuses
 40-character commit and base names that are not lowercase hex. The concurrency
 comment and `docs/ci-cd.md` now say that a cancelled stale release head can
-still be tagged, and its tag then reproduces in full. The source inventory is
+still be tagged, and its tag then reproduces in full unless another successful
+release push run of the same commit left a marker. The source inventory is
 unchanged at `1246 / 85 / 57`.

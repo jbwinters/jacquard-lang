@@ -6,8 +6,9 @@
 # usage: run-demos.sh --list   print "<name> <script>" for each demo, one per line
 #        run-demos.sh          run every demo in a source checkout; exit 1 if any fails
 #
-# Run from the repository root after building the CLI (dune build @all). JACQUARD
-# is ignored, so the demos use the checkout's own build, as a release run does.
+# Build the CLI first (dune build @all); the script changes to the repository
+# root itself. JACQUARD is ignored, so the demos use the checkout's own build,
+# as a release run does.
 set -eu
 
 demos() {
@@ -46,15 +47,16 @@ JACQUARD_PRELUDE=$root/prelude
 export JACQUARD_PRELUDE
 
 failed=
-demos >"${TMPDIR:-/tmp}/run-demos.$$"
-while read -r name script; do
+list=$(demos)
+while read -r name script <&3; do
   echo "== $name =="
   if ! sh "$script" </dev/null; then
     echo "demo failed: $name ($script)" >&2
     failed="$failed $name"
   fi
-done <"${TMPDIR:-/tmp}/run-demos.$$"
-rm -f "${TMPDIR:-/tmp}/run-demos.$$"
+done 3<<LIST
+$list
+LIST
 
 if [ -n "$failed" ]; then
   echo "failed demos:$failed" >&2

@@ -317,8 +317,9 @@ Manual dispatches are grouped by the ref they reproduce, so dispatching
 different candidates from one branch no longer replaces queued runs; a
 repeated dispatch of the same ref still replaces that ref's pending run. A
 newer push to a `release/**` branch cancels the running reproduction of the
-stale head; if that head is tagged anyway, its tag finds no prior pass and
-reproduces in full. Tag and dispatch runs are never cancelled.
+stale head. A cancelled run leaves no marker, so if that head is tagged anyway
+its tag reproduces in full, unless another successful release push run of the
+same commit left one. Tag and dispatch runs are never cancelled.
 
 The script verifies the complete 0.3 diff manifest, the 0.2 manifest at its
 tag, and every historical publication before running the build, test,
