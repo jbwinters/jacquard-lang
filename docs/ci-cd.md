@@ -65,6 +65,7 @@ scripts/release/check-historical-manifests.sh \
   --commit "$(git rev-parse HEAD)" \
   --require-history
 scripts/release/test-historical-manifests.sh --commit "$(git rev-parse HEAD)"
+scripts/release/check-frozen-releases.sh --commit "$(git rev-parse HEAD)"
 sh editors/check.sh
 scripts/ci/opam-install-deps.sh \
   --deps-only . --with-test --with-doc --with-dev-setup -y
@@ -336,8 +337,10 @@ stale head. A cancelled run leaves no marker, so if that head is tagged anyway
 its tag reproduces in full, unless another successful release push run of the
 same commit left one. Tag and dispatch runs are never cancelled.
 
-The script verifies the complete 0.3 diff manifest, the 0.2 manifest at its
-tag, and every historical publication before running the build, test,
+The script verifies the 0.3 and 0.2 manifests at their tags, that the
+published 0.2 and 0.3 documents are unchanged since those tags
+(`scripts/release/check-frozen-releases.sh`, which the development gate also
+runs), and every historical publication before running the build, test,
 parser-depth, GM.12B, dual-compiler native, packaging, demo, and gauntlet
 evidence. The historical 0.1 script and documentation remain retained for
 reproducing the older candidate, but are not the current release workflow.
@@ -362,7 +365,11 @@ each step off for the next release:
    is never reused, so a tag on a commit that only a dispatch reproduced
    reproduces again.
 6. Freeze the published release documents and their test inventory at the
-   tag, as `docs/release/0.2/` is.
+   tag, as `docs/release/0.2/` and `docs/release/0.3/` are: move
+   `docs/release/unreleased/` into the release's directory, pin its inventory
+   in `test/test_surface_laws.ml`, add the directory and tag to
+   `scripts/release/check-frozen-releases.sh`, and start a new
+   `docs/release/unreleased/`.
 
 ## Release Binaries
 

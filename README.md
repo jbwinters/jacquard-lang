@@ -575,9 +575,11 @@ the larger applications.
 
 ## Release Evidence
 
-The current release evidence pack lives in `docs/release/0.3/`. The published
-0.2 pack and historical 0.1 evidence remain byte-preserved under
-`docs/release/0.2/` and `docs/release/0.1/`.
+The current release evidence pack lives in `docs/release/0.3/`. It and the
+published 0.2 pack are frozen at their tags (`scripts/release/check-frozen-releases.sh`),
+and historical 0.1 evidence remains byte-preserved under `docs/release/0.1/`.
+Work merged since 0.3.0, with the live test inventory and the next release's
+upgrade notes, is recorded in `docs/release/unreleased/`.
 
 To reproduce the release evidence from this checkout:
 
@@ -588,7 +590,8 @@ JACQUARD_RELEASE_REF=HEAD JACQUARD_RELEASE_BASE=f296ec1333072a1bdddb53f707eef836
 The script installs dependencies, builds, runs the full test suite, checks
 formatting, runs public demos, runs gauntlet tests, records `jacquard --version`,
 and writes generated evidence under `.scratch/release/0.3/`. It also checks
-the complete release-diff manifest, historical publications, parser-depth and
+the 0.2 and 0.3 release-diff manifests at their tags, that the released
+documents are unchanged, historical publications, parser-depth and
 GM.12B evidence, and native memory/differential/leak/fuzz lanes under both
 Clang and GCC.
 

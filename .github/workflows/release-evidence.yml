@@ -148,6 +148,7 @@ jobs:
           include-hidden-files: true
           path: |
             docs/release/0.3/
+            docs/release/unreleased/
             .scratch/release/0.3/
 
   # The required check. It passes when a prior pass is reused or every stage

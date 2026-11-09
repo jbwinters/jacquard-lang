@@ -118,7 +118,10 @@ Read these together when judging the integrated 0.3 distribution:
 - `release/0.3/MANIFEST.sha256`: complete hashed change inventory from the
   frozen 0.3 lineage base, excluding only the manifest itself.
 - `release/0.3/SLICES.md`: per-change evidence log for everything integrated
-  since 0.2.0.
+  between 0.2.0 and 0.3.0.
+- `release/unreleased/`: the live inventory, upgrade notes and per-change
+  evidence log for work integrated after 0.3.0. The 0.2 and 0.3 documents are
+  frozen at their tags.
 
 The detailed successor packs indexed below remain the authority for each
 subsystem. The 0.3 pack rolls them up without editing their historical bytes.

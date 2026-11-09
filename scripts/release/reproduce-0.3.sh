@@ -62,7 +62,11 @@ capture historical-manifest-adversarial scripts/release/test-historical-manifest
 capture release-0.2-manifest env -u GITHUB_SHA -u JACQUARD_RELEASE_BASE scripts/release/check-0.2-manifest.sh \
   --commit jacquard-core-0.2.0
 capture release-0.2-unchanged git diff --exit-code jacquard-core-0.2.0 HEAD -- docs/release/0.2
-capture release-0.3-manifest scripts/release/check-0.3-manifest.sh --commit HEAD
+# 0.3 is published too: its manifest is verified at its tag, and its documents
+# stay frozen there (work after it is recorded in docs/release/unreleased/).
+capture release-0.3-manifest env -u GITHUB_SHA -u JACQUARD_RELEASE_BASE scripts/release/check-0.3-manifest.sh \
+  --commit jacquard-core-0.3.0
+capture frozen-releases scripts/release/check-frozen-releases.sh --commit HEAD
 
 capture deps opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 capture build opam exec -- dune build --root "$ROOT" @all
