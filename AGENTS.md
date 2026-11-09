@@ -210,9 +210,10 @@ GitHub Actions mirrors the local definition of done:
   lint, type, unit/accessibility, build, and browser checks.
 - `GM12B / GM12B exhaustive forwarding evidence` runs or explicitly carries
   forward the scoped 50,000-case forwarding proof.
-- `Release Evidence / Reproduce 0.3 evidence` runs
-  `scripts/release/reproduce-0.3.sh` on `release/**`, `jacquard-core-*` tags, and
-  manual dispatch, then uploads the evidence transcripts.
+- `Release Evidence / Reproduce 0.3 evidence` requires
+  `scripts/release/reproduce-0.3.sh` to pass in four parallel stages on
+  `release/**`, `jacquard-core-*` tags, and manual dispatch (a tag may reuse an
+  earlier pass of the same commit), and each stage uploads its transcripts.
 
 Release-facing changes should keep `scripts/release/reproduce-0.3.sh` green and
 should not add features outside the release hardening scope.

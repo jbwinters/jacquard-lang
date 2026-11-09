@@ -286,20 +286,33 @@ Required check before tagging 0.3 release candidates:
 
 - `Release Evidence / Reproduce 0.3 evidence`
 
-The workflow runs:
+The workflow has three jobs. `Identify candidate` resolves the commit it
+reproduces (for a manual dispatch, the dispatched ref, not the dispatching
+branch tip) and the candidate base, and on a tag push looks for a reusable
+pass. Four `Evidence stage` jobs then run in parallel, each checking out
+exactly that commit:
 
 ```sh
 JACQUARD_RELEASE_REF=HEAD \
 JACQUARD_RELEASE_BASE=f296ec1333072a1bdddb53f707eef836926cdb43 \
+JACQUARD_RELEASE_STAGES=core|gm12b|native-clang|native-gcc \
 scripts/release/reproduce-0.3.sh
 ```
 
-It uploads `docs/release/0.3/` and generated evidence from
-`.scratch/release/0.3/` as a GitHub Actions artifact. After a successful
-reproduction it also uploads a marker artifact,
-`release-evidence-pass-<commit>-<base>`, naming the commit it checked out
-(for a manual dispatch, the dispatched ref, not the dispatching branch tip)
-and the candidate base.
+Every stage first checks the clean checkout, the release manifests and
+historical publications, then installs and builds. `core` runs the docs,
+tests, doctests, parser depth, formatting, version, installer, demo and
+gauntlet evidence; `gm12b` the GM.12B proof; `native-clang` and `native-gcc`
+the runtime memory, differential, leak and fuzz evidence for one compiler.
+Without `JACQUARD_RELEASE_STAGES` the script runs everything in one pass, as a
+local reproduction does. Each stage uploads `docs/release/0.3/` and its
+generated evidence from `.scratch/release/0.3/` as an artifact named
+`jacquard-release-0.3-evidence-<run>-<stage>`.
+
+The required check, `Reproduce 0.3 evidence`, passes only when a prior pass is
+reused or every stage passed. Only then, after a full reproduction, does it
+upload a marker artifact, `release-evidence-pass-<commit>-<base>`, naming the
+reproduced commit and the candidate base.
 
 A `jacquard-core-*` tag push reuses an earlier reproduction instead of
 repeating it: `scripts/release/find-prior-evidence.sh` looks for an unexpired

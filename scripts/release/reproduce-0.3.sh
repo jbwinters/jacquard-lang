@@ -11,6 +11,19 @@ REF=${JACQUARD_RELEASE_REF:-HEAD}
 BASE=${JACQUARD_RELEASE_BASE:-f296ec1333072a1bdddb53f707eef836926cdb43}
 OUT=${JACQUARD_RELEASE_OUT:-$ROOT/.scratch/release/0.3}
 TRANSCRIPTS="$OUT/transcripts"
+# JACQUARD_RELEASE_STAGES selects one stage so Release Evidence can run the
+# stages as parallel jobs; every stage first checks the candidate and builds it.
+STAGES=${JACQUARD_RELEASE_STAGES:-all}
+case "$STAGES" in
+  all | core | gm12b | native-clang | native-gcc) ;;
+  *)
+    echo "JACQUARD_RELEASE_STAGES must be all, core, gm12b, native-clang or native-gcc" >&2
+    exit 2
+    ;;
+esac
+stage() {
+  [ "$STAGES" = all ] || [ "$STAGES" = "$1" ]
+}
 
 mkdir -p "$TRANSCRIPTS"
 
@@ -39,6 +52,7 @@ fi
 git checkout "$REF"
 git merge-base --is-ancestor "$BASE" HEAD
 git rev-parse HEAD | tee "$OUT/commit.txt"
+echo "$STAGES" >"$OUT/stage.txt"
 
 capture historical-manifests scripts/release/check-historical-manifests.sh \
   --commit HEAD --require-history
@@ -52,13 +66,18 @@ capture release-0.3-manifest scripts/release/check-0.3-manifest.sh --commit HEAD
 
 capture deps opam install --deps-only . --with-test --with-dev-setup --with-doc -y
 capture build opam exec -- dune build --root "$ROOT" @all
-capture docs opam exec -- dune build --root "$ROOT" @doc
-capture runtest opam exec -- dune runtest --root "$ROOT"
-capture doctest opam exec -- dune runtest --root "$ROOT" test/docs-doctest --force
-capture parser-depth scripts/parser-depth-perf.sh
-capture gm12b opam exec -- dune build --root "$ROOT" @test/gm12b/gm12b-evidence --force
+if stage core; then
+  capture docs opam exec -- dune build --root "$ROOT" @doc
+  capture runtest opam exec -- dune runtest --root "$ROOT"
+  capture doctest opam exec -- dune runtest --root "$ROOT" test/docs-doctest --force
+  capture parser-depth scripts/parser-depth-perf.sh
+fi
+if stage gm12b; then
+  capture gm12b opam exec -- dune build --root "$ROOT" @test/gm12b/gm12b-evidence --force
+fi
 
 for cc in clang gcc; do
+  stage "native-$cc" || continue
   capture "runtime-memory-$cc" env CC="$cc" runtime/check.sh
   capture "native-diff-$cc" env CC="$cc" JACQUARD="$ROOT/_build/default/bin/main.exe" \
     opam exec -- sh scripts/native-diff.sh
@@ -67,6 +86,12 @@ for cc in clang gcc; do
   capture "native-fuzz-$cc" env CC="$cc" \
     opam exec -- dune build --root "$ROOT" @native-fuzz --force
 done
+
+if ! stage core; then
+  capture final-clean-diff git diff --exit-code HEAD
+  echo "release reproduction stage $STAGES complete: $OUT"
+  exit 0
+fi
 
 capture fmt opam exec -- dune fmt --root "$ROOT"
 capture clean-diff git diff --exit-code HEAD

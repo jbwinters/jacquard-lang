@@ -721,8 +721,9 @@ GitHub Actions separates independently retryable evidence:
   forwarding proof, with a successful no-op result outside its dependency
   closure.
 - `Release Evidence / Reproduce 0.3 evidence`: release branches, `jacquard-core-*`
-  tags, and manual dispatch; runs `scripts/release/reproduce-0.3.sh` and uploads
-  transcripts.
+  tags, and manual dispatch; runs `scripts/release/reproduce-0.3.sh` in four
+  parallel stages (core, GM.12B, native clang, native gcc) and uploads their
+  transcripts; a tag may reuse an earlier pass of the same commit.
 - `Release Binaries`: `jacquard-core-*` tags and manual dispatch; builds
   Linux/macOS tarballs with `jacquard`, `jac`, the prelude, demos, and native
   runtime sources.
