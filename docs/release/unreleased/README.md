@@ -4,19 +4,20 @@ This directory carries the work integrated after `jacquard-core-0.3.0` until
 the next release. The published 0.3 documents in `../0.3/`, like those in
 `../0.2/`, stay byte-identical to their tag; CI refuses any change to them
 (`scripts/release/check-frozen-releases.sh`). At the next release this
-directory becomes that release's directory, and its inventory is frozen at
-the tag.
+directory becomes that release's directory, and the inventory printed by
+`scripts/release/inventory.sh` is frozen there at the tag.
 
-## Live Inventory
+## Inventory and Slice Entries
 
-The source checkout currently has:
+The live inventory is not recorded in any document, so parallel changes do not
+conflict over it: `scripts/release/inventory.sh` prints it from the build, and
+the next release freezes it at its tag. At the last recorded point it was
+1246 Alcotest/QCheck cases, 85 cram transcript files and 57 documentation
+examples across 9 documents.
 
-- Alcotest/QCheck cases: `1246`
-- Cram transcript files: `85`
-- Documentation examples: `57` named examples across `9` documents
-
-`test/test_surface_laws.ml` checks the first two counts against the build.
-Each merged change records the inventory it reached in [SLICES.md](SLICES.md).
+[SLICES.md](SLICES.md) holds the slice log up to that point. Each later change
+adds its own entry file under [slices/](slices/) instead of appending to a
+shared log, and does not record a running inventory.
 
 ## Upgrade Notes
 

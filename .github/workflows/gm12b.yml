@@ -8,6 +8,8 @@ on:
     branches:
       - main
   pull_request:
+  # the merge queue tests each queued pull request merged onto the latest main
+  merge_group:
   workflow_dispatch:
 
 permissions:
@@ -40,6 +42,7 @@ jobs:
         env:
           # a fork chooses its branch name, so it reaches the script only as data
           HEAD_REF: ${{ github.head_ref }}
+          QUEUE_BASE_REF: ${{ github.event.merge_group.base_ref }}
         run: |
           scope_regex='^(src/|bin/|prelude/|\.github/workflows/(ci|gm12b)\.yml$|\.tool-versions$|dune-project$|dune-workspace[^/]*$|[^/]+\.opam$|test/dune$|test/gm12b/dune$|test/cli/workspace-forward-laws\.(jqd|expected)$|scripts/ci/opam-install-deps\.sh$|scripts/release/check-gm12b-exhaustive\.sh$|docs/release/governed-membranes/GM12B-(EVIDENCE\.md|MANIFEST\.sha256)$)'
           zero_sha=0000000000000000000000000000000000000000
@@ -87,6 +90,22 @@ jobs:
                   run=true
                   ;;
               esac
+              ;;
+            merge_group)
+              # A queued group's parent is the group ahead of it, not the
+              # target branch, so the range starts where the queued commit
+              # leaves the target branch: it covers every pull request queued
+              # ahead as well as this one. An unknown range runs the proof.
+              queue_base=
+              case "$QUEUE_BASE_REF" in
+                refs/heads/?*)
+                  queue_base=$(git merge-base "refs/remotes/origin/${QUEUE_BASE_REF#refs/heads/}" \
+                    "${{ github.sha }}" 2>/dev/null) || queue_base=
+                  ;;
+              esac
+              if range_is_relevant "$queue_base" "${{ github.sha }}"; then
+                run=true
+              fi
               ;;
             workflow_dispatch)
               run=true

@@ -34,10 +34,10 @@ native Channel, actor, or supervision claim.
 | C3 | Scoped typed channels run through deterministic FIFO, seeded, replay, exhaustive, and cached interpreter scheduling with exact run/scope ownership, rendezvous and buffering, close, cancellation, and deadlock behavior. | `channel-contract`, `round-robin`, and `exhaustive-schedule` suites; `test/cli/task-values.t`; `test/cli/schedule-replay.t`; and the frozen traces below |
 | C4 | Not claimed: host asynchronous I/O, actors, and supervision are absent. | [LIMITS.md](LIMITS.md) |
 
-The current successor inventory is exactly 984 compiled Alcotest/QCheck cases, 60 recursive
-cram transcript files, and 28 named doctest examples across 8 documents. The
-repository release-law checks recompute those counts instead of trusting this
-paragraph.
+At SC.16 the successor inventory was 984 compiled Alcotest/QCheck cases, 60
+recursive cram transcript files, and 28 named doctest examples across 8
+documents. The live inventory is no longer recorded or checked here;
+`scripts/release/inventory.sh` prints it.
 
 ## One program under four schedule handlers
 
@@ -758,10 +758,10 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The current inventory is mechanically checked against compiled discovery:
-
-- Alcotest/QCheck cases: `1246`
-- Cram transcript files: `85`
+The live inventory is no longer recorded here: `scripts/release/inventory.sh`
+prints it from compiled discovery, and each release freezes it in its own
+evidence. When the count stopped being kept here it was 1246 Alcotest/QCheck
+cases and 85 cram transcript files.
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the
@@ -922,9 +922,9 @@ The checked effect-payload successor adds 37 handler/transport cases and one
 unifier isolation case, plus one CLI transcript, bringing the live inventory to
 `969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
-unchanged; these inventory numbers describe the current source checkout.
+unchanged; these inventory numbers described the source checkout at that merge.
 
-The serial host-session library adds 15 cases, bringing the current source
-inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
+The serial host-session library added 15 cases, bringing the source inventory
+at that merge to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence; the process worker remains
 unimplemented. See [the session contract](../../host-session-v0.md).

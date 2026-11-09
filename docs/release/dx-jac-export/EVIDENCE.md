@@ -4,11 +4,12 @@ Status: successor evidence after Jacquard Core 0.1 and the surface-syntax
 release. The frozen 0.1 and SS.21/SS.22 inventories describe their reviewed
 artifacts and are not retroactively updated by DX.2.
 
-## Current inventory
+## Inventory
 
-- Alcotest/QCheck cases: `1246`
-- Cram transcript files: `85`
-- Doctest examples: `57` across 9 documents
+This pack no longer records the live inventory: `scripts/release/inventory.sh`
+prints it, and each release freezes it in its own evidence. When the count
+stopped being kept here it was 1246 Alcotest/QCheck cases, 85 cram transcript
+files and 57 doctest examples across 9 documents.
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
 structural-depth and diagnostic-compatibility cases. The successor cram
@@ -106,9 +107,9 @@ The checked effect-payload successor adds 37 handler/transport cases and one
 unifier isolation case, plus one CLI transcript, bringing the live inventory to
 `969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
-unchanged; these inventory numbers describe the current source checkout.
+unchanged; these inventory numbers described the source checkout at that merge.
 
-The serial host-session library adds 15 cases, bringing the current source
-inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,
+The serial host-session library added 15 cases, bringing the source inventory
+at that merge to `984 / 60 / 28`. It covers typed responses, terminal mappings,
 finish-once accounting, and bounded evidence; the process worker remains
 unimplemented. See [the session contract](../../host-session-v0.md).

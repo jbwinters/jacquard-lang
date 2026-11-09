@@ -16,7 +16,8 @@ Pull-request evidence is split into three workflows:
   exhaustive forwarding evidence.
 
 The split changes scheduling and retry boundaries, not the definition of done.
-All three workflows run for pull requests, `main`, and manual dispatch; CI and
+All three workflows run for pull requests, the merge queue (`merge_group`),
+`main`, and manual dispatch; CI and
 Governance also run for `release/**` pushes, while GM12B covers release
 branches through their pull requests. A transient failure in one workflow can
 be rerun without repeating the independent workflows. The core workflow
@@ -218,7 +219,14 @@ workflow has no `release/**` push trigger: one run per release head, not one
 for the push and another for its pull request.
 Each `main` push has a unique, non-canceling workflow concurrency group so a
 later unrelated push cannot replace the run responsible for an earlier
-relevant range.
+relevant range. In the merge queue the scope is the whole queued range, from
+where the queued commit leaves `main` to that commit, so it covers every pull
+request queued ahead as well as this one (a group's own parent is the group
+ahead of it, not `main`). A queued pull request whose range touches the
+closure therefore reruns the proof on the merged result even though its pull
+request already ran it; an unknown range runs it. A `release/**` pull request
+is not forced to rerun in the queue: its own pull request run always ran the
+proof, and the queued range decides as for any other.
 
 The proof owns a dedicated Dune rule in `test/gm12b/dune`, so changes to
 unrelated cram dependencies do not enter its CI scope. Its conservative
@@ -366,9 +374,11 @@ each step off for the next release:
    reproduces again.
 6. Freeze the published release documents and their test inventory at the
    tag, as `docs/release/0.2/` and `docs/release/0.3/` are: move
-   `docs/release/unreleased/` into the release's directory, pin its inventory
-   in `test/test_surface_laws.ml`, add the directory and tag to
-   `scripts/release/check-frozen-releases.sh`, and start a new
+   `docs/release/unreleased/` into the release's directory, gathering the
+   entry files under `slices/` into its slice log in date order; record the
+   inventory `scripts/release/inventory.sh` prints and pin it in
+   `test/test_surface_laws.ml`; add the directory, tag and tagged commit to
+   `scripts/release/check-frozen-releases.sh`; and start a new
    `docs/release/unreleased/`.
 
 ## Release Binaries
@@ -429,7 +439,13 @@ For `main`:
 - require `CI / Native parity (gcc)`
 - require `Governance / Governance playground`
 - require `GM12B / GM12B exhaustive forwarding evidence`
-- require branches to be up to date before merging
+- require the merge queue, which tests each pull request merged onto the
+  latest `main` before merging it (the required workflows run on
+  `merge_group`), instead of requiring branches to be up to date: parallel
+  pull requests then need no rebase onto each other. Merge only non-failing
+  pull requests, so a group never lands on another group's failed checks, and
+  set the queue's status check timeout to at least 300 minutes, above GM.12B's
+  240-minute proof
 - dismiss stale approvals when new commits are pushed
 
 For `release/**`:
