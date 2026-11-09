@@ -1,7 +1,8 @@
 ; TYPE.2: the prelude's pinned constructors drive builtins and governance validation
 ; even after a file rebinds bool, result, ordering, option, list and pair as
 ; its own opaque types: native output matches the interpreter, which prints the
-; rebound values as <opaque name> and the builtins' results as prelude values.
+; rebound bool, result, list and pair values it shows as <opaque name> and the
+; builtins' results as prelude values.
 (defterm ((binding authority-cases () (lam ()
 (match
   (tuple

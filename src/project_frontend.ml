@@ -764,7 +764,7 @@ let constructor_collisions ?(own = []) session (node : node) tops =
   let store = session.store in
   let describe hash =
     let owner =
-      if List.mem node.project.dir (Hashtbl.find_all session.owners hash) then "the library"
+      if List.mem node.project.dir (Hashtbl.find_all session.owners hash) then "this project"
       else owner_label session hash
     in
     Printf.sprintf "type `%s` of %s" (owning_type store hash) owner
@@ -828,7 +828,9 @@ let constructor_collisions ?(own = []) session (node : node) tops =
         | _ -> [])
       tops
   in
-  List.rev visible_clashes @ local_clashes
+  (* An entry's [own] layer is its composed library, which already passed this check against the
+     same dependencies and prelude; only the entry's own constructors are judged again. *)
+  (if own = [] then List.rev visible_clashes else []) @ local_clashes
 
 (* --- context identity (design §8) --- *)
 

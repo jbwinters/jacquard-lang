@@ -340,7 +340,7 @@ let test_forged_opaque_responses () =
       let json = finished (Session.respond session (success value)) in
       (* the decoder refuses the opaque constructor before the result type is checked, and the
          session reports every undecodable response as one E1608, so this shows the refusal, not
-         which check made it; the decoder's cause is pinned on the invoke path below *)
+         which check made it; the decoder's cause is pinned on the invoke path above *)
       check_code "E1608" json;
       check_terminal "diagnostic" json;
       Alcotest.(check int) (label ^ ": not observed") 0 (List.length (observations json));

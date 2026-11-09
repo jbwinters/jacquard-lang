@@ -2,8 +2,11 @@ Opaque types across native dependency calls and relational comparison (TYPE.2,
 docs/designs/abstract-types.md §2.4). A root without a namespace may rebind
 prelude term names; its dependency still calls the prelude's own declarations,
 and the native binary prints exactly what the interpreter prints. A root that
-runs an entry may not rebind a prelude constructor name (E1731), with or without
-a dependency: the root's own constructors are checked against the prelude's.
+runs an entry may also rebind prelude constructor names as its own opaque types:
+the dependency's code and the builtins it calls still build prelude values
+beside the root's sealed ones, on both engines; a root with no dependency runs
+too. An entry's own constructor that collides with a visible one is still
+refused (E1731).
 
   $ export JACQUARD_PRELUDE=$PWD/../../prelude JACQUARD_RUNTIME=$PWD/../../runtime CC=clang
   $ export TMPDIR=$PWD
@@ -41,29 +44,33 @@ a dependency: the root's own constructors are checked against the prelude's.
   $ cmp run.out native.out && cat run.out
   "(ok(0.5), err(\"out of range\"), cons(mk-pair(true, 0.5), cons(mk-pair(false, 0.5), nil)), err(\"expected 64 lowercase hexadecimal HASH_V0 digits\"), cons((<opaque coin>, 1.0), nil), <opaque coin>)"
   $ printf 'opaque type Bool = | False | True\nopaque type Result = | Ok | Err\n' > app/app.jac
+  $ echo 'debug.inspect((lib.check(0.5), lib.check(2.0), lib.flags(), True, Ok))' > app/demo.jac
+  $ jacquard project run --project app demo --allow console > run.out 2>&1; echo $?
+  0
+  $ jacquard project build --project app demo -o app-native > /dev/null 2>&1; echo $?
+  0
+  $ ./app-native --allow console > native.out 2>&1; echo $?
+  0
+  $ cmp run.out native.out && cat run.out
+  "(ok(0.5), err(\"out of range\"), cons(mk-pair(true, 0.5), cons(mk-pair(false, 0.5), nil)), <opaque bool>, <opaque result>)"
+  $ printf 'type Flag = | True\ndebug.inspect(True)\n' > app/demo.jac
   $ jacquard project run --project app demo --allow console > clash.out 2>&1; echo $?
   1
-  $ grep -c 'error\[E1731\]' clash.out
-  4
-  $ grep -o 'constructor `[a-z]*` of type `[a-z]*` of the library and constructor `[a-z]*` of type `[a-z]*` of the prelude' clash.out | sort
-  constructor `err` of type `result` of the library and constructor `err` of type `result` of the prelude
-  constructor `false` of type `bool` of the library and constructor `false` of type `bool` of the prelude
-  constructor `ok` of type `result` of the library and constructor `ok` of type `result` of the prelude
-  constructor `true` of type `bool` of the library and constructor `true` of type `bool` of the prelude
-  $ mkdir solo && cp app/app.jac solo/app.jac && echo 'True' > solo/demo.jac
+  $ grep -A1 'error\[E1731\]' clash.out | grep -o 'Cause: .*'
+  Cause: constructor `true` of type `flag` is also a constructor of type `bool` of this project
+  $ mkdir solo && cp app/app.jac solo/app.jac && echo 'debug.inspect((True, support(bernoulli(1.0))))' > solo/demo.jac
   $ cat > solo/project.jqd <<'M'
   > (project-v1 (name "solo") (requires (core "0.2")) (units "app.jac")
   >   (entries (run demo (units "demo.jac") (grants console))))
   > M
-  $ jacquard project run --project solo demo --allow console > solo.out 2>&1; echo $?
-  1
-  $ grep -c 'error\[E1731\]' solo.out
-  4
+  $ jacquard project run --project solo demo --allow console
+  "(<opaque bool>, cons(mk-pair(true, 1.0), cons(mk-pair(false, 0.0), nil)))"
   $ cd ..
 
 Relational comparison keys opaque values by structure. Under grant=dist the live
-and dry samplers draw the same coin for seed 1 and different coins for seed 3,
-as they do for the same draw over Ints, so the comparison neither merges
+and dry samplers draw the same coin for seed 1 and different coins for seed 3;
+the same draw over Ints is likewise equal at seed 1 and diverges at seed 3
+(E1003). So the comparison neither merges
 distinct opaque results nor separates equal ones. Without a policy `relate`
 records run-transcript-v1, whose divergence messages show a value's structure,
 outside the display guarantee (§2.4). An observation policy maps an opaque value

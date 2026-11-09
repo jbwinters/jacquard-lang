@@ -1238,3 +1238,16 @@ successful; a manual dispatch is never reused
 (`scripts/release/find-prior-evidence.sh`, pinned by
 `release-evidence-reuse.t`). `docs/ci-cd.md` gains a release procedure. The
 source inventory is now `1246 / 85 / 57`.
+
+Abstract-types hardening, seventh part. A root project that runs an entry may
+rebind prelude constructor names as its own opaque types, as its library check
+and the decision record already allowed: the entry check no longer re-reports
+clashes between the composed library's constructors and those of its
+dependencies or the prelude, which the library check has already judged, and
+still refuses an entry's own constructor that collides with a visible one
+(E1731). `opaque-matrix.t` now runs such a root against a dependency on both
+engines, and on the interpreter without one, and shows that the dependency's
+code and the builtins it calls still return prelude values beside the root's
+sealed ones. E1731 names the
+root's own constructors as `of this project`. The source inventory is
+unchanged at `1246 / 85 / 57`.
