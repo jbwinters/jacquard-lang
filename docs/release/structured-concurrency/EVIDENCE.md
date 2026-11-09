@@ -922,7 +922,7 @@ The checked effect-payload successor adds 37 handler/transport cases and one
 unifier isolation case, plus one CLI transcript, bringing the live inventory to
 `969 / 60 / 28`. See [the containment contract](../../effect-payload-containment.md).
 The historical publication manifests and their recorded source evidence remain
-unchanged; these inventory numbers describe the current source checkout.
+unchanged; these inventory numbers described the source checkout at that merge.
 
 The serial host-session library adds 15 cases, bringing the current source
 inventory to `984 / 60 / 28`. It covers typed responses, terminal mappings,

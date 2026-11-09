@@ -578,8 +578,9 @@ the larger applications.
 The current release evidence pack lives in `docs/release/0.3/`. It and the
 published 0.2 pack are frozen at their tags (`scripts/release/check-frozen-releases.sh`),
 and historical 0.1 evidence remains byte-preserved under `docs/release/0.1/`.
-Work merged since 0.3.0, with the live test inventory and the next release's
-upgrade notes, is recorded in `docs/release/unreleased/`.
+Work merged since 0.3.0 and the next release's upgrade notes are recorded in
+`docs/release/unreleased/`; `scripts/release/inventory.sh` prints the live
+test inventory.
 
 To reproduce the release evidence from this checkout:
 

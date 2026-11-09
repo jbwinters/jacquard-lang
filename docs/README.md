@@ -119,9 +119,10 @@ Read these together when judging the integrated 0.3 distribution:
   frozen 0.3 lineage base, excluding only the manifest itself.
 - `release/0.3/SLICES.md`: per-change evidence log for everything integrated
   between 0.2.0 and 0.3.0.
-- `release/unreleased/`: the live inventory, upgrade notes and per-change
-  evidence log for work integrated after 0.3.0. The 0.2 and 0.3 documents are
-  frozen at their tags.
+- `release/unreleased/`: upgrade notes and per-change evidence for work
+  integrated after 0.3.0 (the live inventory is printed by
+  `scripts/release/inventory.sh`). The 0.2 and 0.3 documents are frozen at
+  their tags.
 
 The detailed successor packs indexed below remain the authority for each
 subsystem. The 0.3 pack rolls them up without editing their historical bytes.

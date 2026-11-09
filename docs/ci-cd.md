@@ -219,10 +219,14 @@ workflow has no `release/**` push trigger: one run per release head, not one
 for the push and another for its pull request.
 Each `main` push has a unique, non-canceling workflow concurrency group so a
 later unrelated push cannot replace the run responsible for an earlier
-relevant range. In the merge queue the scope is the queued range, from `main`'s
-tip to the merged commit, so a queued pull request that touches the closure
-reruns the proof on the merged result even though its pull request already
-ran it.
+relevant range. In the merge queue the scope is the whole queued range, from
+where the queued commit leaves `main` to that commit, so it covers every pull
+request queued ahead as well as this one (a group's own parent is the group
+ahead of it, not `main`). A queued pull request whose range touches the
+closure therefore reruns the proof on the merged result even though its pull
+request already ran it; an unknown range runs it. A `release/**` pull request
+is not forced to rerun in the queue: its own pull request run always ran the
+proof, and the queued range decides as for any other.
 
 The proof owns a dedicated Dune rule in `test/gm12b/dune`, so changes to
 unrelated cram dependencies do not enter its CI scope. Its conservative
@@ -438,7 +442,10 @@ For `main`:
 - require the merge queue, which tests each pull request merged onto the
   latest `main` before merging it (the required workflows run on
   `merge_group`), instead of requiring branches to be up to date: parallel
-  pull requests then need no rebase onto each other
+  pull requests then need no rebase onto each other. Merge only non-failing
+  pull requests, so a group never lands on another group's failed checks, and
+  set the queue's status check timeout to at least 300 minutes, above GM.12B's
+  240-minute proof
 - dismiss stale approvals when new commits are pushed
 
 For `release/**`:

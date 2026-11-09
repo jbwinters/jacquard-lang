@@ -1,13 +1,13 @@
 # Jacquard Core Unreleased Slice Log
 
-Each change integrated after `jacquard-core-0.3.0` records its evidence and
-the source inventory it reached when it merged. The 0.3 release documents in
-`../0.3/` are frozen at their tag; this log, `README.md` and the live
-inventory there carry the unreleased work until the next release moves them
-into its own release directory. The intermediate inventory figures describe
-the source checkout at each merge, not a release. Changes merged after the
-fifth part of the release-process work add their own entry files under
-[slices/](slices/) instead of appending here.
+The changes integrated after `jacquard-core-0.3.0`, up to the fifth part of the
+release-process work, recorded their evidence and the source inventory they
+reached here; those intermediate figures describe the source checkout at each
+merge, not a release. Later changes add their own entry files under
+[slices/](slices/) instead, without a running inventory. The 0.3 release
+documents in `../0.3/` are frozen at their tag; this log, the entries and
+`README.md` carry the unreleased work until the next release moves them into
+its own release directory.
 
 A handler clause that discards its continuation with `resume _` no longer
 crashes `check`, `run` or `test` when its declaration is stored: the `.jqd`
