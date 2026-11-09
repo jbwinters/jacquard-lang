@@ -33,9 +33,9 @@ must select `JACQUARD_INSTALL_VERSION=jacquard-core-0.3.0-rc1` explicitly.
 The candidate inventory is discovered by the checked-in test runner and file
 tree, not estimated from task history:
 
-- Alcotest/QCheck cases: `1246`
-- Cram transcript files: `85`
-- Documentation examples: `57` named examples across `9` documents
+- Alcotest/QCheck cases: `1194`
+- Cram transcript files: `78`
+- Documentation examples: `36` named examples across `8` documents
 
 The host protocol v0 conformance kit's `kit.json` records `core_version`
 `0.3.0`; its SHA-256 is
