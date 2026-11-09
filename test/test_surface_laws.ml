@@ -729,24 +729,11 @@ let compiled_test_inventory =
      | Unix.WEXITED 0 -> inventory
      | _ -> Alcotest.fail "compiled Alcotest inventory command failed")
 
-let compiled_test_count = lazy (List.length (Lazy.force compiled_test_inventory))
-
 let compiled_group_count group =
   let prefix = group ^ " " in
   Lazy.force compiled_test_inventory
   |> List.fold_left
        (fun count line -> if String.starts_with ~prefix line then count + 1 else count)
-       0
-
-let rec count_files_with_suffix path suffix =
-  Sys.readdir path |> Array.to_list
-  |> List.fold_left
-       (fun count entry ->
-         let child = Filename.concat path entry in
-         match (Unix.stat child).st_kind with
-         | Unix.S_DIR -> count + count_files_with_suffix child suffix
-         | Unix.S_REG when Filename.check_suffix entry suffix -> count + 1
-         | _ -> count)
        0
 
 let claimed_inventory_count ~path ~prefix source =
@@ -775,9 +762,9 @@ let inventory_claim_errors ~path claims =
                expected)
       | Error message -> Some message)
 
+(* Only released inventories are recorded and checked; the live inventory is printed by
+   scripts/release/inventory.sh and frozen at each release's tag. *)
 let release_inventory_errors () =
-  let actual_tests = Lazy.force compiled_test_count in
-  let actual_crams = count_files_with_suffix (source_path "test") ".t" in
   let concurrency_path = "docs/release/structured-concurrency/EVIDENCE.md" in
   let concurrency_evidence = read_source concurrency_path in
   let channel_cases = compiled_group_count "channel-contract" in
@@ -794,12 +781,6 @@ let release_inventory_errors () =
       [ ("- Alcotest/QCheck cases:", 1194); ("- Cram transcript files:", 78) ]
   @ inventory_claim_errors ~path:"docs/release/0.3/DECISION.md"
       [ ("Test count:", 1194); ("Cram count:", 78) ]
-  @ inventory_claim_errors ~path:"docs/release/unreleased/README.md"
-      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
-  @ inventory_claim_errors ~path:"docs/release/dx-jac-export/EVIDENCE.md"
-      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
-  @ inventory_claim_errors ~path:concurrency_path
-      [ ("- Alcotest/QCheck cases:", actual_tests); ("- Cram transcript files:", actual_crams) ]
   @
   if contains channel_row concurrency_evidence then []
   else

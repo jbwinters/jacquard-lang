@@ -4,11 +4,12 @@ Status: successor evidence after Jacquard Core 0.1 and the surface-syntax
 release. The frozen 0.1 and SS.21/SS.22 inventories describe their reviewed
 artifacts and are not retroactively updated by DX.2.
 
-## Current inventory
+## Inventory
 
-- Alcotest/QCheck cases: `1246`
-- Cram transcript files: `85`
-- Doctest examples: `57` across 9 documents
+This pack no longer records the live inventory: `scripts/release/inventory.sh`
+prints it, and each release freezes it in its own evidence. When the count
+stopped being kept here it was 1246 Alcotest/QCheck cases, 85 cram transcript
+files and 57 doctest examples across 9 documents.
 
 The test count includes six DX.2 filesystem-boundary cases and six DX.5/DX.7
 structural-depth and diagnostic-compatibility cases. The successor cram

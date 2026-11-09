@@ -758,10 +758,10 @@ opam exec -- dune build test/test_jacquard.exe
 )
 ```
 
-The current inventory is mechanically checked against compiled discovery:
-
-- Alcotest/QCheck cases: `1246`
-- Cram transcript files: `85`
+The live inventory is no longer recorded here: `scripts/release/inventory.sh`
+prints it from compiled discovery, and each release freezes it in its own
+evidence. When the count stopped being kept here it was 1246 Alcotest/QCheck
+cases and 85 cram transcript files.
 
 The SC.14 baseline arithmetic remains exact: twelve compiled
 `channel-contract` cases plus the `store/9` Channel-private-hash case took the

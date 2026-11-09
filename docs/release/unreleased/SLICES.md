@@ -5,7 +5,9 @@ the source inventory it reached when it merged. The 0.3 release documents in
 `../0.3/` are frozen at their tag; this log, `README.md` and the live
 inventory there carry the unreleased work until the next release moves them
 into its own release directory. The intermediate inventory figures describe
-the source checkout at each merge, not a release.
+the source checkout at each merge, not a release. Changes merged after the
+fifth part of the release-process work add their own entry files under
+[slices/](slices/) instead of appending here.
 
 A handler clause that discards its continuation with `resume _` no longer
 crashes `check`, `run` or `test` when its declaration is stored: the `.jqd`

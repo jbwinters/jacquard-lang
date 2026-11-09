@@ -6,6 +6,8 @@ on:
       - main
       - "release/**"
   pull_request:
+  # the merge queue tests each queued pull request merged onto the latest main
+  merge_group:
   workflow_dispatch:
 
 permissions:
