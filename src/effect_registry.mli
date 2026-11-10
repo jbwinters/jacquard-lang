@@ -54,6 +54,11 @@ val root_grant_name : metadata -> string
     own index name, except that [ConsoleInput] is covered by the [console] grant. It does not say
     whether that name is grantable at all. *)
 
+val root_grantable_names : string list
+(** [root_grantable_names] are the only names a root grant ([--allow]) can install. An effect is
+    root-grantable exactly when it is in the canonical registry and its {!root_grant_name} is in
+    this list; the checker decides that by identity, never by a colliding user spelling. *)
+
 val catalog : metadata list
 (** The current taxonomy snapshot, presently {!catalog_v3}. *)
 

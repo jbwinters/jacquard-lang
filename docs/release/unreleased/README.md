@@ -34,3 +34,12 @@ Notes for the next release's upgrade section, collected as changes land:
   check no longer refuses it (E1731). An entry's own constructor that collides
   with a visible one is still E1731, and E1731 now names the root's own
   constructors as `of this project`.
+- **E0837 for effects a task leaves to an outer handler.** A spawned child or
+  an `async.scope` body runs on a fresh continuation under the scheduler, so a
+  handler outside the task never handled its operations: such a program checked
+  and then failed at run time with `Failed("unhandled effect ...")`. The
+  checker now refuses it with E0837. A task must handle inside its own thunk
+  every effect other than Async, Channel and the root-grantable effects; move
+  the handler into the thunk passed to `async.spawn` or `async.scope`. Like
+  scoped-instance Limit L2, a callback a spawning body runs in the parent is
+  restricted the same way. `docs/concurrency.md` states the rule.

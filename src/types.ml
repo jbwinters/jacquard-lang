@@ -64,17 +64,22 @@ and instance = { effect_id : Hash.t; label : ty; payload : ty list }
 and rtail = RClosed | RVar of rvar ref | RSkolem of int * string
 
 and rvar =
-  | RUnbound of { id : int; level : level; lacks_instances : bool }
+  | RUnbound of { id : int; level : level; lacks_instances : bool; task_row : bool }
       (** [lacks_instances] marks the row of a fresh-continuation callback (design §9 A1.4): it may
-          never be bound to a row with an instance entry, and it passes to the bound row's tail. *)
+          never be bound to a row with an instance entry, and it passes to the bound row's tail.
+          [task_row] marks the row of a task thunk (an [async.spawn] child or an [async.scope]
+          body): it may never be bound to a row with a fixed effect that {!task_effect_allowed}
+          rejects, because only the scheduler and the root grants handle what a task leaves
+          unhandled. It passes to the bound row's tail the same way. *)
   | RLink of row
 
 exception Unify_error of string
 
-exception Instance_refusal of string * string
-(** [Instance_refusal (code, detail)] is a scoped-instance refusal found inside unification (design
-    §9 A1.8). It is not a [Unify_error], so handlers that relabel ordinary unification failures
-    cannot hide it; the checker reports it with its own code. *)
+exception Instance_refusal of string * (name_of:(Hash.t -> string) -> string)
+(** [Instance_refusal (code, detail)] is a structured refusal found inside unification: a
+    scoped-instance refusal (design §9 A1.8) or a task-effect refusal (E0837). It is not a
+    [Unify_error], so handlers that relabel ordinary unification failures cannot hide it; the
+    checker reports it with its own code and renders [detail] with its declaration names. *)
 
 (* ------------------------------------------------------------------ *)
 (* Construction                                                        *)
@@ -94,8 +99,14 @@ let is_label_id id = id < 0
 (** [copy_var id level] is a fresh variable of the sort of variable [id]. *)
 let copy_var id level = if is_label_id id then new_label_var level else new_tvar level
 
-let new_rvar ?(lacks_instances = false) level : rtail =
-  RVar (ref (RUnbound { id = fresh_id (); level; lacks_instances }))
+let new_rvar ?(lacks_instances = false) ?(task_row = false) level : rtail =
+  RVar (ref (RUnbound { id = fresh_id (); level; lacks_instances; task_row }))
+
+(** [task_effect_allowed] decides, by effect identity, whether a task may leave an effect unhandled:
+    the scheduler's Async and Channel effects and the root-grantable effects. {!Check} installs the
+    policy when it is linked; the default admits every effect, so code that never links the checker
+    cannot observe a refusal. *)
+let task_effect_allowed : (Hash.t -> bool) ref = ref (fun _ -> true)
 
 (** [closed_row ~payloads effects] builds an exact row. Payload keys must name effects in the row;
     duplicate payload constraints are checked when the row is normalized. *)
@@ -264,9 +275,9 @@ and row_occurs_in_row id lvl row =
   List.iter (fun (_, args) -> List.iter (row_occurs_adjust id lvl) args) row.payloads;
   List.iter (fun entry -> List.iter (row_occurs_adjust id lvl) entry.payload) row.instances;
   match row.tail with
-  | RVar ({ contents = RUnbound { id = id'; level = l'; lacks_instances } } as r) ->
+  | RVar ({ contents = RUnbound ({ id = id'; level = l'; _ } as unbound) } as r) ->
       if id = id' then raise (Unify_error "occurs check: a row would contain itself");
-      if l' > lvl then r := RUnbound { id = id'; level = lvl; lacks_instances }
+      if l' > lvl then r := RUnbound { unbound with level = lvl }
   | _ -> ()
 
 (* ------------------------------------------------------------------ *)
@@ -376,8 +387,8 @@ and row_var_levels level t =
       row_payload_levels level row;
       (let row = repr_row row in
        match row.tail with
-       | RVar ({ contents = RUnbound { id; level = l'; lacks_instances } } as r) when l' > level ->
-           r := RUnbound { id; level; lacks_instances }
+       | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
+           r := RUnbound { unbound with level }
        | _ -> ());
       row_var_levels level result
   | TResume (input, row, answer) ->
@@ -385,8 +396,8 @@ and row_var_levels level t =
       row_payload_levels level row;
       (let row = repr_row row in
        match row.tail with
-       | RVar ({ contents = RUnbound { id; level = l'; lacks_instances } } as r) when l' > level ->
-           r := RUnbound { id; level; lacks_instances }
+       | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
+           r := RUnbound { unbound with level }
        | _ -> ());
       row_var_levels level answer
   | TVariadicArrow (param, row, result) ->
@@ -394,8 +405,8 @@ and row_var_levels level t =
       row_payload_levels level row;
       (let row = repr_row row in
        match row.tail with
-       | RVar ({ contents = RUnbound { id; level = l'; lacks_instances } } as r) when l' > level ->
-           r := RUnbound { id; level; lacks_instances }
+       | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
+           r := RUnbound { unbound with level }
        | _ -> ());
       row_var_levels level result
   | TExactThunk inner -> row_var_levels level inner
@@ -487,9 +498,11 @@ and unify_rows (ra : row) (rb : row) : unit =
           (* same tail: exact row equality still requires equal fixed sets *)
           if only_a_any || only_b_any then
             raise (Unify_error "occurs check: effect rows with the same tail differ")
-      | ( RUnbound { level = la; lacks_instances = lacks_a; _ },
-          RUnbound { level = lb; lacks_instances = lacks_b; _ } ) ->
-          let tail = new_rvar ~lacks_instances:(lacks_a || lacks_b) (min la lb) in
+      | ( RUnbound { level = la; lacks_instances = lacks_a; task_row = task_a; _ },
+          RUnbound { level = lb; lacks_instances = lacks_b; task_row = task_b; _ } ) ->
+          let tail =
+            new_rvar ~lacks_instances:(lacks_a || lacks_b) ~task_row:(task_a || task_b) (min la lb)
+          in
           bind_rvar rva
             {
               effects = only_b;
@@ -511,14 +524,31 @@ and unify_rows (ra : row) (rb : row) : unit =
 and bind_rvar (rv : rvar ref) (r : row) : unit =
   match !rv with
   | RLink _ -> assert false
-  | RUnbound { id; level; lacks_instances } -> (
+  | RUnbound { id; level; lacks_instances; task_row } -> (
       (* a fresh-continuation callback's row never gains an instance entry (A1.4) *)
       if lacks_instances && (repr_row r).instances <> [] then
         raise
           (Instance_refusal
              ( "E0833",
-               "an instance operation cannot run in a callback that runs on a fresh continuation \
-                (async.spawn, async.scope or dist.sample-lw)" ));
+               fun ~name_of:_ ->
+                 "an instance operation cannot run in a callback that runs on a fresh continuation \
+                  (async.spawn, async.scope or dist.sample-lw)" ));
+      (* a task's row never gains an effect that only an outer handler could handle *)
+      (if task_row then
+         match List.filter (fun h -> not (!task_effect_allowed h)) (repr_row r).effects with
+         | [] -> ()
+         | refused ->
+             raise
+               (Instance_refusal
+                  ( "E0837",
+                    fun ~name_of ->
+                      Printf.sprintf
+                        "a task (an async.spawn child or an async.scope body) performs %s, and no \
+                         handler inside the task handles it; a task runs on a fresh continuation \
+                         under the scheduler, so a handler outside the task never handles its \
+                         operations"
+                        (String.concat ", "
+                           (List.map (fun identity -> "`" ^ name_of identity ^ "`") refused)) )));
       (* occurs: the bound row's tail must not be this very variable *)
       match (repr_row r).tail with
       | RVar { contents = RUnbound { id = id'; _ } } when id = id' ->
@@ -544,11 +574,19 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
           row_payload_levels level r;
           (* propagate the level ceiling and the instance exclusion to the new tail *)
           (match (repr_row r).tail with
-          | RVar ({ contents = RUnbound { id = id'; level = l'; lacks_instances = lacks' } } as r')
-            ->
+          | RVar
+              ({
+                 contents =
+                   RUnbound { id = id'; level = l'; lacks_instances = lacks'; task_row = task' };
+               } as r') ->
               r' :=
                 RUnbound
-                  { id = id'; level = min l' level; lacks_instances = lacks' || lacks_instances }
+                  {
+                    id = id';
+                    level = min l' level;
+                    lacks_instances = lacks' || lacks_instances;
+                    task_row = task' || task_row;
+                  }
           | _ -> ());
           rv := RLink r)
 
@@ -751,11 +789,12 @@ let instantiate ~level (s : scheme) : ty =
       }
     in
     match r.tail with
-    | RVar { contents = RUnbound { id; level = l; lacks_instances } } when l > s.gen_level -> (
+    | RVar { contents = RUnbound { id; level = l; lacks_instances; task_row } } when l > s.gen_level
+      -> (
         match Hashtbl.find_opt rmap id with
         | Some tail -> { r with tail }
         | None ->
-            let tail = new_rvar ~lacks_instances level in
+            let tail = new_rvar ~lacks_instances ~task_row level in
             Hashtbl.add rmap id tail;
             { r with tail })
     | _ -> r
@@ -812,12 +851,12 @@ let clone_schemes (schemes : scheme list) : scheme list =
           | RLink inner ->
               flatten (effects @ inner.effects) (payloads @ inner.payloads)
                 (instances @ inner.instances) inner.tail
-          | RUnbound { id; level; lacks_instances } ->
+          | RUnbound { id; level; lacks_instances; task_row } ->
               let tail =
                 match Hashtbl.find_opt rmap id with
                 | Some copy -> copy
                 | None ->
-                    let copy = new_rvar ~lacks_instances level in
+                    let copy = new_rvar ~lacks_instances ~task_row level in
                     Hashtbl.add rmap id copy;
                     copy
               in

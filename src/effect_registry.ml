@@ -210,6 +210,7 @@ let root_grant_name metadata =
   if String.equal metadata.index_name console_input.index_name then "console"
   else metadata.index_name
 
+let root_grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net"; "secret" ]
 let catalog = catalog_v3
 
 let canonical_of_catalog catalog =

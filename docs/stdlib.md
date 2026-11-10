@@ -425,6 +425,11 @@ The checker enforces these rules:
   that work (E0833). It may open and discharge its own scope, and merely
   capturing an unused capability is allowed. Because their rows share a tail, a
   sibling callback in a body that spawns is restricted the same way.
+  Ordinary effects follow a parallel rule for the two task callbacks: an
+  `async.spawn` child or an `async.scope` body must handle inside itself every
+  effect other than Async, Channel and the root-grantable effects, because no
+  handler outside a task handles its operations (E0837; see
+  [concurrency.md](concurrency.md)).
 - **Handlers.** A user handler cannot handle an instance operation (E0834).
 - **Opacity.** Capabilities cannot be forged or taken apart (E0835). A
   capability type cannot be written directly into a nominal type's field or a

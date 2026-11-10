@@ -171,6 +171,7 @@ malformed source, path, or host-message byte in a string field is replaced with 
 | E0834 | a user handler clause for an instance operation | `handle ... with get-at(...)` |
 | E0835 | constructing, destructuring or pattern-matching a capability | forging a capability value |
 | E0836 | a capability type in a nominal declaration or user operation signature | `type Box = Box(StateRef Int)` |
+| E0837 | a task (an `async.spawn` child or an `async.scope` body) performs an effect, other than Async, Channel or a root-grantable effect, that no handler inside the task handles; a task runs on a fresh continuation, so a handler outside it never handles its operations | `all(fn () -> async.scope(fn () -> first(1)))` where `all` handles `first` |
 | W0801 | redundant match clause | a clause after `(pwild)` |
 
 E0817 has one bounded transformer exception: a direct clause lambda may capture

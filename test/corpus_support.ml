@@ -423,6 +423,10 @@ let diag_cases : (string * string * string list option) list =
     ( "redundant-clause",
       "(lam ((pvar b)) (match (var b) (clause (pwild) (lit 0)) (clause (pcon true) (lit 1))))",
       None );
+    ( "task-effect-outer-handler",
+      "(lam () (app (var state.run) (lam () (app (var async.scope) (lam () (app (var put) (lit \
+       1))))) (lit 0)))",
+      None );
   ]
 
 (** TS.2 cases on the production State instance declarations. *)

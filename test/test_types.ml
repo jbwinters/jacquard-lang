@@ -660,6 +660,87 @@ let test_fresh_continuation_flag () =
   in
   Alcotest.(check string) "display" "() ->{E} E" shown
 
+let test_task_row_flag () =
+  (* E0837: a task row refuses a fixed effect other than Async, Channel and the root-grantable
+     effects; the refusal is structured and names the effect through the caller's renderer.
+     Referencing Check links the policy it installs. *)
+  ignore (Check.checker_codes : (string * string) list);
+  let refusal f =
+    match f () with
+    | () -> None
+    | exception Instance_refusal ("E0837", detail) ->
+        Some (detail ~name_of:(fun h -> if Hash.equal h ha then "effect-a" else "other"))
+    | exception Unify_error detail -> Alcotest.failf "an ordinary unification failure: %s" detail
+  in
+  let refused f = Option.is_some (refusal f) in
+  let contains needle text =
+    let n = String.length needle in
+    let rec go i = i + n <= String.length text && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let channel = Option.get (Hash.of_hex Channel_contract.channel_effect_hash) in
+  let async = Option.get (Hash.of_hex Concurrency_contract.async_effect_hash) in
+  let registered name =
+    List.find_map
+      (fun (metadata : Effect_registry.metadata) ->
+        match metadata.interface with
+        | Effect_registry.Released { hash; _ } when String.equal metadata.index_name name ->
+            Some hash
+        | _ -> None)
+      Effect_registry.catalog
+    |> Option.get
+  in
+  let flagged () = new_rvar ~task_row:true 0 in
+  let bind tail row = match tail with RVar cell -> bind_rvar cell row | _ -> assert false in
+  Alcotest.(check bool)
+    "a task row refuses a user effect and names it" true
+    (match refusal (fun () -> bind (flagged ()) (closed_row [ ha ])) with
+    | Some detail -> contains "`effect-a`" detail
+    | None -> false);
+  Alcotest.(check bool)
+    "and a registered effect that is not root-grantable" true
+    (refused (fun () -> bind (flagged ()) (closed_row [ registered "state" ])));
+  Alcotest.(check bool)
+    "but accepts Async, Channel and root-grantable effects" false
+    (refused (fun () ->
+         bind (flagged ())
+           (closed_row [ async; channel; registered "console"; registered "console-input" ])));
+  Alcotest.(check bool)
+    "and a closed or rigid tail" false
+    (refused (fun () -> bind (flagged ()) (instance_row ~tail:(RSkolem (fresh_id (), "e")) [])));
+  Alcotest.(check bool)
+    "an unflagged tail accepts any effect" false
+    (refused (fun () -> bind (new_rvar 0) (closed_row [ ha ])));
+  (* the flag passes through tail unification and binding *)
+  let left = flagged () and right = new_rvar 0 in
+  unify_rows { empty_row with tail = left } { empty_row with tail = right };
+  Alcotest.(check bool)
+    "unifying with a flagged tail flags the shared tail" true
+    (refused (fun () -> unify_rows { empty_row with tail = right } (closed_row [ hb ])));
+  let start = flagged () in
+  let next = new_rvar 0 in
+  bind start { (closed_row [ channel ]) with tail = next };
+  Alcotest.(check bool)
+    "binding passes the flag to the new tail" true
+    (refused (fun () -> bind next (closed_row [ ha ])));
+  (* instantiation and cloning keep it, independently of the instance flag *)
+  let arrow = TArrow ([], { empty_row with tail = new_rvar ~task_row:true 1 }, t_int) in
+  let flags ty =
+    match repr ty with
+    | TArrow (_, row, _) -> (
+        match (repr_row row).tail with
+        | RVar { contents = RUnbound { task_row; lacks_instances; _ } } ->
+            (task_row, lacks_instances)
+        | _ -> (false, false))
+    | _ -> (false, false)
+  in
+  Alcotest.(check (pair bool bool))
+    "instantiation keeps the flag" (true, false)
+    (flags (instantiate ~level:2 { ty = arrow; gen_level = 0 }));
+  Alcotest.(check (pair bool bool))
+    "cloning keeps the flag" (true, false)
+    (match clone_schemes [ mono arrow ] with [ s ] -> flags s.ty | _ -> (false, false))
+
 let suite =
   [
     Alcotest.test_case "effect payload constraints survive transport and isolation" `Quick
@@ -668,6 +749,7 @@ let suite =
     Alcotest.test_case "instance entries: identity and distinctness" `Quick test_instance_entries;
     Alcotest.test_case "instance entries: fixpoint normalization" `Quick test_instance_fixpoint;
     Alcotest.test_case "fresh-continuation flag" `Quick test_fresh_continuation_flag;
+    Alcotest.test_case "task-row flag (E0837)" `Quick test_task_row_flag;
     Alcotest.test_case "labels are their own sort" `Quick test_label_sort;
     Alcotest.test_case "instance payloads in occurs and quantification" `Quick
       test_instance_payload_occurs;

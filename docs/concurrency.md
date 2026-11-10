@@ -65,6 +65,27 @@ object. That dependency travels with the value through aliases, wrappers,
 returned closures, tuples, and independent polymorphic instantiations. It is
 not a syntax-directed application exception.
 
+Charging is not handling. Every task (a spawned child or an `async.scope`
+body) runs on a fresh continuation under the scheduler. An operation the task
+does not handle itself goes to the scheduler (Async, Channel), then to the root
+grants; otherwise the task ends `Failed("unhandled effect ...")`. A handler
+outside the task never handles it, even one written around the `async.spawn`
+or `async.scope` call. The checker therefore requires a task's thunk to handle
+inside itself every effect other than Async, Channel and the root-grantable
+effects (`clock`, `console`, `dist`, `eval`, `fs`, `infer`, `net`, `secret`,
+decided by effect identity). Otherwise it refuses the program with E0837:
+
+```text
+error[E0837]: An effect performed in a task is not handled inside the task
+  Cause: a task (an async.spawn child or an async.scope body) performs `one`, and no handler inside the task handles it; ...
+  Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
+```
+
+Root-grantable effects are still charged to the caller's row and checked by the
+manifest as above. Because a body's ambient row shares the operation's row
+tail (scoped-effect-instances Limit L2), a sibling callback in a body that
+spawns or opens a scope is restricted the same way.
+
 The identity guard applies only to the resolved operation whose complete
 declaration is the exact four-operation interface above. The nominal HASH_V0
 identities are `Task`

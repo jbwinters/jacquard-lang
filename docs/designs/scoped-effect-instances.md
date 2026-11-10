@@ -508,10 +508,18 @@ the callback, the scheduler and the root handlers; neither the scheduler nor a
 root handler ever performs an instance operation, and any value they deliver
 (a channel message, a sampled element of a program-supplied distribution)
 keeps its label in its type, so E0832 governs it; a captured capability that
-is never used is inert. (Ambient effects inside a spawned child or an
-`async.scope` body that an enclosing language handler appears to handle
-statically, e.g. `emit.collect(fn () -> async.scope(fn () -> emit(1)))`, are
-an existing SC.4/TS.0 progress gap outside this amendment.)
+is never used is inert.
+
+Ambient effects inside a spawned child or an `async.scope` body that an
+enclosing language handler appeared to handle statically, e.g.
+`emit.collect(fn () -> async.scope(fn () -> emit(1)))`, were an SC.4/TS.0
+progress gap: the child failed at run time with an unhandled effect. A parallel
+rule now closes it for the two task callbacks only. Their row variable also
+carries a "task row" flag (not `dist.sample-lw`, whose thunk is not a task).
+Binding a flagged variable to a row with a fixed effect other than Async,
+Channel or a root-grantable effect (identity, not spelling) fails with E0837;
+the flag propagates, is OR-ed, instantiated and cloned exactly like the
+instance flag, and is discharged at a rigid tail the same way.
 
 **Limit L2 (pinned by tests).** Under SC.4 the operation's row shares the
 callback's row tail (not necessarily its whole row: `async.scope` removes
@@ -525,6 +533,10 @@ instance, although it runs in the parent; for example
 `par(k1, k2) = { let t = async.spawn(k1); k2(); async.await(t) }` refuses a
 `k2` that uses one. Separating the child's exclusion from the parent's
 inclusion needs a directional row constraint and is future work.
+The E0837 task-row flag has the same limit for the same reason: such a `k2`
+cannot perform an effect that only an outer handler handles, e.g.
+`h(g) = { let x = g(); async.scope(fn () -> x) }` refuses a `g` that performs
+a user effect handled around the call of `h`. It is pinned by tests too.
 
 ### A1.5 Annotations
 

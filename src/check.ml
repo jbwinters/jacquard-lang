@@ -319,6 +319,7 @@ let diagnostic_summary = function
   | "E0834" -> "A user handler cannot handle an instance operation"
   | "E0835" -> "A capability cannot be constructed or taken apart"
   | "E0836" -> "A capability type cannot be stored in a declaration"
+  | "E0837" -> "An effect performed in a task is not handled inside the task"
   | "E0907" -> "A scoped task or channel handle is invalid"
   | code -> "Checker rejected the program (" ^ code ^ ")"
 
@@ -347,6 +348,7 @@ let diagnostic_next_step = function
   | "E0834" -> "Use the instance's scoped combinator; user handlers handle ambient effects only."
   | "E0835" -> "Obtain a capability from its scoped combinator."
   | "E0836" -> "Carry a capability through a type parameter instead of a fixed field type."
+  | "E0837" -> "Handle the effect inside the thunk passed to async.spawn or async.scope."
   | "E0907" -> "Use the handle only inside the exact async.scope that created it."
   | _ -> "Correct the rejected checker input and try again."
 
@@ -380,6 +382,23 @@ let instance_refusal ?meta code detail =
   Diag.error ?span:(Option.bind meta Meta.span) ~domain:Diag.Checker ~code
     ~summary:(diagnostic_summary code) ~cause:detail ~next_step:(diagnostic_next_step code)
     ~contrast:None ()
+
+(** [task_may_leave_unhandled identity] is the E0837 policy: an effect a task may leave to its
+    surroundings, because the scheduler (Async, Channel) or a root grant handles it there. Every
+    other effect must be handled inside the task, since a task runs on a fresh continuation and no
+    handler outside it ever handles its operations. Identity decides: a user effect that reuses a
+    built-in spelling is not root-grantable. *)
+let task_may_leave_unhandled identity =
+  let hex = Hash.to_hex identity in
+  String.equal hex Concurrency_contract.async_effect_hash
+  || String.equal hex Channel_contract.channel_effect_hash
+  ||
+  match Effect_registry.find_canonical identity with
+  | Some metadata ->
+      List.mem (Effect_registry.root_grant_name metadata) Effect_registry.root_grantable_names
+  | None -> false
+
+let () = Types.task_effect_allowed := task_may_leave_unhandled
 
 (* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
    bodies may use a hidden prelude capability hash, while source expressions must use public
@@ -1423,10 +1442,11 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
         else if is_frozen_async_spawn ctx h then
           match params with
           | [ TArrow ([], child_row, _) ] ->
-              (* the child runs on a fresh continuation: no instance entry may reach it (A1.4) *)
+              (* the child runs on a fresh continuation: no instance entry may reach it (A1.4),
+                 and no effect an outer handler would have to handle may reach it (E0837) *)
               (match child_row.tail with
               | RVar ({ contents = RUnbound { id; level; _ } } as cell) ->
-                  cell := RUnbound { id; level; lacks_instances = true }
+                  cell := RUnbound { id; level; lacks_instances = true; task_row = true }
               | _ -> ());
               child_row
           | _ ->
@@ -1701,7 +1721,8 @@ and infer ?immediate_transformer ctx env ~ambient ~required (e : Kernel.expr) : 
   if ctx.instances = [] then infer_expr ?immediate_transformer ctx env ~ambient ~required e
   else
     try infer_expr ?immediate_transformer ctx env ~ambient ~required e
-    with Types.Instance_refusal (code, detail) -> err ~meta:e.Kernel.meta ~code "%s" detail
+    with Types.Instance_refusal (code, detail) ->
+      err ~meta:e.Kernel.meta ~code "%s" (detail ~name_of:(name_of ctx))
 
 and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
@@ -3069,7 +3090,7 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
         | Kernel.Expr expression -> expression.meta
         | Kernel.Decl declaration -> declaration.meta
       in
-      Error [ instance_refusal ~meta code detail ]
+      Error [ instance_refusal ~meta code (detail ~name_of:(name_of ctx)) ]
   | exception Unify_error detail ->
       let meta =
         match top with
@@ -3204,7 +3225,8 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match term_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
-  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
+  | exception Types.Instance_refusal (code, detail) ->
+      Error [ instance_refusal code (detail ~name_of:(name_of ctx)) ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 (** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
@@ -3212,7 +3234,8 @@ let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match con_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
-  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
+  | exception Types.Instance_refusal (code, detail) ->
+      Error [ instance_refusal code (detail ~name_of:(name_of ctx)) ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
@@ -3224,7 +3247,8 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
     match thunk () with
     | value -> Ok value
     | exception Err diagnostic -> Error [ diagnostic ]
-    | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
+    | exception Types.Instance_refusal (code, detail) ->
+        Error [ instance_refusal code (detail ~name_of:(name_of ctx)) ]
     | exception Unify_error detail -> Error [ payload_conflict detail ]
   in
   match Store.locate ctx.store h with
@@ -3344,6 +3368,7 @@ let checker_codes : (string * string) list =
     ("E0834", "user handler clause for an instance operation");
     ("E0835", "capability constructed or taken apart");
     ("E0836", "capability type stored in a nominal declaration or operation signature");
+    ("E0837", "effect performed in a task that no handler inside the task handles");
     ("W0801", "redundant match clause");
     ("W1206", "labeled API called with a positional Bool constructor literal");
     ("W1207", "labeled API called across a definite repeated-type positional parameter run");
