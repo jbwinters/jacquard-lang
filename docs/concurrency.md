@@ -60,10 +60,13 @@ async.spawn : (() ->{Async | e} a) -> Task a
 Calling it contributes both `Async` and the solved child row `e` to the caller.
 Merely checking the parameter type is insufficient: unification could absorb
 `Net` into `e` and then discard it. SC.4 therefore gives the exact frozen
-operation a dependent scheme whose thunk row and callable row are the same row
-object. That dependency travels with the value through aliases, wrappers,
-returned closures, tuples, and independent polymorphic instantiations. It is
-not a syntax-directed application exception.
+operation a dependent scheme whose callable row receives every effect of the
+thunk row. Since E0837 the two rows have separate tails linked in one
+direction (the thunk row's effects flow into the callable row, never the
+reverse; see below), and `async.scope`'s result row is linked to its body row
+the same way. That dependency travels with the value through aliases,
+wrappers, returned closures, tuples, and independent polymorphic
+instantiations. It is not a syntax-directed application exception.
 
 Charging is not handling. Every task (a spawned child or an `async.scope`
 body) runs on a fresh continuation under the scheduler. An operation the task
@@ -81,10 +84,23 @@ error[E0837]: An effect performed in a task is not handled inside the task
   Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
 ```
 
-Root-grantable effects are still charged to the caller's row and checked by the
-manifest as above. Because a body's ambient row shares the operation's row
-tail (scoped-effect-instances Limit L2), a sibling callback in a body that
-spawns or opens a scope is restricted the same way.
+Only the task's own effects count. A task's row and the row of the
+`async.spawn` or `async.scope` call that starts it have separate tails, linked
+in one direction: every effect the task performs, root-grantable ones
+included, is added to the call's row, so it is still charged to the caller and
+checked by `--allow` and the manifest as above. Nothing reaches the task's row
+from outside: a handler, an annotation, or a function joined with the caller
+(by `if` or a shared parameter) constrains only the call's row. A callback the
+parent runs beside a spawn or a scope, such as `g` in
+`h(g) = { let x = g(); async.scope(fn () -> x) }`, may therefore perform an
+effect handled around the call of `h`.
+
+Not yet checked: an in-language handler of a root-grantable effect written
+around a task (for example `dist.enumerate`, or a user handler of Console)
+does not handle the task's operations, which go to the root grant at run time
+or fail if it is absent; such a program still checks. A user handler that
+interprets Async itself (the native parity seam) runs children inline, where
+an outer handler would reach them, but is refused like any other.
 
 The identity guard applies only to the resolved operation whose complete
 declaration is the exact four-operation interface above. The nominal HASH_V0

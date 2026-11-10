@@ -64,13 +64,29 @@ and instance = { effect_id : Hash.t; label : ty; payload : ty list }
 and rtail = RClosed | RVar of rvar ref | RSkolem of int * string
 
 and rvar =
-  | RUnbound of { id : int; level : level; lacks_instances : bool; task_row : bool }
+  | RUnbound of {
+      id : int;
+      level : level;
+      lacks_instances : bool;
+      task_row : bool;
+      task_out : row list;
+    }
       (** [lacks_instances] marks the row of a fresh-continuation callback (design §9 A1.4): it may
           never be bound to a row with an instance entry, and it passes to the bound row's tail.
           [task_row] marks the row of a task thunk (an [async.spawn] child or an [async.scope]
           body): it may never be bound to a row with a fixed effect that {!task_effect_allowed}
           rejects, because only the scheduler and the root grants handle what a task leaves
-          unhandled. It passes to the bound row's tail the same way. *)
+          unhandled. It passes to the bound row's tail the same way.
+
+          [task_out] are the outward rows a task tail feeds: the row of the [async.spawn] operation
+          or of the [async.scope] call, each with its own tail. The task row and an outward row
+          never share a tail, so a handler, annotation or join outside the task constrains only the
+          outward row. The link is directional: binding this tail to fixed effects (after the
+          [task_row] check) adds those effects and their payloads to every outward row, as
+          {!require_effects} would, except that a closed or rigid outward row lacking one is a row
+          mismatch. The bound row's tail inherits the list; unifying two tails unions their lists.
+          Invariant: no variable of an outward row is more general (has a higher level) than the
+          tail itself, so a later binding never refines a generalized variable. *)
   | RLink of row
 
 exception Unify_error of string
@@ -99,8 +115,11 @@ let is_label_id id = id < 0
 (** [copy_var id level] is a fresh variable of the sort of variable [id]. *)
 let copy_var id level = if is_label_id id then new_label_var level else new_tvar level
 
-let new_rvar ?(lacks_instances = false) ?(task_row = false) level : rtail =
-  RVar (ref (RUnbound { id = fresh_id (); level; lacks_instances; task_row }))
+(** [new_rvar ?lacks_instances ?task_row ?task_out level] is a fresh row tail at [level]. A caller
+    passing [task_out] must respect the level invariant of {!rvar}: no outward row may hold a
+    variable deeper than [level]. *)
+let new_rvar ?(lacks_instances = false) ?(task_row = false) ?(task_out = []) level : rtail =
+  RVar (ref (RUnbound { id = fresh_id (); level; lacks_instances; task_row; task_out }))
 
 (** [task_effect_allowed] decides, by effect identity, whether a task may leave an effect unhandled:
     the scheduler's Async and Channel effects and the root-grantable effects. {!Check} installs the
@@ -277,7 +296,26 @@ and row_occurs_in_row id lvl row =
   match row.tail with
   | RVar ({ contents = RUnbound ({ id = id'; level = l'; _ } as unbound) } as r) ->
       if id = id' then raise (Unify_error "occurs check: a row would contain itself");
-      if l' > lvl then r := RUnbound { unbound with level = lvl }
+      if l' > lvl then lower_unbound r (RUnbound { unbound with level = lvl })
+  | _ -> ()
+
+(** [lower_unbound cell unbound] writes [unbound] into [cell] and lowers every variable of its
+    outward rows to [unbound.level], keeping the {!rvar} invariant. *)
+and lower_unbound cell unbound =
+  match unbound with
+  | RUnbound u ->
+      cell := unbound;
+      List.iter (lower_row_level u.level) u.task_out
+  | RLink _ -> cell := unbound
+
+(** [lower_row_level level row] lowers to [level] every variable of [row]: payload and instance
+    arguments, and an unbound tail together with its own outward rows. Lowering only ever decreases
+    a level, so a cycle of outward rows stops once every level is at most [level]. *)
+and lower_row_level level row =
+  row_payload_levels level row;
+  match (repr_row row).tail with
+  | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
+      lower_unbound r (RUnbound { unbound with level })
   | _ -> ()
 
 (* ------------------------------------------------------------------ *)
@@ -388,7 +426,7 @@ and row_var_levels level t =
       (let row = repr_row row in
        match row.tail with
        | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
-           r := RUnbound { unbound with level }
+           lower_unbound r (RUnbound { unbound with level })
        | _ -> ());
       row_var_levels level result
   | TResume (input, row, answer) ->
@@ -397,7 +435,7 @@ and row_var_levels level t =
       (let row = repr_row row in
        match row.tail with
        | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
-           r := RUnbound { unbound with level }
+           lower_unbound r (RUnbound { unbound with level })
        | _ -> ());
       row_var_levels level answer
   | TVariadicArrow (param, row, result) ->
@@ -406,7 +444,7 @@ and row_var_levels level t =
       (let row = repr_row row in
        match row.tail with
        | RVar ({ contents = RUnbound ({ level = l'; _ } as unbound) } as r) when l' > level ->
-           r := RUnbound { unbound with level }
+           lower_unbound r (RUnbound { unbound with level })
        | _ -> ());
       row_var_levels level result
   | TExactThunk inner -> row_var_levels level inner
@@ -524,7 +562,7 @@ and unify_rows (ra : row) (rb : row) : unit =
 and bind_rvar (rv : rvar ref) (r : row) : unit =
   match !rv with
   | RLink _ -> assert false
-  | RUnbound { id; level; lacks_instances; task_row } -> (
+  | RUnbound { id; level; lacks_instances; task_row; task_out } -> (
       (* a fresh-continuation callback's row never gains an instance entry (A1.4) *)
       if lacks_instances && (repr_row r).instances <> [] then
         raise
@@ -534,21 +572,7 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
                  "an instance operation cannot run in a callback that runs on a fresh continuation \
                   (async.spawn, async.scope or dist.sample-lw)" ));
       (* a task's row never gains an effect that only an outer handler could handle *)
-      (if task_row then
-         match List.filter (fun h -> not (!task_effect_allowed h)) (repr_row r).effects with
-         | [] -> ()
-         | refused ->
-             raise
-               (Instance_refusal
-                  ( "E0837",
-                    fun ~name_of ->
-                      Printf.sprintf
-                        "a task (an async.spawn child or an async.scope body) performs %s, and no \
-                         handler inside the task handles it; a task runs on a fresh continuation \
-                         under the scheduler, so a handler outside the task never handles its \
-                         operations"
-                        (String.concat ", "
-                           (List.map (fun identity -> "`" ^ name_of identity ^ "`") refused)) )));
+      if task_row then check_task_effects (repr_row r).effects;
       (* occurs: the bound row's tail must not be this very variable *)
       match (repr_row r).tail with
       | RVar { contents = RUnbound { id = id'; _ } } when id = id' ->
@@ -572,23 +596,70 @@ and bind_rvar (rv : rvar ref) (r : row) : unit =
                 entry.payload)
             (repr_row r).instances;
           row_payload_levels level r;
-          (* propagate the level ceiling and the instance exclusion to the new tail *)
+          (* propagate the level ceiling, both flags and the outward rows to the new tail *)
           (match (repr_row r).tail with
-          | RVar
-              ({
-                 contents =
-                   RUnbound { id = id'; level = l'; lacks_instances = lacks'; task_row = task' };
-               } as r') ->
-              r' :=
-                RUnbound
-                  {
-                    id = id';
-                    level = min l' level;
-                    lacks_instances = lacks' || lacks_instances;
-                    task_row = task' || task_row;
-                  }
+          | RVar ({ contents = RUnbound unbound } as r') ->
+              lower_unbound r'
+                (RUnbound
+                   {
+                     unbound with
+                     level = min unbound.level level;
+                     lacks_instances = unbound.lacks_instances || lacks_instances;
+                     task_row = unbound.task_row || task_row;
+                     task_out =
+                       List.fold_left
+                         (fun outs row -> if List.memq row outs then outs else outs @ [ row ])
+                         unbound.task_out task_out;
+                   })
           | _ -> ());
-          rv := RLink r)
+          rv := RLink r;
+          (* a task's own effects also reach the rows outside it (spawn or scope call) *)
+          let bound = repr_row r in
+          if bound.effects <> [] then
+            List.iter (push_outward ~effects:bound.effects ~payloads:bound.payloads) task_out)
+
+(** [check_task_effects effects] raises the E0837 refusal when a task row would gain a fixed effect
+    that {!task_effect_allowed} rejects. *)
+and check_task_effects effects =
+  match List.filter (fun h -> not (!task_effect_allowed h)) effects with
+  | [] -> ()
+  | refused ->
+      raise
+        (Instance_refusal
+           ( "E0837",
+             fun ~name_of ->
+               Printf.sprintf
+                 "a task (an async.spawn child or an async.scope body) performs %s, and no handler \
+                  inside the task handles it; a task runs on a fresh continuation under the \
+                  scheduler, so a handler outside the task never handles its operations"
+                 (String.concat ", "
+                    (List.map (fun identity -> "`" ^ name_of identity ^ "`") refused)) ))
+
+(** [push_outward ~effects ~payloads outward] adds a task's fixed [effects] and their [payloads] to
+    one outward row, as {!require_effects} would: a flexible tail absorbs the missing labels. A
+    closed or rigid outward row that lacks one raises [Unify_error]. Pushing stops at labels the row
+    already has, so an outward row that resolves back into the task's own chain (it was linked just
+    before) is a no-op; each push adds labels from the fixed set [effects] to some chain, so a cycle
+    of outward rows terminates. *)
+and push_outward ~effects ~payloads outward =
+  let outward = repr_row outward in
+  ignore (merge_payloads outward.payloads (payloads_for outward.effects payloads));
+  match (hash_set_diff effects outward.effects, outward.tail) with
+  | [], _ -> ()
+  | missing, RVar ({ contents = RUnbound { level; _ } } as rv) ->
+      bind_rvar rv
+        {
+          effects = missing;
+          payloads = payloads_for missing payloads;
+          instances = [];
+          tail = new_rvar level;
+        }
+  | _, RVar { contents = RLink _ } -> assert false (* repr_row eliminated links *)
+  | _, (RClosed | RSkolem _) ->
+      raise
+        (Unify_error
+           "a closed effect row cannot absorb extra effects: an effect a task performs also \
+            belongs to the row of the async.spawn or async.scope call that starts it")
 
 (** [include_rows sub into] returns the directional union recording that [sub] is evaluated in
     [into]. It never modifies either operand. Open tails are unified so later specialization of
@@ -789,14 +860,19 @@ let instantiate ~level (s : scheme) : ty =
       }
     in
     match r.tail with
-    | RVar { contents = RUnbound { id; level = l; lacks_instances; task_row } } when l > s.gen_level
+    | RVar { contents = RUnbound ({ id; level = l; task_out; _ } as unbound) } when l > s.gen_level
       -> (
         match Hashtbl.find_opt rmap id with
         | Some tail -> { r with tail }
         | None ->
-            let tail = new_rvar ~lacks_instances ~task_row level in
-            Hashtbl.add rmap id tail;
-            { r with tail })
+            (* memoize the copy before its outward rows: they may lead back to this tail *)
+            let fresh = fresh_id () in
+            let cell = ref (RUnbound { unbound with id = fresh; level; task_out = [] }) in
+            Hashtbl.add rmap id (RVar cell);
+            if task_out <> [] then
+              cell :=
+                RUnbound { unbound with id = fresh; level; task_out = List.map go_row task_out };
+            { r with tail = RVar cell })
     | _ -> r
   in
   go s.ty
@@ -851,14 +927,19 @@ let clone_schemes (schemes : scheme list) : scheme list =
           | RLink inner ->
               flatten (effects @ inner.effects) (payloads @ inner.payloads)
                 (instances @ inner.instances) inner.tail
-          | RUnbound { id; level; lacks_instances; task_row } ->
+          | RUnbound ({ id; task_out; _ } as unbound) ->
               let tail =
                 match Hashtbl.find_opt rmap id with
                 | Some copy -> copy
                 | None ->
-                    let copy = new_rvar ~lacks_instances ~task_row level in
-                    Hashtbl.add rmap id copy;
-                    copy
+                    (* memoize the copy before its outward rows: they may lead back to this tail *)
+                    let fresh = fresh_id () in
+                    let cell = ref (RUnbound { unbound with id = fresh; task_out = [] }) in
+                    Hashtbl.add rmap id (RVar cell);
+                    if task_out <> [] then
+                      cell :=
+                        RUnbound { unbound with id = fresh; task_out = List.map go_row task_out };
+                    RVar cell
               in
               finish effects payloads instances tail)
     in

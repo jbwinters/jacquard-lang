@@ -435,6 +435,22 @@ let name_of ctx h =
 
 let show_ty ctx t = Types.show ~name_of:(name_of ctx) t
 
+(** [refusal_name_of ctx identity] names an effect in a refusal raised during unification (E0833,
+    E0837). A user effect whose name collides with a registry effect's name is qualified
+    ([unpackaged:<hash-prefix>/<name>], {!Effect_registry.qualify_user_hint}), so a refused user
+    [effect Clock] never reads like the root-grantable built-in [clock]. *)
+let refusal_name_of ctx identity =
+  let name = name_of ctx identity in
+  let collides (metadata : Effect_registry.metadata) =
+    String.equal (String.lowercase_ascii metadata.index_name) (String.lowercase_ascii name)
+    || String.equal (String.lowercase_ascii metadata.display_name) (String.lowercase_ascii name)
+  in
+  if
+    Option.is_none (Effect_registry.find_canonical identity)
+    && List.exists collides Effect_registry.catalog
+  then Effect_registry.qualify_user_hint ~name_hint:name identity
+  else name
+
 let is_secret_ty ctx t =
   match repr t with
   | TCon (identity, []) ->
@@ -1441,14 +1457,29 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
                 (name_of ctx h)
         else if is_frozen_async_spawn ctx h then
           match params with
-          | [ TArrow ([], child_row, _) ] ->
+          | [ TArrow ([], child_row, _) ] -> (
               (* the child runs on a fresh continuation: no instance entry may reach it (A1.4),
-                 and no effect an outer handler would have to handle may reach it (E0837) *)
-              (match child_row.tail with
-              | RVar ({ contents = RUnbound { id; level; _ } } as cell) ->
-                  cell := RUnbound { id; level; lacks_instances = true; task_row = true }
-              | _ -> ());
-              child_row
+                 and no effect an outer handler would have to handle may reach it (E0837). The
+                 operation's own row is a separate outward row with its own tail: the child's
+                 tail feeds it, but a handler, annotation or join around the spawn constrains only
+                 the outward row. *)
+              let child = repr_row child_row in
+              Types.check_task_effects child.effects;
+              match child.tail with
+              | RVar ({ contents = RUnbound ({ level; _ } as unbound) } as cell) ->
+                  let outward =
+                    { child with tail = new_rvar ~lacks_instances:true level; instances = [] }
+                  in
+                  cell :=
+                    RUnbound
+                      {
+                        unbound with
+                        lacks_instances = true;
+                        task_row = true;
+                        task_out = outward :: unbound.task_out;
+                      };
+                  outward
+              | _ -> child)
           | _ ->
               err ?meta ~code:"E0805"
                 "frozen async.spawn identity resolved to an invalid converted parameter shape"
@@ -1597,7 +1628,25 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
       row.instances
   in
   walk t;
-  Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink empty_row) counts
+  (* a task tail and the outward rows it feeds are linked by a constraint the type does not show:
+     neither is lonely while the task tail occurs in the type *)
+  let linked = Hashtbl.create 8 in
+  Hashtbl.iter
+    (fun id (_, r) ->
+      match !r with
+      | RUnbound { task_out = _ :: _ as outs; _ } ->
+          Hashtbl.replace linked id ();
+          List.iter
+            (fun row ->
+              match (repr_row row).tail with
+              | RVar { contents = RUnbound { id; _ } } -> Hashtbl.replace linked id ()
+              | _ -> ())
+            outs
+      | _ -> ())
+    counts;
+  Hashtbl.iter
+    (fun id (n, r) -> if n = 1 && not (Hashtbl.mem linked id) then r := RLink empty_row)
+    counts
 
 (* ------------------------------------------------------------------ *)
 (* Patterns                                                            *)
@@ -1722,7 +1771,7 @@ and infer ?immediate_transformer ctx env ~ambient ~required (e : Kernel.expr) : 
   else
     try infer_expr ?immediate_transformer ctx env ~ambient ~required e
     with Types.Instance_refusal (code, detail) ->
-      err ~meta:e.Kernel.meta ~code "%s" (detail ~name_of:(name_of ctx))
+      err ~meta:e.Kernel.meta ~code "%s" (detail ~name_of:(refusal_name_of ctx))
 
 and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
@@ -3090,7 +3139,7 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
         | Kernel.Expr expression -> expression.meta
         | Kernel.Decl declaration -> declaration.meta
       in
-      Error [ instance_refusal ~meta code (detail ~name_of:(name_of ctx)) ]
+      Error [ instance_refusal ~meta code (detail ~name_of:(refusal_name_of ctx)) ]
   | exception Unify_error detail ->
       let meta =
         match top with
@@ -3226,7 +3275,7 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
   | s -> Ok s
   | exception Err d -> Error [ d ]
   | exception Types.Instance_refusal (code, detail) ->
-      Error [ instance_refusal code (detail ~name_of:(name_of ctx)) ]
+      Error [ instance_refusal code (detail ~name_of:(refusal_name_of ctx)) ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 (** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
@@ -3235,7 +3284,7 @@ let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
   | s -> Ok s
   | exception Err d -> Error [ d ]
   | exception Types.Instance_refusal (code, detail) ->
-      Error [ instance_refusal code (detail ~name_of:(name_of ctx)) ]
+      Error [ instance_refusal code (detail ~name_of:(refusal_name_of ctx)) ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
@@ -3248,7 +3297,7 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
     | value -> Ok value
     | exception Err diagnostic -> Error [ diagnostic ]
     | exception Types.Instance_refusal (code, detail) ->
-        Error [ instance_refusal code (detail ~name_of:(name_of ctx)) ]
+        Error [ instance_refusal code (detail ~name_of:(refusal_name_of ctx)) ]
     | exception Unify_error detail -> Error [ payload_conflict detail ]
   in
   match Store.locate ctx.store h with

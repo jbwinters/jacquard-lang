@@ -109,11 +109,12 @@ The flag travels through a polymorphic helper's inferred signature.
     Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
   [1]
 
-Known limit (the same as scoped-instance Limit L2): a body's ambient row shares
-the scope's row tail, so a callback the body runs in the parent is restricted
-too. This program would run correctly, but the checker refuses it.
+A task row and the row of the spawn or scope call that starts it are distinct:
+the task's own effects flow outward into the call's row, but nothing outside the
+task flows in. A callback the parent runs before opening a scope (formerly
+refused, the same shape as scoped-instance Limit L2) therefore checks and runs.
 
-  $ cat one.jac - > limit.jac <<'EOF'
+  $ cat one.jac - > callback.jac <<'EOF'
   > h(g) = {
   >   let x = g()
   >   async.scope(fn () -> x)
@@ -121,10 +122,117 @@ too. This program would run correctly, but the checker refuses it.
   > t() = all(fn () -> h(fn () -> first(1)))
   > t()
   > EOF
-  $ jacquard check limit.jac > limit.out 2>&1; echo "exit $?"
-  exit 1
-  $ head -1 limit.out
-  limit.jac:12:20-40: error[E0837]: An effect performed in a task is not handled inside the task
+  $ jacquard run callback.jac
+  done(2)
+
+An outer handler, a built-in handler or a wider annotation around code that
+merely opens a scope does not reach the scope body, whichever comes first.
+
+  $ cat one.jac - > around-scope.jac <<'EOF'
+  > direct-before() = handle {
+  >   let x = first(1)
+  >   let r = async.scope(fn () -> 1)
+  >   (x, r)
+  > } {
+  > | return v -> v
+  > | first(n) resume k -> k(add(n, 1))
+  > }
+  > direct-after() = handle {
+  >   let r = async.scope(fn () -> 1)
+  >   (r, first(1))
+  > } {
+  > | return v -> v
+  > | first(n) resume k -> k(add(n, 1))
+  > }
+  > thunk() = all(fn () -> async.scope(fn () -> 1))
+  > stateful() = state.run(fn () -> async.scope(fn () -> 1), 0)
+  > run2(f) = all(f)
+  > relayed() = run2(fn () -> async.scope(fn () -> 1))
+  > wide : () ->{One} TaskResult Int
+  > wide() = async.scope(fn () -> 1)
+  > (direct-before(), direct-after(), thunk(), stateful(), relayed(), all(wide))
+  > EOF
+  $ jacquard run around-scope.jac
+  ((2, done(1)), (done(1), 2), done(1), (done(1), 0), done(1), done(1))
+
+Joining a spawning or scope-opening function with one that performs a handled
+user effect (by `if` or a shared parameter) constrains only the call's row.
+
+  $ cat one.jac - > joins.jac <<'EOF'
+  > both(f, g) = (f(), g())
+  > outside() = all(fn () -> both(fn () -> async.scope(fn () -> 1), fn () -> done(first(1))))
+  > branch(b) = async.scope(fn () -> all(fn () -> {
+  >   let f = if b then fn () -> {
+  >     let c = async.spawn(fn () -> 1)
+  >     async.await(c)
+  >   } else fn () -> done(first(1))
+  >   f()
+  > }))
+  > paired() = async.scope(fn () -> all(fn () -> both(fn () -> {
+  >     let c = async.spawn(fn () -> 1)
+  >     async.await(c)
+  >   }, fn () -> done(first(1)))))
+  > (outside(), branch(true), branch(false), paired())
+  > EOF
+  $ jacquard run joins.jac
+  ((done(1), done(2)), done(done(1)), done(done(2)), done((done(1), done(2))))
+
+A Warp Case's closed Check row around a scope whose body performs no Check
+operation is accepted as well.
+
+  $ cat > case-row.jac <<'EOF'
+  > scoped-case =
+  >   Case("opens a scope", fn () -> {
+  >     let r = async.scope(fn () -> 1)
+  >     ()
+  >   })
+  > EOF
+  $ jacquard check case-row.jac
+  ok
+
+The effects a task does perform still reach the call's row, so a granted effect
+in a child stays visible to `--allow` and manifest checking.
+
+  $ cat > granted-out.jac <<'EOF'
+  > t() = async.scope(fn () -> {
+  >     let c = async.spawn(fn () -> print("child\n"))
+  >     async.await(c)
+  >   })
+  > t()
+  > EOF
+  $ jacquard check granted-out.jac --manifest dist
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`).
+    Next step: grant it with --allow console, or handle the effect in the program
+  [1]
+  $ jacquard run granted-out.jac
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `t`).
+    Next step: grant it with --allow console, or handle the effect in the program
+  [3]
+  $ jacquard run granted-out.jac --allow console
+  child
+  done(done(()))
+
+The policy is decided by identity. A user effect spelled like the root-grantable
+built-in Clock is still refused in a task, and the diagnostic qualifies its name.
+
+  $ cat > clock.jac <<'EOF'
+  > effect Clock where {
+  >   once tick : () -> Int
+  > }
+  > fixed(thunk) = handle thunk() {
+  > | return v -> v
+  > | tick() resume k -> k(7)
+  > }
+  > t() = fixed(fn () -> async.scope(fn () -> tick()))
+  > t()
+  > EOF
+  $ jacquard check clock.jac
+  clock.jac:8:22-50: error[E0837]: An effect performed in a task is not handled inside the task
+    Cause: a task (an async.spawn child or an async.scope body) performs `unpackaged:1f94d485f5a2/clock`, and no handler inside the task handles it; a task runs on a fresh continuation under the scheduler, so a handler outside the task never handles its operations
+    Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
+  [1]
 
 Performing the effect directly in the parent, outside the scope, is accepted.
 

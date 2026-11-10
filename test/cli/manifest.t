@@ -130,8 +130,9 @@ the equation diagnostic retains the propagated Net effect.
     Next step: Change the value or its annotation so the two types agree.
   [1]
 
-Adversarial polymorphic rows also fail at the async.spawn source instead of
-solving a cyclic child/caller row.
+A caller row wider than the child row is accepted: the spawn call's row is fed
+by the child's row rather than sharing its tail, so demanding an extra Net on
+the call only over-approximates the call and gives the child nothing.
 
   $ cat > row-cycle.jac <<'JACQUARD'
   > type Task a = | TaskOpaque
@@ -147,10 +148,7 @@ solving a cyclic child/caller row.
   > cycle() = force-cycle(async.spawn)
   > JACQUARD
   $ jacquard check row-cycle.jac
-  row-cycle.jac:11:23-34: error[E0801]: Types do not agree
-    Cause: argument: expected (() ->{async | e} a) ->{async, net | e} task a, got (() ->{async | e} a) ->{async | e} task a (occurs check: effect rows with the same tail differ)
-    Next step: the expected side comes from the surrounding context; make both sides agree
-  [1]
+  ok
 
 World facade effects are also not root-grantable, but they are not pure. Their
 diagnostic directs the caller to the required membrane handler:

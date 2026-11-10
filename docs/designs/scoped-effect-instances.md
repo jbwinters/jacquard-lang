@@ -517,14 +517,28 @@ progress gap: the child failed at run time with an unhandled effect. A parallel
 rule now closes it for the two task callbacks only. Their row variable also
 carries a "task row" flag (not `dist.sample-lw`, whose thunk is not a task).
 Binding a flagged variable to a row with a fixed effect other than Async,
-Channel or a root-grantable effect (identity, not spelling) fails with E0837;
-the flag propagates, is OR-ed, instantiated and cloned exactly like the
-instance flag, and is discharged at a rigid tail the same way.
+Channel or a root-grantable effect (identity, not spelling) fails with E0837.
+Unlike the instance flag, the task flag is not shared with the operation's
+row: the spawn operation's row and the `async.scope` call's result row get
+their own unflagged tail, which the flagged task tail records as an outward
+row. The link is directional. Binding the task tail to fixed effects (after
+the E0837 check) adds those effects and their payloads to every outward row,
+as a handler requirement would; a closed or rigid outward row that lacks one
+is an ordinary row mismatch. The new tail inherits the flag and the outward
+rows, unifying two task tails unions their outward rows, and instantiation and
+cloning copy the outward rows through the same copy, so a copied task tail
+feeds the copied outward row. An outward row is never more general than its
+task tail: lowering the tail's level lowers the outward row's variables too, so
+a later binding never refines a generalized variable. The flag is discharged
+at a rigid tail like the instance flag. The outward tail keeps the instance
+flag, so E0833 refuses exactly what it refused before (Limit L2 below).
 
-**Limit L2 (pinned by tests).** Under SC.4 the operation's row shares the
-callback's row tail (not necessarily its whole row: `async.scope` removes
-Async, likelihood weighting removes Dist), and the calling body's ambient row
-shares that tail. Therefore
+**Limit L2 (pinned by tests).** Under SC.4 the operation's row excludes
+instance entries like the callback's row: for likelihood weighting it shares
+the callback's row tail (not its whole row: weighting removes Dist), and for
+`async.spawn` and `async.scope` it has its own tail that keeps the instance
+flag. The calling body's ambient row shares the operation's row tail.
+Therefore
 a callback invoked by a body that calls a fresh-continuation operation,
 directly or through any callee whose row shares its tail (row-polymorphic
 helpers such as `bg(k) = async.spawn(k)`, `state.scoped` bodies that spawn,
@@ -532,11 +546,12 @@ a function that calls `async.scope` or `dist.sample-lw`), cannot use an
 instance, although it runs in the parent; for example
 `par(k1, k2) = { let t = async.spawn(k1); k2(); async.await(t) }` refuses a
 `k2` that uses one. Separating the child's exclusion from the parent's
-inclusion needs a directional row constraint and is future work.
-The E0837 task-row flag has the same limit for the same reason: such a `k2`
-cannot perform an effect that only an outer handler handles, e.g.
-`h(g) = { let x = g(); async.scope(fn () -> x) }` refuses a `g` that performs
-a user effect handled around the call of `h`. It is pinned by tests too.
+inclusion needs a directional row constraint; the E0837 link above is one, and
+moving the instance flag onto the task tail alone is future work.
+The E0837 task-row flag does not have this limit: such a `k2` may perform an
+effect that only an outer handler handles, e.g.
+`h(g) = { let x = g(); async.scope(fn () -> x) }` accepts a `g` that performs
+a user effect handled around the call of `h`. Tests pin both.
 
 ### A1.5 Annotations
 

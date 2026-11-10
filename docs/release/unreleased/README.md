@@ -40,6 +40,13 @@ Notes for the next release's upgrade section, collected as changes land:
   and then failed at run time with `Failed("unhandled effect ...")`. The
   checker now refuses it with E0837. A task must handle inside its own thunk
   every effect other than Async, Channel and the root-grantable effects; move
-  the handler into the thunk passed to `async.spawn` or `async.scope`. Like
-  scoped-instance Limit L2, a callback a spawning body runs in the parent is
-  restricted the same way. `docs/concurrency.md` states the rule.
+  the handler into the thunk passed to `async.spawn` or `async.scope`. Only
+  effects the task itself performs count: a handler, an annotation or a
+  sibling callback around the spawn or scope call is unaffected, and every
+  effect a task performs, granted ones included, still appears in the caller's
+  row for `--allow` and manifests. Not yet checked: a built-in grantable effect
+  (such as `console` or `dist`) that a task performs under an in-language
+  handler around the task (such as `dist.enumerate` or a user Console handler)
+  still checks, although the task's operation goes to the root grant at run
+  time; a follow-up slice adds that check. `docs/concurrency.md` states the
+  rule.
