@@ -1629,20 +1629,24 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
   in
   walk t;
   (* a task tail and the outward rows it feeds are linked by a constraint the type does not show:
-     neither is lonely while the task tail occurs in the type *)
+     none is lonely while the task tail occurs in the type. The link is followed transitively,
+     because an outward row's tail may itself be a task tail that the type does not mention (a
+     scope body that spawns a parameter feeds the scope's call row through the body's tail). *)
   let linked = Hashtbl.create 8 in
+  let rec follow id outs =
+    if not (Hashtbl.mem linked id) then begin
+      Hashtbl.replace linked id ();
+      List.iter
+        (fun row ->
+          match (repr_row row).tail with
+          | RVar { contents = RUnbound { id; task_out; _ } } -> follow id task_out
+          | _ -> ())
+        outs
+    end
+  in
   Hashtbl.iter
     (fun id (_, r) ->
-      match !r with
-      | RUnbound { task_out = _ :: _ as outs; _ } ->
-          Hashtbl.replace linked id ();
-          List.iter
-            (fun row ->
-              match (repr_row row).tail with
-              | RVar { contents = RUnbound { id; _ } } -> Hashtbl.replace linked id ()
-              | _ -> ())
-            outs
-      | _ -> ())
+      match !r with RUnbound { task_out = _ :: _ as outs; _ } -> follow id outs | _ -> ())
     counts;
   Hashtbl.iter
     (fun id (n, r) -> if n = 1 && not (Hashtbl.mem linked id) then r := RLink empty_row)

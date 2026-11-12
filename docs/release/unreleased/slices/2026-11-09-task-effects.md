@@ -18,7 +18,9 @@ outward row. Binding the task tail to fixed effects pushes them into every
 outward row (a closed or rigid outward row lacking one is a row mismatch), the
 new tail inherits the flag and the outward rows, unification unions them, level
 lowering lowers the outward rows with the tail, and instantiation and cloning
-remap them through the same copy. So only the task's own effects reach its
+remap them through the same copy; closing lonely row variables follows the
+links transitively, so a helper that spawns a caller's thunk inside a scope or
+another task keeps its call row open. So only the task's own effects reach its
 row: a handler, annotation or join around the call constrains only the outward
 row, while every effect the task performs, granted ones included, still
 reaches the caller's row for `--allow` and manifests. The outward tail keeps
@@ -32,11 +34,20 @@ performs the effect, a nested scope with the handler between, an outer
 accepted programs (handling inside a child and a grandchild, console and dist
 under their grants, a channel, a callback the parent runs before a scope,
 handlers and a wider annotation around code that only opens a scope, `if` and
-shared-parameter joins, a Warp Case around a scope, and a child's console
-effect reaching `--manifest` and `--allow`); `test/test_types.ml` pins the
+shared-parameter joins, a Warp Case around a scope, a child's console
+effect reaching `--manifest` and `--allow`, also through such nested helpers,
+and a two-variable wrapper signature), and the known limits (a thunk the parent
+both calls and spawns, a one-variable wrapper signature, which are refused
+because one function value has one row); `test/test_types.ml` pins the
 flag's unification behaviour and the outward rows' propagation, level
 lowering, cycles, instantiation and cloning; the diagnostic battery gains an
-E0837 case. Left for later: an in-language handler of a root-grantable effect
+E0837 case. Consequences of the separate tails: printed helper signatures
+show two row variables (`forall a | e e1.`) without the link between them; the
+`test/cli/manifest.t` row-cycle program, whose caller row is the child row
+plus Net, now checks (it only over-approximates the call); and a rigid
+annotation whose call row omits the child's tail, such as
+`(() ->{Async | e} a) ->{Async} Task a` on a spawn wrapper, is accepted at the
+definition and refuses non-Async children at each use. Left for later: an in-language handler of a root-grantable effect
 around a task (`dist.enumerate`, a user Console handler) does not handle the
 task's operations but still checks. A user handler that interprets Async in the
 language (the native parity seam) runs children inline, where an outer handler

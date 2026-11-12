@@ -432,7 +432,10 @@ The checker enforces these rules:
   handler outside a task handles its operations (E0837; see
   [concurrency.md](concurrency.md)). Only the task's own effects count: a
   handler or annotation around the call, or a sibling callback the parent
-  runs, is not restricted by this rule.
+  runs, is not restricted by this rule, except where one function value is
+  both a task and parent code (a thunk the parent both calls and spawns) or a
+  signature names one row variable for a task row and its call row; give such
+  a wrapper two row variables (see [concurrency.md](concurrency.md)).
 - **Handlers.** A user handler cannot handle an instance operation (E0834).
 - **Opacity.** Capabilities cannot be forged or taken apart (E0835). A
   capability type cannot be written directly into a nominal type's field or a

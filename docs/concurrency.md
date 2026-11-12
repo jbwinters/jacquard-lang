@@ -88,12 +88,21 @@ Only the task's own effects count. A task's row and the row of the
 `async.spawn` or `async.scope` call that starts it have separate tails, linked
 in one direction: every effect the task performs, root-grantable ones
 included, is added to the call's row, so it is still charged to the caller and
-checked by `--allow` and the manifest as above. Nothing reaches the task's row
-from outside: a handler, an annotation, or a function joined with the caller
-(by `if` or a shared parameter) constrains only the call's row. A callback the
-parent runs beside a spawn or a scope, such as `g` in
-`h(g) = { let x = g(); async.scope(fn () -> x) }`, may therefore perform an
-effect handled around the call of `h`.
+checked by `--allow` and the manifest as above. A handler, an annotation or a
+function joined with the caller (by `if` or a shared parameter) around the call
+constrains only the call's row. A callback the parent runs beside a spawn or a
+scope, such as `g` in `h(g) = { let x = g(); async.scope(fn () -> x) }`, may
+therefore perform an effect handled around the call of `h`. Printed signatures
+show the two tails as separate variables, as in
+`forall a | e e1. (() ->{Async | e1} a) ->{| e} TaskResult a`, without the link: every effect of `e1` also belongs to `e`.
+
+Known limit: there is no subeffecting, so one function value has one row. Two
+shapes put a task's row and its call's row back together, and a handler around
+them is then refused with E0837 although no task performs the effect: a thunk
+the parent both calls and spawns (`{ let x = t(); let c = async.spawn(t); ... }`),
+and a signature that names one row variable for both, such as
+`(() ->{Async | e} a) ->{| e} TaskResult a` on a wrapper of `async.scope`. Give
+such a wrapper two row variables, as inferred signatures do.
 
 Not yet checked: an in-language handler of a root-grantable effect written
 around a task (for example `dist.enumerate`, or a user handler of Console)

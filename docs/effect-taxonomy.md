@@ -175,7 +175,8 @@ directional link between two tails rather than one shared tail, so nothing
 outside the child reaches the child's row). The dependency survives aliases, higher-order
 wrappers, returned closures, tuples, polymorphic row instantiation, and nested
 scopes. Executable concurrency fixtures pin `{Async, Net}` before a scope and
-`{Net}` after one, and reject misleading closed annotations and cyclic rows.
+`{Net}` after one, and reject misleading closed annotations; a caller row wider than the
+child row, which the shared tail used to reject as cyclic, is now accepted.
 Generic operation typing remains unchanged. `Async` is still a reserved
 taxonomy name, while its implementation has progressed beyond a placeholder:
 SC.3 represents opaque run/scope-local Task values, SC.4 adds the static

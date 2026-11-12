@@ -214,6 +214,69 @@ in a child stays visible to `--allow` and manifest checking.
   child
   done(done(()))
 
+A helper that spawns a caller's thunk inside a scope or inside another task
+keeps the link from the thunk to its own call row, so a granted effect in the
+thunk reaches the caller.
+
+  $ cat > nested-helpers.jac <<'EOF'
+  > go(g) = async.scope(fn () -> {
+  >     let c = async.spawn(g)
+  >     async.await(c)
+  >   })
+  > sp(g) = async.spawn(fn () -> {
+  >     let c = async.spawn(g)
+  >     async.await(c)
+  >   })
+  > t() = (go(fn () -> print("go\n")), async.scope(fn () -> async.await(sp(fn () -> print("sp\n")))))
+  > t()
+  > EOF
+  $ jacquard check nested-helpers.jac --manifest dist
+  error[E0814]: The program requires an effect that was not granted
+    Cause: This program requires console [world/low] — talk to the process terminal, which is not granted (performed via `print`).
+    Next step: grant it with --allow console, or handle the effect in the program
+  [1]
+  $ jacquard run nested-helpers.jac --allow console
+  go
+  sp
+  (done(done(())), done(done(done(()))))
+
+Known limit: the checker has no subeffecting, so one thunk's row is one row.
+A thunk the parent both calls and spawns shares its row with the task, and an
+annotation that names one row variable for both the task row and the call row
+merges them. A handler around either is then refused, although no task performs
+the effect. Give such a helper two row variables, as the inferred signatures do.
+
+  $ cat one.jac - > both-ways.jac <<'EOF'
+  > both-ways(t) = { let x = t(); let c = async.spawn(t); (x, async.await(c)) }
+  > u() = async.scope(fn () -> all(fn () -> both-ways(fn () -> 1)))
+  > EOF
+  $ jacquard check both-ways.jac
+  both-ways.jac:9:28-63: error[E0837]: An effect performed in a task is not handled inside the task
+    Cause: a task (an async.spawn child or an async.scope body) performs `one`, and no handler inside the task handles it; a task runs on a fresh continuation under the scheduler, so a handler outside the task never handles its operations
+    Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
+  [1]
+  $ cat one.jac - > one-var.jac <<'EOF'
+  > sc : forall a | e. (() ->{Async | e} a) ->{| e} TaskResult a
+  > sc(b) = async.scope(b)
+  > t() = all(fn () -> sc(fn () -> 1))
+  > EOF
+  $ jacquard check one-var.jac
+  one-var.jac:10:7-35: error[E0837]: An effect performed in a task is not handled inside the task
+    Cause: a task (an async.spawn child or an async.scope body) performs `one`, and no handler inside the task handles it; a task runs on a fresh continuation under the scheduler, so a handler outside the task never handles its operations
+    Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
+  [1]
+  $ cat one.jac - > two-vars.jac <<'EOF'
+  > sc : forall a | e e1. (() ->{Async | e1} a) ->{| e} TaskResult a
+  > sc(b) = async.scope(b)
+  > t() = all(fn () -> sc(fn () -> 1))
+  > bad() = all(fn () -> sc(fn () -> first(1)))
+  > EOF
+  $ jacquard check two-vars.jac
+  two-vars.jac:11:22-43: error[E0837]: An effect performed in a task is not handled inside the task
+    Cause: a task (an async.spawn child or an async.scope body) performs `one`, and no handler inside the task handles it; a task runs on a fresh continuation under the scheduler, so a handler outside the task never handles its operations
+    Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
+  [1]
+
 The policy is decided by identity. A user effect spelled like the root-grantable
 built-in Clock is still refused in a task, and the diagnostic qualifies its name.
 

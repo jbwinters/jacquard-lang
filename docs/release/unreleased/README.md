@@ -42,7 +42,11 @@ Notes for the next release's upgrade section, collected as changes land:
   every effect other than Async, Channel and the root-grantable effects; move
   the handler into the thunk passed to `async.spawn` or `async.scope`. Only
   effects the task itself performs count: a handler, an annotation or a
-  sibling callback around the spawn or scope call is unaffected, and every
+  sibling callback around the spawn or scope call is unaffected (except for a
+  thunk the parent both calls and spawns, and for a wrapper signature that
+  names one row variable for the task row and the call row, such as
+  `(() ->{Async | e} a) ->{| e} TaskResult a`: give it two, as in
+  `forall a | e e1. (() ->{Async | e1} a) ->{| e} TaskResult a`), and every
   effect a task performs, granted ones included, still appears in the caller's
   row for `--allow` and manifests. Not yet checked: a built-in grantable effect
   (such as `console` or `dist`) that a task performs under an in-language

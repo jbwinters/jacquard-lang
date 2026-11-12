@@ -551,7 +551,10 @@ moving the instance flag onto the task tail alone is future work.
 The E0837 task-row flag does not have this limit: such a `k2` may perform an
 effect that only an outer handler handles, e.g.
 `h(g) = { let x = g(); async.scope(fn () -> x) }` accepts a `g` that performs
-a user effect handled around the call of `h`. Tests pin both.
+a user effect handled around the call of `h`. Tests pin both. It keeps a
+narrower limit of its own: a thunk the parent both calls and spawns, or a
+signature naming one row variable for the task row and the call row, joins the
+two rows again (see concurrency.md).
 
 ### A1.5 Annotations
 
