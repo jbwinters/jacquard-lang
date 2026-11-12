@@ -423,8 +423,19 @@ The checker enforces these rules:
   `async.scope`, and the `dist.sample-lw` and `dist.sample-lw-weights-v1`
   thunks) cannot perform an operation on a capability whose scope is outside
   that work (E0833). It may open and discharge its own scope, and merely
-  capturing an unused capability is allowed. Because their rows share a tail, a
-  sibling callback in a body that spawns is restricted the same way.
+  capturing an unused capability is allowed. The row of the spawn, scope or
+  sampling call excludes instance operations too, so a sibling callback in a
+  body that spawns is restricted the same way.
+  Ordinary effects follow a parallel rule for the two task callbacks: an
+  `async.spawn` child or an `async.scope` body must handle inside itself every
+  effect other than Async, Channel and the root-grantable effects, because no
+  handler outside a task handles its operations (E0837; see
+  [concurrency.md](concurrency.md)). Only the task's own effects count: a
+  handler or annotation around the call, or a sibling callback the parent
+  runs, is not restricted by this rule, except where one function value is
+  both a task and parent code (a thunk the parent both calls and spawns) or a
+  signature names one row variable for a task row and its call row; give such
+  a wrapper two row variables (see [concurrency.md](concurrency.md)).
 - **Handlers.** A user handler cannot handle an instance operation (E0834).
 - **Opacity.** Capabilities cannot be forged or taken apart (E0835). A
   capability type cannot be written directly into a nominal type's field or a

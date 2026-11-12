@@ -169,11 +169,14 @@ performing `async.spawn` must make the caller row gain `{Async | e}`, so a
 child cannot launder authority out of its parent signature.
 
 SC.4 admits an effect's own name inside its operation rows and gives the exact
-resolved `async.spawn` identity a dependent operation scheme: its thunk and
-caller share `{Async | e}`. The dependency survives aliases, higher-order
+resolved `async.spawn` identity a dependent operation scheme: every effect of
+its thunk row `{Async | e}` reaches the caller's row (since E0837 through a
+directional link between two tails rather than one shared tail, so nothing
+outside the child reaches the child's row). The dependency survives aliases, higher-order
 wrappers, returned closures, tuples, polymorphic row instantiation, and nested
 scopes. Executable concurrency fixtures pin `{Async, Net}` before a scope and
-`{Net}` after one, and reject misleading closed annotations and cyclic rows.
+`{Net}` after one, and reject misleading closed annotations; a caller row wider than the
+child row, which the shared tail used to reject as cyclic, is now accepted.
 Generic operation typing remains unchanged. `Async` is still a reserved
 taxonomy name, while its implementation has progressed beyond a placeholder:
 SC.3 represents opaque run/scope-local Task values, SC.4 adds the static

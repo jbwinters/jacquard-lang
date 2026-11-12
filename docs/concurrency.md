@@ -60,10 +60,56 @@ async.spawn : (() ->{Async | e} a) -> Task a
 Calling it contributes both `Async` and the solved child row `e` to the caller.
 Merely checking the parameter type is insufficient: unification could absorb
 `Net` into `e` and then discard it. SC.4 therefore gives the exact frozen
-operation a dependent scheme whose thunk row and callable row are the same row
-object. That dependency travels with the value through aliases, wrappers,
-returned closures, tuples, and independent polymorphic instantiations. It is
-not a syntax-directed application exception.
+operation a dependent scheme whose callable row receives every effect of the
+thunk row. Since E0837 the two rows have separate tails linked in one
+direction (the thunk row's effects flow into the callable row, never the
+reverse; see below), and `async.scope`'s result row is linked to its body row
+the same way. That dependency travels with the value through aliases,
+wrappers, returned closures, tuples, and independent polymorphic
+instantiations. It is not a syntax-directed application exception.
+
+Charging is not handling. Every task (a spawned child or an `async.scope`
+body) runs on a fresh continuation under the scheduler. An operation the task
+does not handle itself goes to the scheduler (Async, Channel), then to the root
+grants; otherwise the task ends `Failed("unhandled effect ...")`. A handler
+outside the task never handles it, even one written around the `async.spawn`
+or `async.scope` call. The checker therefore requires a task's thunk to handle
+inside itself every effect other than Async, Channel and the root-grantable
+effects (`clock`, `console`, `dist`, `eval`, `fs`, `infer`, `net`, `secret`,
+decided by effect identity). Otherwise it refuses the program with E0837:
+
+```text
+error[E0837]: An effect performed in a task is not handled inside the task
+  Cause: a task (an async.spawn child or an async.scope body) performs `one`, and no handler inside the task handles it; ...
+  Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
+```
+
+Only the task's own effects count. A task's row and the row of the
+`async.spawn` or `async.scope` call that starts it have separate tails, linked
+in one direction: every effect the task performs, root-grantable ones
+included, is added to the call's row, so it is still charged to the caller and
+checked by `--allow` and the manifest as above. A handler, an annotation or a
+function joined with the caller (by `if` or a shared parameter) around the call
+constrains only the call's row. A callback the parent runs beside a spawn or a
+scope, such as `g` in `h(g) = { let x = g(); async.scope(fn () -> x) }`, may
+therefore perform an effect handled around the call of `h`. Printed signatures
+show the two tails as separate variables, as in
+`forall a | e e1. (() ->{Async | e1} a) ->{| e} TaskResult a`, without the link: every effect of `e1` also belongs to `e`.
+
+Known limit: there is no subeffecting, so one function value has one row. Two
+shapes put a task's row and its call's row back together, and a handler around
+them is then refused with E0837 although no task performs the effect: a thunk
+the parent both calls and spawns (`{ let x = t(); let c = async.spawn(t); ... }`),
+and a signature that names one row variable for both, such as
+`(() ->{Async | e} a) ->{| e} TaskResult a` on a wrapper of `async.scope`. Give
+such a wrapper two row variables, as inferred signatures do.
+
+Not yet checked: an in-language handler of a root-grantable effect written
+around a task (for example `dist.enumerate`, or a user handler of Console)
+does not handle the task's operations, which go to the root grant at run time
+or fail if it is absent; such a program still checks. A user handler that
+interprets Async itself (the native parity seam) runs children inline, where
+an outer handler would reach them, but is refused like any other.
 
 The identity guard applies only to the resolved operation whose complete
 declaration is the exact four-operation interface above. The nominal HASH_V0

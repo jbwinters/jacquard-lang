@@ -660,6 +660,205 @@ let test_fresh_continuation_flag () =
   in
   Alcotest.(check string) "display" "() ->{E} E" shown
 
+let test_task_row_flag () =
+  (* E0837: a task row refuses a fixed effect other than Async, Channel and the root-grantable
+     effects; the refusal is structured and names the effect through the caller's renderer.
+     Referencing Check links the policy it installs. *)
+  ignore (Check.checker_codes : (string * string) list);
+  let refusal f =
+    match f () with
+    | () -> None
+    | exception Instance_refusal ("E0837", detail) ->
+        Some (detail ~name_of:(fun h -> if Hash.equal h ha then "effect-a" else "other"))
+    | exception Unify_error detail -> Alcotest.failf "an ordinary unification failure: %s" detail
+  in
+  let refused f = Option.is_some (refusal f) in
+  let contains needle text =
+    let n = String.length needle in
+    let rec go i = i + n <= String.length text && (String.sub text i n = needle || go (i + 1)) in
+    go 0
+  in
+  let channel = Option.get (Hash.of_hex Channel_contract.channel_effect_hash) in
+  let async = Option.get (Hash.of_hex Concurrency_contract.async_effect_hash) in
+  let registered name =
+    List.find_map
+      (fun (metadata : Effect_registry.metadata) ->
+        match metadata.interface with
+        | Effect_registry.Released { hash; _ } when String.equal metadata.index_name name ->
+            Some hash
+        | _ -> None)
+      Effect_registry.catalog
+    |> Option.get
+  in
+  let flagged () = new_rvar ~task_row:true 0 in
+  let bind tail row = match tail with RVar cell -> bind_rvar cell row | _ -> assert false in
+  Alcotest.(check bool)
+    "a task row refuses a user effect and names it" true
+    (match refusal (fun () -> bind (flagged ()) (closed_row [ ha ])) with
+    | Some detail -> contains "`effect-a`" detail
+    | None -> false);
+  Alcotest.(check bool)
+    "and a registered effect that is not root-grantable" true
+    (refused (fun () -> bind (flagged ()) (closed_row [ registered "state" ])));
+  Alcotest.(check bool)
+    "but accepts Async, Channel and root-grantable effects" false
+    (refused (fun () ->
+         bind (flagged ())
+           (closed_row [ async; channel; registered "console"; registered "console-input" ])));
+  Alcotest.(check bool)
+    "and a closed or rigid tail" false
+    (refused (fun () -> bind (flagged ()) (instance_row ~tail:(RSkolem (fresh_id (), "e")) [])));
+  Alcotest.(check bool)
+    "an unflagged tail accepts any effect" false
+    (refused (fun () -> bind (new_rvar 0) (closed_row [ ha ])));
+  (* the flag passes through tail unification and binding *)
+  let left = flagged () and right = new_rvar 0 in
+  unify_rows { empty_row with tail = left } { empty_row with tail = right };
+  Alcotest.(check bool)
+    "unifying with a flagged tail flags the shared tail" true
+    (refused (fun () -> unify_rows { empty_row with tail = right } (closed_row [ hb ])));
+  let start = flagged () in
+  let next = new_rvar 0 in
+  bind start { (closed_row [ channel ]) with tail = next };
+  Alcotest.(check bool)
+    "binding passes the flag to the new tail" true
+    (refused (fun () -> bind next (closed_row [ ha ])));
+  (* instantiation and cloning keep it, independently of the instance flag *)
+  let arrow = TArrow ([], { empty_row with tail = new_rvar ~task_row:true 1 }, t_int) in
+  let flags ty =
+    match repr ty with
+    | TArrow (_, row, _) -> (
+        match (repr_row row).tail with
+        | RVar { contents = RUnbound { task_row; lacks_instances; _ } } ->
+            (task_row, lacks_instances)
+        | _ -> (false, false))
+    | _ -> (false, false)
+  in
+  Alcotest.(check (pair bool bool))
+    "instantiation keeps the flag" (true, false)
+    (flags (instantiate ~level:2 { ty = arrow; gen_level = 0 }));
+  Alcotest.(check (pair bool bool))
+    "cloning keeps the flag" (true, false)
+    (match clone_schemes [ mono arrow ] with [ s ] -> flags s.ty | _ -> (false, false))
+
+let test_task_outward_rows () =
+  (* E0837 with a directional link: a task tail feeds its outward rows (the spawn or scope call's
+     row) without sharing a tail with them. *)
+  ignore (Check.checker_codes : (string * string) list);
+  let console =
+    List.find_map
+      (fun (metadata : Effect_registry.metadata) ->
+        match metadata.interface with
+        | Effect_registry.Released { hash; _ } when String.equal metadata.index_name "console" ->
+            Some hash
+        | _ -> None)
+      Effect_registry.catalog
+    |> Option.get
+  in
+  let refused f = match f () with () -> false | exception Instance_refusal ("E0837", _) -> true in
+  (* level, task flag and outward rows of an unbound tail *)
+  let unbound = function
+    | RVar { contents = RUnbound u } -> (u.level, u.task_row, u.task_out)
+    | _ -> Alcotest.fail "expected an unbound row tail"
+  in
+  let cell = function RVar cell -> cell | _ -> Alcotest.fail "expected a row variable" in
+  let task level =
+    let outward = { empty_row with tail = new_rvar level } in
+    (new_rvar ~task_row:true ~task_out:[ outward ] level, outward)
+  in
+  let effects row = (repr_row row).effects in
+  (* binding the task tail pushes its effects outward and passes flag and list to the new tail *)
+  let tail, outward = task 1 in
+  let next = new_rvar 1 in
+  bind_rvar (cell tail) { (closed_row [ console ]) with tail = next };
+  Alcotest.(check bool)
+    "a granted effect reaches the outward row" true
+    (List.exists (Hash.equal console) (effects outward));
+  Alcotest.(check (pair bool int))
+    "the new tail inherits the flag and the outward list" (true, 1)
+    (let _, task_row, task_out = unbound next in
+     (task_row, List.length task_out));
+  (* a refused effect leaves the outward row untouched *)
+  let tail, outward = task 1 in
+  Alcotest.(check bool)
+    "a refused effect is refused" true
+    (refused (fun () -> bind_rvar (cell tail) (closed_row [ ha ])));
+  Alcotest.(check int) "and never reaches the outward row" 0 (List.length (effects outward));
+  (* the outward row is unflagged: an outer handler or annotation may add any effect to it *)
+  let _, outward = task 1 in
+  Alcotest.(check bool)
+    "the outward row accepts a user effect" false
+    (refused (fun () -> unify_rows outward (closed_row [ ha ])));
+  (* a closed outward row lacking the effect is an ordinary row mismatch *)
+  let closed = closed_row [] in
+  let tail = new_rvar ~task_row:true ~task_out:[ closed ] 1 in
+  Alcotest.(check bool)
+    "a closed outward row cannot absorb a task effect" false
+    (unifies (fun () -> bind_rvar (cell tail) (closed_row [ console ])));
+  (* unifying two task tails unions their outward lists *)
+  let left, left_out = task 1 and right, right_out = task 1 in
+  unify_rows { empty_row with tail = left } { empty_row with tail = right };
+  unify_rows { empty_row with tail = left } (closed_row [ console ]);
+  Alcotest.(check (pair bool bool))
+    "both outward rows receive the effect" (true, true)
+    ( List.exists (Hash.equal console) (effects left_out),
+      List.exists (Hash.equal console) (effects right_out) );
+  (* an outward row that resolves back into the task's own chain terminates *)
+  let own =
+    ref
+      (RUnbound
+         { id = fresh_id (); level = 1; lacks_instances = false; task_row = true; task_out = [] })
+  in
+  let looped = { empty_row with tail = RVar own } in
+  (match !own with
+  | RUnbound u -> own := RUnbound { u with task_out = [ looped ] }
+  | RLink _ -> assert false);
+  bind_rvar own (open_row 1 [ console ]);
+  Alcotest.(check bool)
+    "a cycle of outward rows terminates" true
+    (List.exists (Hash.equal console) (effects looped));
+  (* lowering a task tail's level lowers its outward rows and keeps flag and list *)
+  let tail, outward = task 5 in
+  let holder = new_tvar 2 in
+  unify holder (TArrow ([], { empty_row with tail }, t_int));
+  let level, task_row, task_out = unbound (repr_row { empty_row with tail }).tail in
+  let outward_level, _, _ = unbound (repr_row outward).tail in
+  Alcotest.(check (list int))
+    "level adjustment lowers the tail and its outward row" [ 2; 2 ] [ level; outward_level ];
+  Alcotest.(check (pair bool int))
+    "and keeps the flag and the outward list" (true, 1)
+    (task_row, List.length task_out);
+  (* instantiation and cloning remap the outward row through the same copy *)
+  let scope_like () =
+    let tail, outward = task 1 in
+    TArrow ([ TArrow ([], { empty_row with tail }, t_int) ], outward, t_int)
+  in
+  let linked ty =
+    match repr ty with
+    | TArrow ([ TArrow ([], body, _) ], outward, _) -> (
+        let _, task_row, task_out = unbound (repr_row body).tail in
+        match task_out with
+        | [ fed ] -> (
+            task_row
+            &&
+            match ((repr_row fed).tail, (repr_row outward).tail) with
+            | RVar left, RVar right -> left == right
+            | _ -> false)
+        | _ -> false)
+    | _ -> false
+  in
+  let original = scope_like () in
+  let copy = instantiate ~level:2 { ty = original; gen_level = 0 } in
+  Alcotest.(check bool) "instantiation feeds the copied outward row" true (linked copy);
+  (match (repr copy, repr original) with
+  | TArrow ([ TArrow ([], body, _) ], _, _), TArrow (_, original_out, _) ->
+      unify_rows body (closed_row [ console ]);
+      Alcotest.(check int) "and never the generic original" 0 (List.length (effects original_out))
+  | _ -> Alcotest.fail "unexpected instance shape");
+  Alcotest.(check bool)
+    "cloning feeds the cloned outward row" true
+    (match clone_schemes [ mono (scope_like ()) ] with [ s ] -> linked s.ty | _ -> false)
+
 let suite =
   [
     Alcotest.test_case "effect payload constraints survive transport and isolation" `Quick
@@ -668,6 +867,8 @@ let suite =
     Alcotest.test_case "instance entries: identity and distinctness" `Quick test_instance_entries;
     Alcotest.test_case "instance entries: fixpoint normalization" `Quick test_instance_fixpoint;
     Alcotest.test_case "fresh-continuation flag" `Quick test_fresh_continuation_flag;
+    Alcotest.test_case "task-row flag (E0837)" `Quick test_task_row_flag;
+    Alcotest.test_case "task-row outward rows (E0837)" `Quick test_task_outward_rows;
     Alcotest.test_case "labels are their own sort" `Quick test_label_sort;
     Alcotest.test_case "instance payloads in occurs and quantification" `Quick
       test_instance_payload_occurs;

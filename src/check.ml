@@ -319,6 +319,7 @@ let diagnostic_summary = function
   | "E0834" -> "A user handler cannot handle an instance operation"
   | "E0835" -> "A capability cannot be constructed or taken apart"
   | "E0836" -> "A capability type cannot be stored in a declaration"
+  | "E0837" -> "An effect performed in a task is not handled inside the task"
   | "E0907" -> "A scoped task or channel handle is invalid"
   | code -> "Checker rejected the program (" ^ code ^ ")"
 
@@ -347,6 +348,7 @@ let diagnostic_next_step = function
   | "E0834" -> "Use the instance's scoped combinator; user handlers handle ambient effects only."
   | "E0835" -> "Obtain a capability from its scoped combinator."
   | "E0836" -> "Carry a capability through a type parameter instead of a fixed field type."
+  | "E0837" -> "Handle the effect inside the thunk passed to async.spawn or async.scope."
   | "E0907" -> "Use the handle only inside the exact async.scope that created it."
   | _ -> "Correct the rejected checker input and try again."
 
@@ -380,6 +382,23 @@ let instance_refusal ?meta code detail =
   Diag.error ?span:(Option.bind meta Meta.span) ~domain:Diag.Checker ~code
     ~summary:(diagnostic_summary code) ~cause:detail ~next_step:(diagnostic_next_step code)
     ~contrast:None ()
+
+(** [task_may_leave_unhandled identity] is the E0837 policy: an effect a task may leave to its
+    surroundings, because the scheduler (Async, Channel) or a root grant handles it there. Every
+    other effect must be handled inside the task, since a task runs on a fresh continuation and no
+    handler outside it ever handles its operations. Identity decides: a user effect that reuses a
+    built-in spelling is not root-grantable. *)
+let task_may_leave_unhandled identity =
+  let hex = Hash.to_hex identity in
+  String.equal hex Concurrency_contract.async_effect_hash
+  || String.equal hex Channel_contract.channel_effect_hash
+  ||
+  match Effect_registry.find_canonical identity with
+  | Some metadata ->
+      List.mem (Effect_registry.root_grant_name metadata) Effect_registry.root_grantable_names
+  | None -> false
+
+let () = Types.task_effect_allowed := task_may_leave_unhandled
 
 (* Stored declarations have already crossed the public resolver/checker boundary. Their resolved
    bodies may use a hidden prelude capability hash, while source expressions must use public
@@ -415,6 +434,22 @@ let name_of ctx h =
   | Error _ -> String.sub (Hash.to_hex h) 0 8
 
 let show_ty ctx t = Types.show ~name_of:(name_of ctx) t
+
+(** [refusal_name_of ctx identity] names an effect in a refusal raised during unification (E0833,
+    E0837). A user effect whose name collides with a registry effect's name is qualified
+    ([unpackaged:<hash-prefix>/<name>], {!Effect_registry.qualify_user_hint}), so a refused user
+    [effect Clock] never reads like the root-grantable built-in [clock]. *)
+let refusal_name_of ctx identity =
+  let name = name_of ctx identity in
+  let collides (metadata : Effect_registry.metadata) =
+    String.equal (String.lowercase_ascii metadata.index_name) (String.lowercase_ascii name)
+    || String.equal (String.lowercase_ascii metadata.display_name) (String.lowercase_ascii name)
+  in
+  if
+    Option.is_none (Effect_registry.find_canonical identity)
+    && List.exists collides Effect_registry.catalog
+  then Effect_registry.qualify_user_hint ~name_hint:name identity
+  else name
 
 let is_secret_ty ctx t =
   match repr t with
@@ -1422,13 +1457,29 @@ let op_scheme ctx ?meta ?(clause = false) (h : Hash.t) : scheme =
                 (name_of ctx h)
         else if is_frozen_async_spawn ctx h then
           match params with
-          | [ TArrow ([], child_row, _) ] ->
-              (* the child runs on a fresh continuation: no instance entry may reach it (A1.4) *)
-              (match child_row.tail with
-              | RVar ({ contents = RUnbound { id; level; _ } } as cell) ->
-                  cell := RUnbound { id; level; lacks_instances = true }
-              | _ -> ());
-              child_row
+          | [ TArrow ([], child_row, _) ] -> (
+              (* the child runs on a fresh continuation: no instance entry may reach it (A1.4),
+                 and no effect an outer handler would have to handle may reach it (E0837). The
+                 operation's own row is a separate outward row with its own tail: the child's
+                 tail feeds it, but a handler, annotation or join around the spawn constrains only
+                 the outward row. *)
+              let child = repr_row child_row in
+              Types.check_task_effects child.effects;
+              match child.tail with
+              | RVar ({ contents = RUnbound ({ level; _ } as unbound) } as cell) ->
+                  let outward =
+                    { child with tail = new_rvar ~lacks_instances:true level; instances = [] }
+                  in
+                  cell :=
+                    RUnbound
+                      {
+                        unbound with
+                        lacks_instances = true;
+                        task_row = true;
+                        task_out = outward :: unbound.task_out;
+                      };
+                  outward
+              | _ -> child)
           | _ ->
               err ?meta ~code:"E0805"
                 "frozen async.spawn identity resolved to an invalid converted parameter shape"
@@ -1577,7 +1628,29 @@ let close_lonely_rows ~gen_level (t : ty) : unit =
       row.instances
   in
   walk t;
-  Hashtbl.iter (fun _ (n, r) -> if n = 1 then r := RLink empty_row) counts
+  (* a task tail and the outward rows it feeds are linked by a constraint the type does not show:
+     none is lonely while the task tail occurs in the type. The link is followed transitively,
+     because an outward row's tail may itself be a task tail that the type does not mention (a
+     scope body that spawns a parameter feeds the scope's call row through the body's tail). *)
+  let linked = Hashtbl.create 8 in
+  let rec follow id outs =
+    if not (Hashtbl.mem linked id) then begin
+      Hashtbl.replace linked id ();
+      List.iter
+        (fun row ->
+          match (repr_row row).tail with
+          | RVar { contents = RUnbound { id; task_out; _ } } -> follow id task_out
+          | _ -> ())
+        outs
+    end
+  in
+  Hashtbl.iter
+    (fun id (_, r) ->
+      match !r with RUnbound { task_out = _ :: _ as outs; _ } -> follow id outs | _ -> ())
+    counts;
+  Hashtbl.iter
+    (fun id (n, r) -> if n = 1 && not (Hashtbl.mem linked id) then r := RLink empty_row)
+    counts
 
 (* ------------------------------------------------------------------ *)
 (* Patterns                                                            *)
@@ -1701,7 +1774,8 @@ and infer ?immediate_transformer ctx env ~ambient ~required (e : Kernel.expr) : 
   if ctx.instances = [] then infer_expr ?immediate_transformer ctx env ~ambient ~required e
   else
     try infer_expr ?immediate_transformer ctx env ~ambient ~required e
-    with Types.Instance_refusal (code, detail) -> err ~meta:e.Kernel.meta ~code "%s" detail
+    with Types.Instance_refusal (code, detail) ->
+      err ~meta:e.Kernel.meta ~code "%s" (detail ~name_of:(refusal_name_of ctx))
 
 and infer_expr ?(immediate_transformer = false) ctx env ~(ambient : row ref) ~(required : row)
     (e : Kernel.expr) : ty =
@@ -3069,7 +3143,7 @@ let check_top_with ?recovery_identity ~recovery ctx (top : Kernel.top) :
         | Kernel.Expr expression -> expression.meta
         | Kernel.Decl declaration -> declaration.meta
       in
-      Error [ instance_refusal ~meta code detail ]
+      Error [ instance_refusal ~meta code (detail ~name_of:(refusal_name_of ctx)) ]
   | exception Unify_error detail ->
       let meta =
         match top with
@@ -3204,7 +3278,8 @@ let force_term ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match term_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
-  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
+  | exception Types.Instance_refusal (code, detail) ->
+      Error [ instance_refusal code (detail ~name_of:(refusal_name_of ctx)) ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 (** [force_constructor ctx h] is the result-returning public form of {!con_scheme}. *)
@@ -3212,7 +3287,8 @@ let force_constructor ctx (h : Hash.t) : (scheme, Diag.t list) result =
   match con_scheme ctx h with
   | s -> Ok s
   | exception Err d -> Error [ d ]
-  | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
+  | exception Types.Instance_refusal (code, detail) ->
+      Error [ instance_refusal code (detail ~name_of:(refusal_name_of ctx)) ]
   | exception Unify_error detail -> Error [ payload_conflict detail ]
 
 type operation_contract = { effect_identity : Hash.t; mode : Kernel.op_mode; scheme : scheme }
@@ -3224,7 +3300,8 @@ let force_operation ctx (h : Hash.t) : (operation_contract, Diag.t list) result 
     match thunk () with
     | value -> Ok value
     | exception Err diagnostic -> Error [ diagnostic ]
-    | exception Types.Instance_refusal (code, detail) -> Error [ instance_refusal code detail ]
+    | exception Types.Instance_refusal (code, detail) ->
+        Error [ instance_refusal code (detail ~name_of:(refusal_name_of ctx)) ]
     | exception Unify_error detail -> Error [ payload_conflict detail ]
   in
   match Store.locate ctx.store h with
@@ -3344,6 +3421,7 @@ let checker_codes : (string * string) list =
     ("E0834", "user handler clause for an instance operation");
     ("E0835", "capability constructed or taken apart");
     ("E0836", "capability type stored in a nominal declaration or operation signature");
+    ("E0837", "effect performed in a task that no handler inside the task handles");
     ("W0801", "redundant match clause");
     ("W1206", "labeled API called with a positional Bool constructor literal");
     ("W1207", "labeled API called across a definite repeated-type positional parameter run");

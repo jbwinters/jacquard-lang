@@ -85,6 +85,9 @@ secret-generic-inspection | secret-generic-inspection.jqd:1:1-100: error[E0819]:
 redundant-clause | redundant-clause.jqd:1:57-85: warning[W0801]: This match clause is redundant
   Cause: Earlier clauses match every value this clause can match.
   Next step: Remove the redundant clause or narrow an earlier pattern.
+task-effect-outer-handler | task-effect-outer-handler.jqd:1:38-94: error[E0837]: An effect performed in a task is not handled inside the task
+  Cause: a task (an async.spawn child or an async.scope body) performs `state`, and no handler inside the task handles it; a task runs on a fresh continuation under the scheduler, so a handler outside the task never handles its operations
+  Next step: Handle the effect inside the thunk passed to async.spawn or async.scope.
 instance-undetermined | instance-undetermined.jqd:1:64-114: error[E0830]: An instance row is undetermined
   Cause: the annotation names instance effect state-instance but no capability parameter determines its instance
   Next step: Pass the capability that determines the instance, or leave the row unannotated.

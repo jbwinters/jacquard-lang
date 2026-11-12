@@ -169,16 +169,19 @@ callback.
 
 Child effects cannot be laundered through the closed Case row. This is the Warp
 checker-side refusal cell; the diagnostic retains the spawned child's `Net`
-authority after `async.scope` removes only `Async`.
+authority after `async.scope` removes only `Async`. The `check.true` calls stay
+outside the scope body: Check is not root-grantable, so performing it inside
+the body would be refused first (E0837, see task-effects.t), because the Case
+handler outside the task never handles it.
 
   $ cat > async-child-row.jac <<'EOF_JAC'
   > async-child-row =
   >   Case("cannot hide net", fn () ->
   >     match async.scope(fn () -> {
   >       let child = async.spawn(fn () -> net.get("https://example.invalid"))
-  >       check.true(true, "child row")
+  >       true
   >     }) {
-  >       | Done(result) -> result
+  >       | Done(result) -> check.true(result, "child row")
   >       | _ -> check.true(false, "child row")
   >     })
   > EOF_JAC

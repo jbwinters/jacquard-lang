@@ -1625,7 +1625,7 @@ let install_dry (ctx : Eval.ctx) ~(audit : string list ref) : (unit, Diag.t list
 
 (** The only effects [grant] can install, i.e. the valid [--allow] values; the E0814 hint consults
     this so it never suggests granting a pure effect. *)
-let grantable_names = [ "clock"; "console"; "dist"; "eval"; "fs"; "infer"; "net"; "secret" ]
+let grantable_names = Effect_registry.root_grantable_names
 
 (** [grant ?console_read ?secret_getenv ctx name ~out ~seed] installs the root handler for effect
     [name] (case-insensitive: "Eval" and "eval" both work); [seed] feeds the dist sampling handler
@@ -1719,10 +1719,23 @@ and base_builtin_signatures (store : Store.t) : ((Hash.t * Types.scheme) list, D
     | Ok scope_h, Some async_h, Some task_result_h ->
         let level = 1 in
         let value = Types.new_tvar level in
-        (* the body runs on a fresh continuation: no instance entry may reach it (A1.4) *)
-        let tail = Types.new_rvar ~lacks_instances:true level in
+        (* the body runs on a fresh continuation: no instance entry may reach it (A1.4), and no
+           effect an outer handler would have to handle may reach it (E0837). The call's row has
+           its own tail, fed directionally by the body's: a handler, annotation or join around the
+           call constrains only the call's row, while the body's effects still reach it. *)
+        let result_row =
+          Types.
+            {
+              effects = [];
+              payloads = [];
+              instances = [];
+              tail = Types.new_rvar ~lacks_instances:true level;
+            }
+        in
+        let tail =
+          Types.new_rvar ~lacks_instances:true ~task_row:true ~task_out:[ result_row ] level
+        in
         let child_row = Types.{ effects = [ async_h ]; payloads = []; instances = []; tail } in
-        let result_row = Types.{ effects = []; payloads = []; instances = []; tail } in
         let thunk = Types.TArrow ([], child_row, value) in
         let result = Types.TCon (task_result_h, [ value ]) in
         Ok
